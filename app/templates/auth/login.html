@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}Sign in — {{ business.company_name }}{% endblock %}
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/auth.css') }}" rel="stylesheet">
+{% endblock %}
+{% block auth_content %}
+<div class="auth-page d-flex align-items-center justify-content-center min-vh-100 px-3">
+  <div class="card auth-card shadow-lg border-0">
+    <div class="card-body p-4 p-md-5">
+      <div class="text-center mb-4">
+        <div class="auth-logo"><i class="fa-solid fa-leaf"></i></div>
+        <h1 class="auth-title">{{ business.company_name }}</h1>
+        <p class="auth-subtitle">Fertilizer &amp; Agricultural Business Management</p>
+      </div>
+
+      <div id="auth-alert" class="auth-alert {% if not auth_error and not logged_out %}d-none{% endif %} {% if auth_error %}auth-alert--error{% elif logged_out %}auth-alert--info{% endif %}" role="alert">
+        <div class="auth-alert__icon">
+          <i class="fa-solid {% if auth_error %}fa-circle-xmark{% else %}fa-circle-check{% endif %}"></i>
+        </div>
+        <div class="auth-alert__body">
+          <strong>{% if auth_error %}Sign in failed{% elif logged_out %}Signed out{% endif %}</strong>
+          <p class="mb-0" id="auth-alert-text">
+            {% if auth_error %}{{ auth_error }}{% elif logged_out %}You have been logged out successfully.{% endif %}
+          </p>
+        </div>
+      </div>
+
+      <form method="post" id="login-form" class="auth-form" novalidate>
+        {{ form.hidden_tag() }}
+        <div class="mb-3">
+          {{ form.username.label(class='form-label fw-semibold') }}
+          {{ form.username(class='form-control' + (' is-invalid' if form.username.errors else ''), id='username', autocomplete='username', placeholder='Enter username') }}
+          <div class="invalid-feedback">{% for e in form.username.errors %}{{ e }}{% endfor %}<span class="field-hint">Username is required.</span></div>
+        </div>
+        <div class="mb-3">
+          {{ form.password.label(class='form-label fw-semibold') }}
+          <div class="input-group">
+            {{ form.password(class='form-control' + (' is-invalid' if form.password.errors else ''), id='password', autocomplete='current-password', placeholder='Enter password') }}
+            <button class="btn btn-outline-secondary" type="button" id="toggle-password" tabindex="-1" aria-label="Show password">
+              <i class="fa-regular fa-eye"></i>
+            </button>
+          </div>
+          <div class="invalid-feedback d-block">{% for e in form.password.errors %}{{ e }}{% endfor %}<span class="field-hint">Password is required.</span></div>
+        </div>
+        <div class="form-check mb-3">
+          {{ form.remember(class='form-check-input', id='remember') }}
+          {{ form.remember.label(class='form-check-label') }}
+        </div>
+        {{ form.submit(class='btn btn-success w-100 auth-submit', id='login-submit') }}
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/login.js') }}"></script>
+{% endblock %}

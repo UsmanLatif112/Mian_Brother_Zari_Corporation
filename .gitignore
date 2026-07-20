@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+instance/
+.env
+backups/
+*.db
+.mypy_cache/
+.pytest_cache/

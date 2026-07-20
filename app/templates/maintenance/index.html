@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+{% block title %}Sync & Backup{% endblock %}
+{% block content %}
+<h1 class="h3 mb-2">Sync &amp; Backup</h1>
+<p class="text-muted mb-4">
+  You are working offline on SQLite by default. When internet is available, you can push local data to MySQL
+  and create/download SQLite backups from this page.
+</p>
+
+<div class="alert alert-light border mb-4">
+  <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
+    <div>
+      <div class="fw-semibold mb-1">MySQL status</div>
+      <div>
+        {% if online %}
+          <span class="badge bg-success">Online</span>
+        {% else %}
+          <span class="badge bg-secondary">Offline</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="small text-muted">
+      Auto sync is controlled by <code>SYNC_AUTO_ENABLED</code>.
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>Push Local Data</strong></div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('maintenance.push_sync') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-success w-100" type="submit"
+            {% if not online or not can_sync %}disabled{% endif %}>
+            <i class="fa-solid fa-cloud-arrow-up me-1"></i> Push local data to MySQL
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mt-4">
+      <div class="card-header bg-white"><strong>Sync Logs</strong></div>
+      <div class="card-body">
+        <ul class="list-group list-group-flush">
+          {% for l in logs %}
+            <li class="list-group-item small">
+              {{ l.started_at }} — {{ l.status }} — {{ l.message }}
+            </li>
+          {% else %}
+            <li class="list-group-item text-muted small">No sync logs yet.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mt-4">
+      <div class="card-header bg-white"><strong>Pending Queue</strong></div>
+      <div class="card-body">
+        <ul class="list-group list-group-flush">
+          {% for q in queue %}
+            <li class="list-group-item small">
+              {{ q.entity_type }} #{{ q.entity_id }} ({{ q.attempts }} attempts)
+            </li>
+          {% else %}
+            <li class="list-group-item text-muted small">Queue empty.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>SQLite Backups</strong></div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('maintenance.create_backup') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-success w-100" type="submit" {% if not can_backup %}disabled{% endif %}>
+            <i class="fa-solid fa-database me-1"></i> Create SQLite Backup
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mt-4">
+      <div class="card-header bg-white"><strong>Download Backups</strong></div>
+      <div class="card-body">
+        <table class="table">
+          <thead>
+            <tr><th>File</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for f in backups %}
+              <tr>
+                <td class="small">{{ f }}</td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('maintenance.download', filename=f) }}">
+                    Download
+                  </a>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td class="text-muted small">No backups found.</td><td></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

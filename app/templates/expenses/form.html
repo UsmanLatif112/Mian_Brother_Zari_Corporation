@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Add Expense{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 dash-hero">
+    <div>
+      <h1 class="h3 mb-1">Add Expense</h1>
+      <p class="text-muted mb-0">Record a new business expense</p>
+    </div>
+    <a href="{{ url_for('expenses.index') }}" class="redirect-icon-btn" title="Back to Expenses">
+      <i class="fa-solid fa-arrow-left"></i>
+    </a>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="card-header bg-white">
+      <strong>Expense Details</strong>
+    </div>
+    <div class="card-body p-4">
+      <form method="post">
+        {{ form.hidden_tag() }}
+        <div class="row g-3">
+          <div class="col-md-6">
+            {{ form.name.label(class='form-label fw-semibold') }}
+            {{ form.name(class='form-control', placeholder='e.g. Transport charges') }}
+          </div>
+          <div class="col-md-3">
+            {{ form.amount.label(class='form-label fw-semibold') }}
+            {{ form.amount(class='form-control', placeholder='0.00') }}
+          </div>
+          <div class="col-md-3">
+            {{ form.expense_date.label(class='form-label fw-semibold') }}
+            {{ form.expense_date(class='form-control') }}
+          </div>
+          <div class="col-md-6">
+            {{ form.category_id.label(class='form-label fw-semibold') }}
+            {{ form.category_id(class='form-select') }}
+          </div>
+          <div class="col-12">
+            {{ form.description.label(class='form-label fw-semibold') }}
+            {{ form.description(class='form-control', rows=3, placeholder='Optional notes') }}
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-4">
+          {{ form.submit(class='btn btn-success px-4') }}
+          <a href="{{ url_for('expenses.index') }}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

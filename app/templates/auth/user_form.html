@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-4">{{ title }}</h1>
+<div class="card shadow-sm"><div class="card-body">
+<form method="post">{{ form.hidden_tag() }}
+  {% for field in form if field.type != 'CSRFTokenField' and field.type != 'SubmitField' %}
+  <div class="mb-3">{{ field.label(class='form-label') }}{{ field(class='form-control') }}</div>
+  {% endfor %}
+  {{ form.submit(class='btn btn-success') }}
+</form></div></div>
+{% endblock %}

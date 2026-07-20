@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% from 'partials/macros.html' import form_modal %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 dash-hero">
+    <div>
+      <h1 class="h3 mb-1">Users</h1>
+      <p class="text-muted mb-0">System users and roles</p>
+    </div>
+    <button type="button" class="btn btn-success px-3" data-bs-toggle="modal" data-bs-target="#formModal">
+      <i class="fa-solid fa-plus me-1"></i> Add User
+    </button>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="card-header bg-white"><strong>User List</strong></div>
+    <div class="table-responsive">
+      <table class="table mb-0">
+        <thead>
+          <tr><th>Username</th><th>Name</th><th>Role</th><th>Email</th></tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>{{ u.username }}</td>
+            <td>{{ u.full_name }}</td>
+            <td>{{ u.role.value }}</td>
+            <td>{{ u.email }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% call form_modal('Create User', 'Save User') %}
+<form method="post" action="{{ url_for('auth.create_user') }}" id="entity-form">
+  {{ form.hidden_tag() }}
+  <div class="row g-2">
+    <div class="col-md-6">{{ form.username.label(class='form-label') }}{{ form.username(class='form-control') }}</div>
+    <div class="col-md-6">{{ form.email.label(class='form-label') }}{{ form.email(class='form-control') }}</div>
+    <div class="col-md-6">{{ form.full_name.label(class='form-label') }}{{ form.full_name(class='form-control') }}</div>
+    <div class="col-md-6">{{ form.role.label(class='form-label') }}{{ form.role(class='form-select') }}</div>
+    <div class="col-md-6">{{ form.password.label(class='form-label') }}{{ form.password(class='form-control', placeholder='Min 6 characters') }}</div>
+    <div class="col-md-6 d-flex align-items-end">
+      <div class="form-check mb-2">
+        {{ form.is_active_user(class='form-check-input') }}
+        {{ form.is_active_user.label(class='form-check-label') }}
+      </div>
+    </div>
+  </div>
+</form>
+{% endcall %}
+{% endblock %}
+{% block extra_js %}
+<script>window.OPEN_FORM_MODAL = {{ 'true' if open_modal else 'false' }};</script>
+{% endblock %}

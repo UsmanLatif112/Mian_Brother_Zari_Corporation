@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}Backup{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Backup &amp; Restore</h1>
+<form method="post" action="{{ url_for('backup.run_backup') }}" class="mb-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="btn btn-success">Create SQLite Backup</button>
+</form>
+<table class="table"><thead><tr><th>File</th><th></th></tr></thead>
+<tbody>{% for f in backups %}<tr><td>{{ f }}</td><td><a href="{{ url_for('backup.download', filename=f) }}" class="btn btn-sm btn-outline-secondary">Download</a></td></tr>{% endfor %}</tbody></table>
+{% endblock %}

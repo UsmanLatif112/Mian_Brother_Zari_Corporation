@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+{% from 'partials/macros.html' import form_modal %}
+{% block title %}Purchases{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 dash-hero">
+    <div>
+      <h1 class="h3 mb-1">Purchases</h1>
+      <p class="text-muted mb-0">Vendor purchases and stock receipts</p>
+    </div>
+    <button type="button" class="btn btn-success px-3" data-bs-toggle="modal" data-bs-target="#formModal">
+      <i class="fa-solid fa-plus me-1"></i> New Purchase
+    </button>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="card-header bg-white"><strong>Purchase History</strong></div>
+    <div class="table-responsive">
+      <table class="table datatable mb-0">
+        <thead>
+          <tr><th>Invoice</th><th>Vendor</th><th>Date</th><th class="text-end">Total</th></tr>
+        </thead>
+        <tbody>
+          {% for p in purchases %}
+          <tr>
+            <td>{{ p.invoice_no }}</td>
+            <td>{{ p.vendor.name }}</td>
+            <td>{{ p.purchase_date }}</td>
+            <td class="text-end">{{ p.grand_total }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% call form_modal('New Purchase', 'Save Purchase', 'modal-xl') %}
+<form method="post" action="{{ url_for('purchases.create') }}" id="entity-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="row g-2 mb-2">
+    <div class="col-md-3">
+      <label class="form-label">Invoice #</label>
+      <input name="invoice_no" class="form-control" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Date</label>
+      <input type="date" name="purchase_date" value="{{ today }}" class="form-control" required>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Vendor</label>
+      <select name="vendor_id" class="form-select" required>
+        {% for v in vendors %}<option value="{{ v.id }}">{{ v.name }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="table-responsive mb-2">
+    <table class="table table-sm" id="purchase-lines">
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th style="width:100px">Qty</th>
+          <th style="width:110px">Purchase</th>
+          <th style="width:110px">Sale price</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <select name="product_id" class="form-select form-select-sm product-select">
+              {% for p in products %}
+              <option value="{{ p.id }}" data-purchase="{{ p.purchase_price }}" data-sale="{{ p.sale_price }}">{{ p.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><input name="quantity" type="number" step="0.001" class="form-control form-control-sm" value="1"></td>
+          <td><input name="unit_price" type="number" step="0.01" class="form-control form-control-sm unit-price" value="0"></td>
+          <td><input name="sale_price" type="number" step="0.01" class="form-control form-control-sm sale-price" value="0" title="Sale price for this batch"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <button type="button" class="btn btn-sm btn-outline-secondary mb-2" onclick="addPurchaseLine()">Add line</button>
+  <div class="row g-2">
+    <div class="col-md-4"><label class="form-label">Discount</label><input name="discount" class="form-control" value="0"></div>
+    <div class="col-md-4"><label class="form-label">Tax</label><input name="tax_amount" class="form-control" value="0"></div>
+    <div class="col-md-4"><label class="form-label">Transport</label><input name="transport_charges" class="form-control" value="0"></div>
+    <div class="col-12"><label class="form-label">Notes</label><textarea name="notes" class="form-control" rows="2"></textarea></div>
+  </div>
+</form>
+{% endcall %}
+{% endblock %}
+{% block extra_js %}
+<script>
+window.OPEN_FORM_MODAL = {{ 'true' if open_modal else 'false' }};
+function fillPrices(tr) {
+  const sel = tr.querySelector('.product-select');
+  if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const purchase = opt?.dataset?.purchase || '0';
+  const sale = opt?.dataset?.sale || '0';
+  const up = tr.querySelector('.unit-price');
+  const sp = tr.querySelector('.sale-price');
+  if (up) up.value = purchase;
+  if (sp) sp.value = sale;
+}
+function addPurchaseLine() {
+  const tb = document.querySelector('#purchase-lines tbody');
+  if (!tb || !tb.rows.length) return;
+  const row = tb.rows[0].cloneNode(true);
+  tb.appendChild(row);
+  fillPrices(row);
+}
+document.querySelector('#purchase-lines')?.addEventListener('change', (e) => {
+  if (e.target.classList.contains('product-select')) {
+    fillPrices(e.target.closest('tr'));
+  }
+});
+document.querySelectorAll('#purchase-lines tbody tr').forEach(fillPrices);
+</script>
+{% endblock %}

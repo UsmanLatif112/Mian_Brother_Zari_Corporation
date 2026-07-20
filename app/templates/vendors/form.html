@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}Add Vendor{% endblock %}
+{% block content %}
+<h1 class="h3 mb-4">Add Vendor</h1>
+<div class="card border-0 shadow-sm"><div class="card-body">
+<form method="post">{{ form.hidden_tag() }}
+  <div class="mb-3">{{ form.name.label(class='form-label') }}{{ form.name(class='form-control') }}</div>
+  <div class="mb-3">{{ form.phone.label(class='form-label') }}{{ form.phone(class='form-control') }}</div>
+  <div class="mb-3">{{ form.opening_balance.label(class='form-label') }}{{ form.opening_balance(class='form-control') }}</div>
+  <div class="mb-3">{{ form.address.label(class='form-label') }}{{ form.address(class='form-control', rows=2) }}</div>
+  {{ form.submit(class='btn btn-success') }}
+</form></div></div>
+{% endblock %}

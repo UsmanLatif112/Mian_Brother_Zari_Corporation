@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}Add Product{% endblock %}
+{% block content %}
+<h1 class="h3 mb-4">Add Product</h1>
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <form method="post">
+      {{ form.hidden_tag() }}
+      <div class="row g-3">
+        <div class="col-md-6">{{ form.name.label(class='form-label') }}{{ form.name(class='form-control') }}</div>
+        <div class="col-md-3">{{ form.sku.label(class='form-label') }}{{ form.sku(class='form-control') }}</div>
+        <div class="col-md-3">{{ form.barcode.label(class='form-label') }}{{ form.barcode(class='form-control') }}</div>
+        <div class="col-md-4">{{ form.category_id.label(class='form-label') }}{{ form.category_id(class='form-select') }}</div>
+        <div class="col-md-4">{{ form.subcategory_id.label(class='form-label') }}{{ form.subcategory_id(class='form-select') }}</div>
+        <div class="col-md-4">{{ form.brand.label(class='form-label') }}{{ form.brand(class='form-control') }}</div>
+        <div class="col-md-3">{{ form.purchase_price.label(class='form-label') }}{{ form.purchase_price(class='form-control') }}</div>
+        <div class="col-md-3">{{ form.sale_price.label(class='form-label') }}{{ form.sale_price(class='form-control') }}</div>
+        <div class="col-md-3">{{ form.opening_stock.label(class='form-label') }}{{ form.opening_stock(class='form-control') }}</div>
+        <div class="col-md-3">{{ form.minimum_stock.label(class='form-label') }}{{ form.minimum_stock(class='form-control') }}</div>
+        <div class="col-12">{{ form.description.label(class='form-label') }}{{ form.description(class='form-control', rows=3) }}</div>
+      </div>
+      <div class="mt-4">{{ form.submit(class='btn btn-success') }}</div>
+    </form>
+  </div>
+</div>
+{% endblock %}

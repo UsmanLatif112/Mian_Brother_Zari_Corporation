@@ -1,0 +1,133 @@
+{% extends 'base.html' %}
+{% block title %}General Journal{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
+    <div>
+      <h1 class="h3 mb-1">General Journal</h1>
+      <p class="text-muted mb-0">All in &amp; out for the selected period (no opening balances)</p>
+    </div>
+    <form method="get" class="dash-filter dash-filter-inline" id="journal-filter-form">
+      <label class="dash-filter-label">Period</label>
+      <select name="period" class="form-select form-select-sm" id="period-filter" onchange="onJournalPeriodChange()">
+        <option value="all" {% if selected_period == 'all' %}selected{% endif %}>All</option>
+        <option value="today" {% if selected_period == 'today' %}selected{% endif %}>Today</option>
+        <option value="week" {% if selected_period == 'week' %}selected{% endif %}>One Week</option>
+        <option value="month" {% if selected_period == 'month' %}selected{% endif %}>One Month</option>
+        <option value="3_month" {% if selected_period == '3_month' %}selected{% endif %}>Three Month</option>
+        <option value="12_month" {% if selected_period == '12_month' %}selected{% endif %}>12 Month</option>
+        <option value="custom" {% if selected_period == 'custom' %}selected{% endif %}>Custom</option>
+      </select>
+      <span class="custom-date-field dash-filter-label">From</span>
+      <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm custom-date-field">
+      <span class="custom-date-field dash-filter-label">To</span>
+      <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm custom-date-field">
+      <button type="submit" class="btn btn-sm btn-outline-secondary custom-date-field">Apply</button>
+    </form>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Total In</p>
+            <h3 class="mb-0 fw-bold text-success">{{ '%.2f'|format(total_in|float) }}</h3>
+          </div>
+          <div class="stat-icon bg-success-subtle text-success"><i class="fa-solid fa-arrow-down"></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Total Out</p>
+            <h3 class="mb-0 fw-bold text-danger">{{ '%.2f'|format(total_out|float) }}</h3>
+          </div>
+          <div class="stat-icon bg-danger-subtle text-danger"><i class="fa-solid fa-arrow-up"></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Net</p>
+            <h3 class="mb-0 fw-bold {% if net|float >= 0 %}text-success{% else %}text-danger{% endif %}">
+              {{ '%.2f'|format(net|float) }}
+            </h3>
+          </div>
+          <div class="stat-icon bg-primary-subtle text-primary"><i class="fa-solid fa-scale-balanced"></i></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Journal Entries</strong>
+      <span class="text-muted small">{{ count }} entries</span>
+    </div>
+    <table class="table datatable mb-0 w-100">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Reference</th>
+          <th>Particulars</th>
+          <th>Party</th>
+          <th>Status</th>
+          <th class="text-end">In</th>
+          <th class="text-end">Out</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.date }}</td>
+          <td><span class="badge bg-light text-dark border">{{ r.type }}</span></td>
+          <td>{{ r.reference }}</td>
+          <td>{{ r.particulars }}</td>
+          <td>{{ r.party }}</td>
+          <td>{{ r.status or '—' }}</td>
+          <td class="text-end {% if r.amount_in|float > 0 %}text-success{% endif %}">
+            {% if r.amount_in|float > 0 %}{{ '%.2f'|format(r.amount_in|float) }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end {% if r.amount_out|float > 0 %}text-danger{% endif %}">
+            {% if r.amount_out|float > 0 %}{{ '%.2f'|format(r.amount_out|float) }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end">
+            {% if r.link %}
+            <a href="{{ r.link }}" class="redirect-icon-btn" title="Open">
+              <i class="fa-solid fa-up-right-from-square"></i>
+            </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onJournalPeriodChange() {
+  const period = document.getElementById('period-filter')?.value;
+  toggleCustomDates();
+  if (period !== 'custom') {
+    document.getElementById('journal-filter-form')?.submit();
+  }
+}
+toggleCustomDates();
+</script>
+{% endblock %}
