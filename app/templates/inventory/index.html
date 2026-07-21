@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% from 'partials/macros.html' import form_modal %}
+{% from 'partials/macros.html' import form_modal, photo_field %}
 {% block title %}Inventory{% endblock %}
 {% block content %}
 <div class="dashboard-page">
@@ -168,19 +168,22 @@
 
 {# Nested quick-add vendor from inventory product form #}
 <div class="modal fade erp-form-modal" id="quickVendorModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Add Vendor</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <div class="row g-2">
-          <div class="col-md-6">
+        <div class="row g-2 align-items-end">
+          <div class="col-auto">
+            {{ photo_field(icon='fa-truck-field', label='Vendor photo', upload='ajax', folder='vendors', picker_id='qv-photo-picker') }}
+          </div>
+          <div class="col-md-5">
             <label class="form-label">Name</label>
             <input id="qv-name" class="form-control" placeholder="Vendor name">
           </div>
-          <div class="col-md-6">
+          <div class="col-md-5">
             <label class="form-label">Phone</label>
             <input id="qv-phone" class="form-control" placeholder="Phone">
           </div>

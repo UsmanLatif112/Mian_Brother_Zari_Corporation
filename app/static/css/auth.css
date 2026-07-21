@@ -8,17 +8,22 @@
   overflow: hidden;
 }
 .auth-logo {
-  width: 48px;
-  height: 48px;
-  margin: 0 auto 0.75rem;
-  border-radius: 0.7rem;
-  background: linear-gradient(135deg, #1f7a4d, #145c3a);
-  color: #fff;
+  width: 96px;
+  height: 96px;
+  margin: 0 auto 0.85rem;
+  border-radius: 50%;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.25rem;
-  box-shadow: 0 6px 16px rgba(31, 122, 77, 0.28);
+  overflow: hidden;
+  box-shadow: 0 8px 22px rgba(31, 107, 58, 0.18);
+}
+.auth-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .auth-title {
   font-size: 1.05rem;

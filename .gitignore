@@ -7,3 +7,7 @@ backups/
 *.db
 .mypy_cache/
 .pytest_cache/
+build/
+dist/
+*.spec.bak
+data/

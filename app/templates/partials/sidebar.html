@@ -1,7 +1,10 @@
 <aside class="erp-sidebar" id="erp-sidebar">
   <div class="sidebar-brand">
-    <i class="fa-solid fa-leaf text-success"></i>
-    <span>{{ brand_short }}</span>
+    <img class="sidebar-brand-logo" src="{{ url_for('static', filename='img/logo.png') }}" alt="Mian Brother Fertilizers">
+    <div class="sidebar-brand-text">
+      <span class="sidebar-brand-name">Mian Brother</span>
+      <span class="sidebar-brand-sub">Fertilizers</span>
+    </div>
   </div>
   <nav class="sidebar-nav">
     <a href="{{ url_for('dashboard.index') }}" class="nav-link"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>

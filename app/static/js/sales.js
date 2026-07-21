@@ -270,9 +270,8 @@
     const btn = e.target.closest('.lookup-item');
     if (!btn) return;
     if (btn.classList.contains('lookup-create')) {
-      document.getElementById('qc-name').value = btn.dataset.name || '';
+      openQuickCustomer(btn.dataset.name || '');
       custResults.classList.add('d-none');
-      bootstrap.Modal.getOrCreateInstance(document.getElementById('quickCustomerModal')).show();
       return;
     }
     document.getElementById('customer-id').value = btn.dataset.id;
@@ -281,9 +280,23 @@
     custResults.classList.add('d-none');
   });
 
-  document.getElementById('btn-add-customer')?.addEventListener('click', () => {
-    document.getElementById('qc-name').value = custSearch.value.trim();
+  function openQuickCustomer(prefillName) {
+    document.getElementById('qc-name').value = prefillName || '';
+    document.getElementById('qc-phone').value = '';
+    document.getElementById('qc-address').value = '';
+    document.getElementById('qc-book').value = '';
+    document.getElementById('qc-balance').value = '';
+    const err = document.getElementById('qc-error');
+    if (err) {
+      err.classList.add('d-none');
+      err.textContent = '';
+    }
+    window.PhotoPicker?.clear?.(document.getElementById('qc-photo-picker'));
     bootstrap.Modal.getOrCreateInstance(document.getElementById('quickCustomerModal')).show();
+  }
+
+  document.getElementById('btn-add-customer')?.addEventListener('click', () => {
+    openQuickCustomer(custSearch.value.trim());
   });
 
   document.getElementById('payment-status')?.addEventListener('change', () => {
@@ -312,6 +325,7 @@
       opening_balance: document.getElementById('qc-balance').value || 0,
       joined_date: document.getElementById('qc-date').value,
       customer_type: document.getElementById('qc-type')?.value || 'good',
+      photo: document.querySelector('#qc-photo-picker .photo-path')?.value || '',
     };
     if (!payload.name) {
       err.textContent = 'Customer name is required.';

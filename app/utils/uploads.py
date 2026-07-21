@@ -74,3 +74,16 @@ def image_url(relative_path: str | None) -> str | None:
         return None
     rel = relative_path.replace("\\", "/").lstrip("/")
     return url_for("static", filename=f"uploads/{rel}")
+
+
+def accept_uploaded_path(relative_path: str | None, folder: str) -> str | None:
+    """Accept a previously uploaded path for folder (e.g. customers/abc.jpg)."""
+    if not relative_path:
+        return None
+    rel = str(relative_path).replace("\\", "/").lstrip("/")
+    if ".." in rel or not rel.startswith(f"{folder}/"):
+        return None
+    abs_path = os.path.join(upload_root(), *rel.split("/"))
+    if not os.path.isfile(abs_path):
+        return None
+    return rel

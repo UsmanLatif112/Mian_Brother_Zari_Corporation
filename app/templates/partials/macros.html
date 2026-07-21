@@ -19,11 +19,20 @@
 {% endmacro %}
 
 
-{% macro photo_field(name='photo', current_url=None, icon='fa-user', label='Photo', clear_name='clear_photo') %}
-<div class="photo-picker photo-picker-line photo-picker-form" data-icon="fa-camera" data-aspect="1"
-     {% if current_url %}data-current="{{ current_url }}"{% endif %} title="{{ label }} (optional)">
-  <input type="file" name="{{ name }}" accept="image/*" class="d-none photo-file-input">
+{% macro photo_field(name='photo', current_url=None, icon='fa-user', label='Photo', clear_name='clear_photo', upload=None, folder='misc', picker_id=None) %}
+{# upload='ajax' for JSON quick-add modals (stores path in .photo-path); default is multipart form file. #}
+<div class="photo-picker photo-picker-line photo-picker-form{% if picker_id %} {{ picker_id }}{% endif %}"
+     data-icon="fa-camera" data-aspect="1"
+     {% if upload == 'ajax' %}data-upload="ajax" data-folder="{{ folder }}"{% endif %}
+     {% if current_url %}data-current="{{ current_url }}"{% endif %}
+     {% if picker_id %}id="{{ picker_id }}"{% endif %}
+     title="{{ label }} (optional)">
+  <input type="file" {% if upload != 'ajax' %}name="{{ name }}"{% endif %} accept="image/*" class="d-none photo-file-input">
+  {% if upload == 'ajax' %}
+  <input type="hidden" class="photo-path" value="">
+  {% else %}
   <input type="hidden" name="{{ clear_name }}" value="" class="photo-clear-flag">
+  {% endif %}
   <div class="line-photo-frame" role="button" tabindex="0" aria-label="{{ label }}">
     <div class="photo-preview line-photo-preview" aria-hidden="true"><i class="fa-solid fa-camera"></i></div>
     <span class="line-photo-hint">Add</span>

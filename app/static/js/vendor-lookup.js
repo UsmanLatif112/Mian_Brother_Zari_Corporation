@@ -50,6 +50,7 @@
         address: document.getElementById('qv-address')?.value.trim() || '',
         opening_balance: document.getElementById('qv-balance')?.value || 0,
         notes: document.getElementById('qv-notes')?.value.trim() || '',
+        photo: document.querySelector('#qv-photo-picker .photo-path')?.value || '',
       };
       if (!payload.name) {
         if (err) {
@@ -113,6 +114,7 @@
       err.classList.add('d-none');
       err.textContent = '';
     }
+    global.PhotoPicker?.clear?.(document.getElementById('qv-photo-picker'));
     bootstrap.Modal.getOrCreateInstance(document.getElementById(modalId)).show();
   }
 

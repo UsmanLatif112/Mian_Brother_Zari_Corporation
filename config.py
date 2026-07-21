@@ -20,6 +20,9 @@ def build_mysql_uri(
 
 def resolve_sqlalchemy_uri() -> str:
     """Offline-first: always SQLite locally unless production server deploy."""
+    if os.environ.get("DESKTOP_APP", "").lower() in ("1", "true", "yes"):
+        return os.environ.get("SQLITE_DATABASE_URI", "sqlite:///mbzc_erp.db")
+
     offline_first = os.environ.get("OFFLINE_FIRST", "true").lower() == "true"
     if offline_first and os.environ.get("FLASK_ENV", "development") != "production":
         return os.environ.get("SQLITE_DATABASE_URI", "sqlite:///mbzc_erp.db")
@@ -81,6 +84,9 @@ def get_config():
 
 def apply_database_uri(app) -> None:
     if app.config.get("TESTING"):
+        return
+    if os.environ.get("DESKTOP_APP", "").lower() in ("1", "true", "yes"):
+        app.config["SQLALCHEMY_DATABASE_URI"] = resolve_sqlalchemy_uri()
         return
     if os.environ.get("FLASK_ENV") == "production":
         app.config["SQLALCHEMY_DATABASE_URI"] = (

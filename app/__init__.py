@@ -1,7 +1,7 @@
 import logging
 import os
 
-from flask import Flask, render_template
+from flask import Flask, render_template, send_from_directory
 
 from config import apply_database_uri, get_config
 from app.extensions import csrf, db, login_manager, migrate
@@ -24,11 +24,62 @@ def _normalize_sqlite_uri(app: Flask) -> None:
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + default.replace("\\", "/")
 
 
+def _apply_desktop_paths(app: Flask) -> None:
+    """Writable DB / uploads / backups outside the frozen bundle."""
+    if os.environ.get("DESKTOP_APP", "").lower() not in ("1", "true", "yes"):
+        return
+    from app.runtime_paths import backups_dir, instance_dir, uploads_dir
+
+    app.instance_path = instance_dir()
+    app.config["UPLOAD_FOLDER"] = uploads_dir()
+    app.config["BACKUP_DIR"] = backups_dir()
+    os.makedirs(app.instance_path, exist_ok=True)
+    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+    os.makedirs(app.config["BACKUP_DIR"], exist_ok=True)
+
+    # Serve user uploads at /static/uploads/... even when folder is outside bundle static
+    upload_root = app.config["UPLOAD_FOLDER"]
+
+    def _serve_uploads(filename: str):
+        return send_from_directory(upload_root, filename)
+
+    # Replace default static handler so uploads resolve from writable data dir
+    static_folder = app.static_folder
+
+    def _desktop_static(filename: str):
+        if filename.startswith("uploads/") or filename.startswith("uploads\\"):
+            rel = filename.split("/", 1)[-1].split("\\", 1)[-1]
+            return send_from_directory(upload_root, rel)
+        return send_from_directory(static_folder, filename)
+
+    app.view_functions["static"] = _desktop_static
+    # Keep explicit route as backup
+    app.add_url_rule(
+        "/static/uploads/<path:filename>",
+        endpoint="desktop_uploads",
+        view_func=_serve_uploads,
+    )
+
+
 def create_app(config_class=None):
-    app = Flask(__name__, instance_relative_config=True)
+    desktop = os.environ.get("DESKTOP_APP", "").lower() in ("1", "true", "yes")
+    if desktop:
+        from app.runtime_paths import instance_dir, static_dir, templates_dir
+
+        app = Flask(
+            __name__,
+            instance_path=instance_dir(),
+            instance_relative_config=True,
+            template_folder=templates_dir(),
+            static_folder=static_dir(),
+        )
+    else:
+        app = Flask(__name__, instance_relative_config=True)
+
     cfg = config_class or get_config()
     app.config.from_object(cfg)
     apply_database_uri(app)
+    _apply_desktop_paths(app)
 
     os.makedirs(app.instance_path, exist_ok=True)
     backup_dir = app.config["BACKUP_DIR"]

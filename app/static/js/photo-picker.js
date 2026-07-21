@@ -467,18 +467,26 @@
     clearBtn?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (input) input.value = '';
-      if (pathEl) pathEl.value = '';
-      wrap.dataset.current = '';
-      if (clearFlag) clearFlag.value = '1';
-      setPreview(wrap, null);
+      clearPicker(wrap);
     });
+  }
+
+  function clearPicker(wrap) {
+    if (!wrap) return;
+    const clearFlag = wrap.querySelector('.photo-clear-flag');
+    const pathEl = wrap.querySelector('.photo-path');
+    const input = wrap.querySelector('.photo-file-input') || wrap.querySelector('input[type="file"]:not(.photo-camera-input)');
+    if (input) input.value = '';
+    if (pathEl) pathEl.value = '';
+    wrap.dataset.current = '';
+    if (clearFlag) clearFlag.value = '1';
+    setPreview(wrap, null);
   }
 
   function bindAll(root) {
     (root || document).querySelectorAll('.photo-picker').forEach(bindPicker);
   }
 
-  global.PhotoPicker = { bind: bindPicker, bindAll, setPreview, open: openStudio };
+  global.PhotoPicker = { bind: bindPicker, bindAll, setPreview, clear: clearPicker, open: openStudio };
   document.addEventListener('DOMContentLoaded', () => bindAll());
 })(window);

@@ -236,6 +236,7 @@
 </div>
 
 {# Nested quick-add customer — same fields as Customers page #}
+{% from 'partials/macros.html' import photo_field %}
 <div class="modal fade erp-form-modal" id="quickCustomerModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -244,12 +245,15 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <div class="row g-2">
-          <div class="col-md-6">
+        <div class="row g-2 align-items-end">
+          <div class="col-auto">
+            {{ photo_field(icon='fa-user', label='Customer photo', upload='ajax', folder='customers', picker_id='qc-photo-picker') }}
+          </div>
+          <div class="col-md-5">
             <label class="form-label">Name</label>
             <input id="qc-name" class="form-control" placeholder="Customer name">
           </div>
-          <div class="col-md-6">
+          <div class="col-md-5">
             <label class="form-label">Phone</label>
             <input id="qc-phone" class="form-control" placeholder="Phone">
           </div>

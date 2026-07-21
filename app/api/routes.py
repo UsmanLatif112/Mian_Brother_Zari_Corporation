@@ -164,12 +164,15 @@ def quick_expense_category():
 @api_bp.route("/vendors/quick", methods=["POST"])
 @login_required
 def quick_vendor():
+    from app.utils.uploads import accept_uploaded_path
+
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
         return jsonify({"ok": False, "error": "Vendor name is required."}), 400
 
     opening = Decimal(str(data.get("opening_balance") or 0))
+    photo = accept_uploaded_path(data.get("photo"), "vendors")
     vendor = Vendor(
         name=name,
         phone=(data.get("phone") or "").strip() or None,
@@ -177,6 +180,7 @@ def quick_vendor():
         opening_balance=opening,
         balance=opening,
         notes=(data.get("notes") or "").strip() or None,
+        photo=photo,
     )
     db.session.add(vendor)
     db.session.commit()
@@ -237,6 +241,7 @@ def quick_customer():
     from datetime import date
 
     from app.services.ledger_service import post_ledger_entry
+    from app.utils.uploads import accept_uploaded_path
 
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
@@ -250,6 +255,7 @@ def quick_customer():
         joined_date = date.today()
 
     opening = Decimal(str(data.get("opening_balance") or data.get("old_account_balance") or 0))
+    photo = accept_uploaded_path(data.get("photo"), "customers")
     customer = Customer(
         name=name,
         phone=(data.get("phone") or "").strip() or None,
@@ -261,6 +267,7 @@ def quick_customer():
         balance=opening,
         credit_limit=data.get("credit_limit") or 0,
         notes=data.get("notes"),
+        photo=photo,
     )
     db.session.add(customer)
     db.session.flush()
