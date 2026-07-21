@@ -9,11 +9,36 @@
       <div class="modal-body">
         {{ caller() }}
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer erp-modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="submit" form="{{ form_id }}" class="btn btn-success">{{ submit_label }}</button>
       </div>
     </div>
   </div>
+</div>
+{% endmacro %}
+
+
+{% macro photo_field(name='photo', current_url=None, icon='fa-user', label='Photo', clear_name='clear_photo') %}
+<div class="photo-picker photo-picker-line photo-picker-form" data-icon="fa-camera" data-aspect="1"
+     {% if current_url %}data-current="{{ current_url }}"{% endif %} title="{{ label }} (optional)">
+  <input type="file" name="{{ name }}" accept="image/*" class="d-none photo-file-input">
+  <input type="hidden" name="{{ clear_name }}" value="" class="photo-clear-flag">
+  <div class="line-photo-frame" role="button" tabindex="0" aria-label="{{ label }}">
+    <div class="photo-preview line-photo-preview" aria-hidden="true"><i class="fa-solid fa-camera"></i></div>
+    <span class="line-photo-hint">Add</span>
+    <button type="button" class="line-photo-clear photo-clear" title="Remove photo" aria-label="Remove photo">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </div>
+</div>
+{% endmacro %}
+
+
+{% macro party_avatar(url=None, name='', icon='fa-user', size='lg') %}
+<div class="party-avatar party-avatar-{{ size }} {% if url %}has-photo{% endif %}"
+     {% if url %}style="background-image:url('{{ url }}')"{% endif %}
+     title="{{ name }}">
+  {% if not url %}<i class="fa-solid {{ icon }}"></i>{% endif %}
 </div>
 {% endmacro %}

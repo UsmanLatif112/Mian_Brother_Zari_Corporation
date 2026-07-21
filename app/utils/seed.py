@@ -66,7 +66,7 @@ def seed_database():
     _get_or_create_balance("cash")
     _get_or_create_balance("bank")
 
-    set_setting("company_name", "Mian Brother Zari Corporation")
+    set_setting("company_name", "Mian Brother Fertilizer")
     set_setting("currency", "PKR")
     set_setting("date_format", "%d-%m-%Y")
     set_setting("tax_rate", "17")

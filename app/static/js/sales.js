@@ -16,11 +16,26 @@
   function rowTemplate() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
+      <td class="line-photo-td">
+        <div class="photo-picker photo-picker-line" data-icon="fa-camera" data-upload="ajax" data-folder="sales" data-aspect="1" title="Add item photo">
+          <input type="file" accept="image/*" class="d-none photo-file-input">
+          <input type="hidden" class="photo-path" value="">
+          <div class="line-photo-frame" role="button" tabindex="0" aria-label="Add photo">
+            <div class="photo-preview line-photo-preview" aria-hidden="true">
+              <i class="fa-solid fa-camera"></i>
+            </div>
+            <span class="line-photo-hint">Add</span>
+            <button type="button" class="line-photo-clear photo-clear" title="Remove photo" aria-label="Remove photo">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+      </td>
       <td>
         <div class="position-relative">
-          <div class="input-group input-group-sm">
+          <div class="input-group input-group-sm erp-input-group-quick sale-item-search">
             <input type="text" class="form-control product-search" placeholder="Search item..." autocomplete="off">
-            <button type="button" class="btn btn-outline-secondary btn-quick-product" title="Add product"><i class="fa-solid fa-plus"></i></button>
+            <button type="button" class="btn erp-btn-quick-add btn-quick-product" title="Add product"><i class="fa-solid fa-plus"></i></button>
           </div>
           <input type="hidden" class="product-id" value="">
           <input type="hidden" class="list-price" value="0">
@@ -31,7 +46,11 @@
       <td><input type="number" min="0.001" step="0.001" class="form-control form-control-sm qty" value="1"></td>
       <td><input type="number" min="0" step="0.01" class="form-control form-control-sm price" value="0" title="Editable — auto-filled from item sale price"></td>
       <td class="text-end line-total fw-semibold">0.00</td>
-      <td><button type="button" class="btn btn-sm text-danger btn-remove-row">&times;</button></td>
+      <td class="text-end">
+        <button type="button" class="btn btn-sm btn-light border-0 sale-row-remove btn-remove-row" title="Remove row">
+          <i class="fa-solid fa-trash-can text-danger"></i>
+        </button>
+      </td>
     `;
     return tr;
   }
@@ -147,6 +166,8 @@
       setListPriceHint(tr, prefill.sale_price);
     }
     bindRow(tr);
+    const picker = tr.querySelector('.photo-picker');
+    if (picker && window.PhotoPicker) window.PhotoPicker.bind(picker);
     recalc();
     return tr;
   }
@@ -350,6 +371,8 @@
       purchase_price: document.getElementById('qp-purchase').value,
       opening_stock: document.getElementById('qp-stock').value,
       minimum_stock: document.getElementById('qp-min-stock')?.value || 0,
+      batch_number: document.getElementById('qp-batch')?.value.trim() || '',
+      expiry_date: document.getElementById('qp-expiry')?.value || '',
       description: document.getElementById('qp-description')?.value.trim() || '',
     };
     const res = await fetch('/api/products/quick', {
@@ -407,6 +430,7 @@
         product_id: Number(pid),
         quantity: Number(tr.querySelector('.qty')?.value || 0),
         unit_price: Number(tr.querySelector('.price')?.value || 0),
+        photo: tr.querySelector('.photo-path')?.value || null,
       });
     });
     if (!items.length) {

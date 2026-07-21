@@ -9,7 +9,7 @@ from app.extensions import db
 from app.forms import ExpenseForm
 from app.models import Expense, ExpenseCategory
 from app.services.audit_service import log_audit
-from app.services.expense_service import delete_expense, settle_expense, update_expense
+from app.services.expense_service import delete_expense, record_expense_cash_out, settle_expense, update_expense
 from app.utils.decorators import permission_required
 
 expenses_bp = Blueprint("expenses", __name__)
@@ -17,7 +17,10 @@ expenses_bp = Blueprint("expenses", __name__)
 
 def _expense_form():
     form = ExpenseForm()
-    form.category_id.choices = [(c.id, c.name) for c in ExpenseCategory.query.all()]
+    form.category_id.choices = [
+        (c.id, c.name)
+        for c in ExpenseCategory.query.filter_by(is_deleted=False).order_by(ExpenseCategory.name)
+    ]
     if not form.expense_date.data:
         form.expense_date.data = date.today()
     return form
@@ -45,7 +48,7 @@ def _expense_page(form=None, open_modal=False):
         .scalar()
     ) or Decimal("0")
     pending_count = Expense.query.filter_by(is_deleted=False, is_settled=False).count()
-    categories = ExpenseCategory.query.order_by(ExpenseCategory.name).all()
+    categories = ExpenseCategory.query.filter_by(is_deleted=False).order_by(ExpenseCategory.name).all()
     return render_template(
         "expenses/index.html",
         expenses=expenses,
@@ -114,6 +117,7 @@ def create():
             )
             db.session.add(expense)
             db.session.flush()
+            record_expense_cash_out(expense, current_user.id)
             log_audit("create", "expense", expense.id, expense.name)
             created += 1
 

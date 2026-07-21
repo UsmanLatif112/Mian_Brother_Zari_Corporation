@@ -11,8 +11,23 @@ from app.models import LedgerEntry, Vendor, VendorPayment
 from app.services.audit_service import log_audit
 from app.services.vendor_payment_service import PAYMENT_TYPES, record_vendor_payment
 from app.utils.decorators import permission_required
+from app.utils.uploads import delete_image, save_image
 
 vendors_bp = Blueprint("vendors", __name__)
+
+
+def _apply_vendor_photo(vendor):
+    if request.form.get("clear_photo") == "1":
+        delete_image(vendor.photo)
+        vendor.photo = None
+        return
+    try:
+        path = save_image(request.files.get("photo"), "vendors")
+    except ValueError:
+        raise
+    if path:
+        delete_image(vendor.photo)
+        vendor.photo = path
 
 
 def _vendor_page(form=None, open_modal=False):
@@ -56,20 +71,61 @@ def create():
         return redirect(url_for("vendors.index", open_modal=1))
     form = VendorForm()
     if form.validate_on_submit():
-        vendor = Vendor(
-            name=form.name.data,
-            phone=form.phone.data,
-            address=form.address.data,
-            opening_balance=form.opening_balance.data or 0,
-            balance=form.opening_balance.data or 0,
-            notes=form.notes.data,
-        )
-        db.session.add(vendor)
-        log_audit("create", "vendor", None, vendor.name)
-        db.session.commit()
-        flash("Vendor created.", "success")
-        return redirect(url_for("vendors.index"))
+        try:
+            opening_raw = form.opening_balance.data
+            opening = Decimal("0") if opening_raw in (None, "") else Decimal(str(opening_raw))
+            vendor = Vendor(
+                name=form.name.data,
+                phone=form.phone.data,
+                address=form.address.data,
+                opening_balance=opening,
+                balance=opening,
+                notes=form.notes.data,
+            )
+            _apply_vendor_photo(vendor)
+            db.session.add(vendor)
+            log_audit("create", "vendor", None, vendor.name)
+            db.session.commit()
+            flash("Vendor created.", "success")
+            return redirect(url_for("vendors.index"))
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return _vendor_page(form=form, open_modal=True)
     return _vendor_page(form=form, open_modal=True)
+
+
+@vendors_bp.route("/<int:vendor_id>/edit", methods=["POST"])
+@login_required
+@permission_required("vendors.*")
+def edit(vendor_id):
+    vendor = db.session.get(Vendor, vendor_id)
+    if not vendor or vendor.is_deleted:
+        flash("Vendor not found.", "danger")
+        return redirect(url_for("vendors.index"))
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Name is required.", "danger")
+        return redirect(url_for("vendors.index"))
+    try:
+        vendor.name = name
+        vendor.phone = (request.form.get("phone") or "").strip() or None
+        vendor.address = (request.form.get("address") or "").strip() or None
+        vendor.notes = (request.form.get("notes") or "").strip() or None
+        opening = request.form.get("opening_balance")
+        vendor.opening_balance = (
+            Decimal("0") if opening in (None, "") else Decimal(str(opening))
+        )
+        _apply_vendor_photo(vendor)
+        log_audit("update", "vendor", vendor.id, vendor.name)
+        db.session.commit()
+        flash("Vendor updated.", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    if request.form.get("return_detail"):
+        return redirect(url_for("vendors.detail", vendor_id=vendor.id))
+    return redirect(url_for("vendors.index"))
 
 
 @vendors_bp.route("/payment", methods=["POST"])

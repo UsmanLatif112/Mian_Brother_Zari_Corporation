@@ -12,7 +12,10 @@
           <div class="col-md-6">{{ form.phone.label(class='form-label') }}{{ form.phone(class='form-control') }}</div>
           <div class="col-12">{{ form.address.label(class='form-label') }}{{ form.address(class='form-control', rows=2) }}</div>
           <div class="col-md-4">{{ form.old_book_no.label(class='form-label') }}{{ form.old_book_no(class='form-control') }}</div>
-          <div class="col-md-4">{{ form.opening_balance.label(class='form-label') }}{{ form.opening_balance(class='form-control') }}</div>
+          <div class="col-md-4">
+            <label class="form-label">{{ form.opening_balance.label.text }} <span class="text-muted fw-normal">(optional)</span></label>
+            {{ form.opening_balance(class='form-control', placeholder='Leave blank if none') }}
+          </div>
           <div class="col-md-4">{{ form.joined_date.label(class='form-label') }}{{ form.joined_date(class='form-control', type='date') }}</div>
           <div class="col-md-6">{{ form.customer_type.label(class='form-label') }}{{ form.customer_type(class='form-select') }}</div>
         </div>

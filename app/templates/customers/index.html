@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% from 'partials/macros.html' import form_modal %}
+{% from 'partials/macros.html' import form_modal, photo_field %}
 {% block title %}Customers{% endblock %}
 {% block content %}
 <div class="dashboard-page">
@@ -98,7 +98,8 @@
                     data-old-book="{{ c.old_book_no or '' }}"
                     data-opening="{{ c.opening_balance or 0 }}"
                     data-joined="{{ c.joined_date.isoformat() if c.joined_date else '' }}"
-                    data-type="{{ c.customer_type or 'good' }}">
+                    data-type="{{ c.customer_type or 'good' }}"
+                    data-photo="{{ c.photo_url or '' }}">
               <i class="fa-solid fa-pen"></i>
             </button>
             <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
@@ -120,14 +121,17 @@
 </div>
 
 {% call form_modal('Add Customer', 'Save Customer') %}
-<form method="post" action="{{ url_for('customers.create') }}" id="entity-form">
+<form method="post" action="{{ url_for('customers.create') }}" id="entity-form" enctype="multipart/form-data">
   {{ form.hidden_tag() }}
-  <div class="row g-2">
-    <div class="col-md-6">
+  <div class="row g-2 align-items-end">
+    <div class="col-auto">
+      {{ photo_field(icon='fa-user', label='Customer photo') }}
+    </div>
+    <div class="col-md-5">
       <label class="form-label">{{ form.name.label.text }}</label>
       {{ form.name(class='form-control', placeholder='Customer name') }}
     </div>
-    <div class="col-md-6">
+    <div class="col-md-5">
       <label class="form-label">{{ form.phone.label.text }}</label>
       {{ form.phone(class='form-control', placeholder='Phone') }}
     </div>
@@ -141,7 +145,7 @@
     </div>
     <div class="col-md-4">
       <label class="form-label">{{ form.opening_balance.label.text }} <span class="text-muted fw-normal">(optional)</span></label>
-      {{ form.opening_balance(class='form-control') }}
+      {{ form.opening_balance(class='form-control', placeholder='Leave blank if none') }}
     </div>
     <div class="col-md-4">
       <label class="form-label">{{ form.joined_date.label.text }}</label>
@@ -212,21 +216,24 @@
 
 {# Edit customer #}
 <div class="modal fade erp-form-modal" id="editCustomerModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
-      <form method="post" id="edit-customer-form">
+      <form method="post" id="edit-customer-form" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-header">
           <h5 class="modal-title">Edit Customer</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <div class="row g-2">
-            <div class="col-md-6">
+          <div class="row g-2 align-items-end">
+            <div class="col-auto" id="edit-customer-photo-wrap">
+              {{ photo_field(icon='fa-user', label='Customer photo') }}
+            </div>
+            <div class="col-md-5">
               <label class="form-label">Name</label>
               <input name="name" class="form-control" required>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-5">
               <label class="form-label">Phone</label>
               <input name="phone" class="form-control">
             </div>
@@ -239,8 +246,8 @@
               <input name="old_book_no" class="form-control">
             </div>
             <div class="col-md-4">
-              <label class="form-label">Old Account Balance</label>
-              <input type="number" step="0.01" name="opening_balance" class="form-control">
+              <label class="form-label">Old Account Balance <span class="text-muted fw-normal">(optional)</span></label>
+              <input type="number" step="0.01" name="opening_balance" class="form-control" placeholder="Leave blank if none">
             </div>
             <div class="col-md-4">
               <label class="form-label">Date Added</label>
@@ -297,9 +304,19 @@ document.addEventListener('click', (e) => {
   form.querySelector('[name=phone]').value = btn.dataset.phone || '';
   form.querySelector('[name=address]').value = btn.dataset.address || '';
   form.querySelector('[name=old_book_no]').value = btn.dataset.oldBook || '';
-  form.querySelector('[name=opening_balance]').value = btn.dataset.opening || '0';
+  form.querySelector('[name=opening_balance]').value =
+    btn.dataset.opening && Number(btn.dataset.opening) !== 0 ? btn.dataset.opening : '';
   form.querySelector('[name=joined_date]').value = btn.dataset.joined || '';
   form.querySelector('[name=customer_type]').value = btn.dataset.type || 'good';
+  const picker = form.querySelector('.photo-picker');
+  if (picker && window.PhotoPicker) {
+    picker.dataset.current = btn.dataset.photo || '';
+    const clearFlag = picker.querySelector('.photo-clear-flag');
+    if (clearFlag) clearFlag.value = '';
+    const fileInput = picker.querySelector('.photo-file-input');
+    if (fileInput) fileInput.value = '';
+    window.PhotoPicker.setPreview(picker, btn.dataset.photo || null);
+  }
   bootstrap.Modal.getOrCreateInstance(document.getElementById('editCustomerModal')).show();
 });
 </script>

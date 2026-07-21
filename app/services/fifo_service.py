@@ -13,6 +13,10 @@ def add_stock_layer(
     source_id=None,
     sale_price=None,
     notes=None,
+    batch_number=None,
+    expiry_date=None,
+    vendor_id=None,
+    invoice_no=None,
 ):
     layer = StockLayer(
         product_id=product_id,
@@ -21,6 +25,10 @@ def add_stock_layer(
         sale_price=Decimal(str(sale_price)) if sale_price is not None else None,
         source_type=source_type,
         source_id=source_id,
+        batch_number=(str(batch_number).strip() or None) if batch_number else None,
+        expiry_date=expiry_date,
+        vendor_id=int(vendor_id) if vendor_id else None,
+        invoice_no=(str(invoice_no).strip() or None) if invoice_no else None,
         received_at=utcnow(),
         notes=notes,
     )
@@ -72,6 +80,10 @@ def fifo_receive(
     user_id,
     notes=None,
     sale_price=None,
+    batch_number=None,
+    expiry_date=None,
+    vendor_id=None,
+    invoice_no=None,
 ):
     qty = Decimal(str(quantity))
     product.current_stock += qty
@@ -91,6 +103,10 @@ def fifo_receive(
         source_id,
         sale_price=layer_sale,
         notes=notes,
+        batch_number=batch_number,
+        expiry_date=expiry_date,
+        vendor_id=vendor_id,
+        invoice_no=invoice_no,
     )
     movement = StockMovement(
         product_id=product.id,

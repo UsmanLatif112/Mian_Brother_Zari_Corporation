@@ -120,6 +120,7 @@ def create():
                 "unit_price": line.get("unit_price", product.sale_price),
                 "discount": line.get("discount", 0),
                 "tax_rate": line.get("tax_rate", product.tax_rate or 0),
+                "photo": (line.get("photo") or "").strip() or None,
             }
         )
 

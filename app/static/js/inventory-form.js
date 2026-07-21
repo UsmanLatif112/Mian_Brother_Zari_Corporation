@@ -25,6 +25,18 @@
     parentIdGetter: () => document.getElementById('category_id')?.value || '',
   });
 
+  if (window.VendorLookup) {
+    VendorLookup.bind({
+      searchId: 'vendor-search',
+      idId: 'vendor_id',
+      resultsId: 'vendor-results',
+      selectedId: 'vendor-selected',
+      addBtnId: 'btn-add-vendor',
+      modalId: 'quickVendorModal',
+      required: true,
+    });
+  }
+
   const form = document.getElementById('entity-form');
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -63,12 +75,39 @@
       if (subId) subId.value = '';
     }
 
+    if (window.VendorLookup) {
+      const vendor = VendorLookup.ensureSelected('vendor_id', true);
+      if (!vendor.ok) {
+        if (err) {
+          err.textContent = vendor.error || 'Vendor is required';
+          err.classList.remove('d-none');
+        }
+        return;
+      }
+    }
+
+    const qty = Number(document.querySelector('[name="opening_stock"]')?.value || 0);
+    if (!(qty > 0)) {
+      if (err) {
+        err.textContent = 'Purchase quantity is required.';
+        err.classList.remove('d-none');
+      }
+      return;
+    }
+
     form.submit();
   });
 
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('.lookup-results') && !e.target.closest('#cat-search') && !e.target.closest('#subcat-search')) {
-      document.querySelectorAll('#cat-results, #subcat-results').forEach((el) => el.classList.add('d-none'));
+    if (
+      !e.target.closest('.lookup-results') &&
+      !e.target.closest('#cat-search') &&
+      !e.target.closest('#subcat-search') &&
+      !e.target.closest('#vendor-search')
+    ) {
+      document
+        .querySelectorAll('#cat-results, #subcat-results, #vendor-results')
+        .forEach((el) => el.classList.add('d-none'));
     }
   });
 })();

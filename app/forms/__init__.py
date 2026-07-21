@@ -54,8 +54,12 @@ class ProductForm(FlaskForm):
     wholesale_price = DecimalField("Wholesale Price", places=2)
     retail_price = DecimalField("Retail Price", places=2)
     tax_rate = DecimalField("GST/Tax %", places=2, default=0)
-    opening_stock = DecimalField("Opening Stock", places=3, default=0)
+    opening_stock = DecimalField("Purchase Qty", places=3, default=0)
     minimum_stock = DecimalField("Minimum Stock", places=3, default=0)
+    batch_number = StringField("Batch No.", validators=[Optional()])
+    expiry_date = DateField("Expiry Date", validators=[Optional()], format="%Y-%m-%d")
+    vendor_id = IntegerField("Vendor", validators=[DataRequired(message="Vendor is required.")])
+    invoice_no = StringField("Invoice No.", validators=[Optional()])
     description = TextAreaField("Description", validators=[Optional()])
     submit = SubmitField("Save Product")
 
@@ -65,7 +69,12 @@ class CustomerForm(FlaskForm):
     phone = StringField("Phone", validators=[Optional()])
     address = TextAreaField("Address", validators=[Optional()])
     old_book_no = StringField("Old Book No", validators=[Optional()])
-    opening_balance = DecimalField("Old Account Balance", places=2, default=0)
+    opening_balance = DecimalField(
+        "Old Account Balance",
+        places=2,
+        validators=[Optional()],
+        default=None,
+    )
     joined_date = DateField("Date Added", validators=[Optional()])
     customer_type = SelectField(
         "Customer Type",
@@ -88,7 +97,12 @@ class VendorForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired()])
     phone = StringField("Phone", validators=[Optional()])
     address = TextAreaField("Address", validators=[Optional()])
-    opening_balance = DecimalField("Opening Balance", places=2, default=0)
+    opening_balance = DecimalField(
+        "Opening Balance",
+        places=2,
+        validators=[Optional()],
+        default=None,
+    )
     notes = TextAreaField("Notes", validators=[Optional()])
     submit = SubmitField("Save")
 

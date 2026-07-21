@@ -13,6 +13,7 @@ def set_setting(key: str, value: str):
         row = Setting(key=key)
         db.session.add(row)
     row.value = value
+    db.session.commit()
 
 
 def get_business_info():
@@ -26,5 +27,5 @@ def get_business_info():
         "tax_rate",
     ]
     info = {k: get_setting(k, "") for k in keys}
-    info["company_name"] = info.get("company_name") or "MBZC ERP"
+    info["company_name"] = info.get("company_name") or "Mian Brother Fertilizer"
     return info

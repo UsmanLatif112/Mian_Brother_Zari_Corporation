@@ -57,11 +57,16 @@
   </div>
 
   <div class="card dash-panel border-0 shadow-sm">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
       <strong>Sales History</strong>
-      <span class="text-muted small">{{ sales|length }} records</span>
+      <div class="d-flex align-items-center gap-2">
+        <span class="text-muted small">{{ sales|length }} records</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-print-sales" title="Print filtered rows">
+          <i class="fa-solid fa-print me-1"></i> Print
+        </button>
+      </div>
     </div>
-    <table class="table datatable mb-0 w-100">
+    <table class="table datatable mb-0 w-100" id="sales-table">
       <thead>
         <tr>
           <th>ID</th>
@@ -139,10 +144,10 @@
           </div>
           <div class="col-md-6">
             <label class="form-label">Customer</label>
-            <div class="input-group">
+            <div class="input-group erp-input-group-quick">
               <input type="text" id="customer-search" class="form-control" placeholder="Search customer..." autocomplete="off">
-              <button type="button" class="btn btn-outline-secondary" id="btn-add-customer" title="Add new customer">
-                <i class="fa-solid fa-user-plus"></i>
+              <button type="button" class="btn erp-btn-quick-add" id="btn-add-customer" title="Add new customer">
+                <i class="fa-solid fa-plus"></i>
               </button>
             </div>
             <input type="hidden" id="customer-id" value="">
@@ -160,9 +165,10 @@
         </div>
 
         <div class="table-responsive mb-2">
-          <table class="table table-sm align-middle" id="sale-lines">
+          <table class="table table-sm align-middle erp-line-table sale-lines-table" id="sale-lines">
             <thead>
               <tr>
+                <th class="line-photo-col" style="width:64px">Photo</th>
                 <th style="min-width:220px">Item</th>
                 <th style="width:90px">Qty</th>
                 <th style="width:120px">Sale Price</th>
@@ -173,7 +179,7 @@
             <tbody></tbody>
           </table>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary mb-2" id="btn-add-row">
+        <button type="button" class="btn btn-sm erp-btn-add-row mb-2" id="btn-add-row">
           <i class="fa-solid fa-plus"></i> Add row
         </button>
 
@@ -221,7 +227,7 @@
         </div>
         <div class="text-danger small mt-2 d-none" id="sale-error"></div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer erp-modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-success" id="btn-save-sale">Save Sale</button>
       </div>
@@ -257,7 +263,7 @@
           </div>
           <div class="col-md-4">
             <label class="form-label">Old Account Balance <span class="text-muted fw-normal">(optional)</span></label>
-            <input type="number" step="0.01" id="qc-balance" class="form-control" value="0">
+            <input type="number" step="0.01" id="qc-balance" class="form-control" placeholder="Leave blank if none">
           </div>
           <div class="col-md-4">
             <label class="form-label">Date Added</label>
@@ -342,6 +348,14 @@
             <label class="form-label">Minimum Stock</label>
             <input type="number" step="0.001" id="qp-min-stock" class="form-control" value="0">
           </div>
+          <div class="col-md-6">
+            <label class="form-label">Batch No. <span class="text-muted fw-normal">(optional)</span></label>
+            <input id="qp-batch" class="form-control" placeholder="For opening stock">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Expiry Date <span class="text-muted fw-normal">(optional)</span></label>
+            <input type="date" id="qp-expiry" class="form-control">
+          </div>
           <div class="col-12">
             <label class="form-label">Description</label>
             <textarea id="qp-description" class="form-control" rows="2" placeholder="Optional"></textarea>
@@ -407,7 +421,7 @@ document.addEventListener('click', (e) => {
   document.getElementById('edit-sale-total-hint').textContent = `(invoice ${btn.dataset.total || '0'})`;
   bootstrap.Modal.getOrCreateInstance(document.getElementById('editSaleModal')).show();
 });
-</script>
+
 window.OPEN_SALE_MODAL = {{ 'true' if open_modal else 'false' }};
 
 function toggleCustomDates() {
@@ -426,6 +440,19 @@ function onSalesPeriodChange() {
 }
 
 toggleCustomDates();
+
+document.getElementById('btn-print-sales')?.addEventListener('click', () => {
+  const period = document.getElementById('period-filter');
+  const periodLabel = period?.options?.[period.selectedIndex]?.text || 'All';
+  // Printed columns (Action skipped): ID, Invoice, Date, Customer, Status, Total, Paid, Due
+  // sum Total/Paid/Due = indexes 5,6,7 among printed cols
+  window.PrintFiltered?.print({
+    table: '#sales-table',
+    title: 'Sales Report',
+    subtitle: 'Period: ' + periodLabel,
+    sumColumns: [5, 6, 7],
+  });
+});
 </script>
 <script src="{{ url_for('static', filename='js/category-lookup.js') }}"></script>
 <script src="{{ url_for('static', filename='js/sales.js') }}"></script>

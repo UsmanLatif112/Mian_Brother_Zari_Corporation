@@ -6,6 +6,7 @@ from app.models import (
     CashBookEntry,
     CustomerReceiving,
     Expense,
+    ExpenseSettlement,
     Purchase,
     Sale,
     VendorPayment,
@@ -45,8 +46,10 @@ def _row(
 
 def get_general_journal(period="all", start_date=None, end_date=None):
     """
-    List every business in/out for the period as single rows.
-    Excludes customer opening balances. No opening carry-forward.
+    Cash in/out for the period (no opening balances).
+    Expenses: Out when spent; In when you replenish the till on settle.
+    Credit sales = Out; purchases = In; customer advance/settle = In, loan = Out;
+    vendor loan = In, vendor pay = Out.
     """
     range_start, range_end = _range_for_filter(period, start_date, end_date)
     rows = []
@@ -60,14 +63,14 @@ def get_general_journal(period="all", start_date=None, end_date=None):
     for s in sq.order_by(Sale.sale_date.desc(), Sale.id.desc()).all():
         paid = _d(s.amount_paid)
         total = _d(s.grand_total)
-        due = total - paid
+        due = total - paid if total > paid else Decimal("0")
         status = s.payment_status.value if s.payment_status else ""
         party = s.customer.name if s.customer else "Walk-in"
         note = f"Sale total {total:.2f}"
         if _d(s.discount) > 0:
             note += f" · Discount {_d(s.discount):.2f}"
         if due > 0:
-            note += f" · Due {due:.2f}"
+            note += f" · Credit {due:.2f}"
         if paid > total:
             note += f" · Advance {paid - total:.2f}"
         rows.append(
@@ -78,7 +81,7 @@ def get_general_journal(period="all", start_date=None, end_date=None):
                 note,
                 party,
                 paid if paid > 0 else Decimal("0"),
-                Decimal("0"),
+                due,
                 status.title(),
                 f"/sales/{s.id}/invoice",
                 s.id,
@@ -92,14 +95,16 @@ def get_general_journal(period="all", start_date=None, end_date=None):
     if range_end:
         pq = pq.filter(Purchase.purchase_date <= range_end)
     for p in pq.order_by(Purchase.purchase_date.desc(), Purchase.id.desc()).all():
-        paid = _d(p.amount_paid)
         total = _d(p.grand_total)
-        due = total - paid
+        paid = _d(p.amount_paid)
+        due = total - paid if total > paid else Decimal("0")
         status = p.payment_status.value if p.payment_status else ""
         party = p.vendor.name if p.vendor else "—"
         note = f"Purchase total {total:.2f}"
         if due > 0:
-            note += f" · Due {due:.2f}"
+            note += f" · Credit {due:.2f}"
+        if paid > 0:
+            note += f" · Paid at purchase {paid:.2f}"
         rows.append(
             _row(
                 p.purchase_date,
@@ -107,15 +112,15 @@ def get_general_journal(period="all", start_date=None, end_date=None):
                 p.invoice_no,
                 note,
                 party,
+                total,
                 Decimal("0"),
-                paid if paid > 0 else Decimal("0"),
                 status.title(),
                 "/purchases/",
                 p.id,
             )
         )
 
-    # —— Expenses ——
+    # —— Expenses (cash out from till when spent) ——
     eq = Expense.query.filter(Expense.is_deleted.is_(False))
     if range_start:
         eq = eq.filter(Expense.expense_date >= range_start)
@@ -124,36 +129,53 @@ def get_general_journal(period="all", start_date=None, end_date=None):
     for e in eq.order_by(Expense.expense_date.desc(), Expense.id.desc()).all():
         amt = _d(e.amount)
         cat = e.category.name if e.category else "Expense"
-        if e.is_settled:
-            rows.append(
-                _row(
-                    e.expense_date,
-                    "Expense",
-                    f"EXP-{e.id}",
-                    e.name or cat,
-                    cat,
-                    Decimal("0"),
-                    amt,
-                    "Settled",
-                    "/expenses/",
-                    e.id,
-                )
+        status = "Settled" if e.is_settled else "Pending replenish"
+        rows.append(
+            _row(
+                e.expense_date,
+                "Expense",
+                f"EXP-{e.id}",
+                e.name or cat,
+                cat,
+                Decimal("0"),
+                amt,
+                status,
+                "/expenses/",
+                e.id,
             )
-        else:
-            rows.append(
-                _row(
-                    e.expense_date,
-                    "Expense",
-                    f"EXP-{e.id}",
-                    f"{e.name or cat} (pending settlement)",
-                    cat,
-                    Decimal("0"),
-                    Decimal("0"),
-                    f"Pending {amt:.2f}",
-                    "/expenses/",
-                    e.id,
-                )
+        )
+
+    # —— Expense settle (cash in — money from pocket to counter) ——
+    settlements = (
+        ExpenseSettlement.query.join(Expense)
+        .filter(Expense.is_deleted.is_(False))
+        .order_by(ExpenseSettlement.settled_at.desc(), ExpenseSettlement.id.desc())
+        .all()
+    )
+    for s in settlements:
+        e = s.expense
+        if not e:
+            continue
+        pay_date = s.settled_at.date() if s.settled_at else e.expense_date
+        if range_start and pay_date < range_start:
+            continue
+        if range_end and pay_date > range_end:
+            continue
+        cat = e.category.name if e.category else "Expense"
+        rows.append(
+            _row(
+                pay_date,
+                "Expense Settle",
+                f"EXP-{e.id}",
+                s.notes or f"Replenish till: {e.name or cat}",
+                cat,
+                _d(s.amount),
+                Decimal("0"),
+                "Cash In",
+                "/expenses/",
+                e.id * 10000 + s.id,
             )
+        )
 
     # —— Customer receivings (cash in against account) ——
     rq = CustomerReceiving.query
@@ -218,6 +240,7 @@ def get_general_journal(period="all", start_date=None, end_date=None):
         ~CashBookEntry.category.in_(
             [
                 "sales_collection",
+                "expense_spent",
                 "expense_settlement",
                 "customer_advance",
                 "customer_settle",

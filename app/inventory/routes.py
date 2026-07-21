@@ -1,22 +1,35 @@
 from decimal import Decimal
 import json
+from datetime import date, datetime
 
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
 
 from app.extensions import db
 from app.forms import ProductForm
-from app.models import Category, Product, StockLayer, StockMovement
+from app.models import Category, Product, StockLayer, StockMovement, Vendor
 from app.services.audit_service import log_audit
 from app.services.fifo_service import (
-    add_stock_layer,
     adjust_batch,
     reprice_all_remaining,
     reprice_batch,
 )
+from app.services.purchase_service import record_purchase
 from app.utils.decorators import permission_required
 
 inventory_bp = Blueprint("inventory", __name__)
+
+
+def _parse_optional_date(raw):
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    return datetime.strptime(raw, "%Y-%m-%d").date()
+
+
+def _parse_optional_text(raw):
+    raw = (raw or "").strip()
+    return raw or None
 
 
 def _inventory_page(form=None, open_modal=False):
@@ -64,40 +77,66 @@ def create_product():
         return redirect(url_for("inventory.index"))
     form = ProductForm()
     if form.validate_on_submit():
+        vendor = db.session.get(Vendor, form.vendor_id.data)
+        if not vendor or vendor.is_deleted:
+            flash("Vendor is required.", "danger")
+            return _inventory_page(form=form, open_modal=True)
+        qty = Decimal(str(form.opening_stock.data or 0))
+        if qty <= 0:
+            flash("Opening stock / purchase quantity is required.", "danger")
+            return _inventory_page(form=form, open_modal=True)
         sub_id = form.subcategory_id.data or None
         if not sub_id:
             sub_id = None
-        product = Product(
-            name=form.name.data,
-            sku=form.sku.data,
-            barcode=form.barcode.data,
-            brand=form.brand.data,
-            category_id=form.category_id.data,
-            subcategory_id=sub_id,
-            purchase_price=form.purchase_price.data or 0,
-            sale_price=form.sale_price.data or 0,
-            wholesale_price=form.wholesale_price.data or 0,
-            retail_price=form.retail_price.data or 0,
-            tax_rate=form.tax_rate.data or 0,
-            opening_stock=form.opening_stock.data or 0,
-            current_stock=form.opening_stock.data or 0,
-            minimum_stock=form.minimum_stock.data or 0,
-            description=form.description.data,
-        )
-        db.session.add(product)
-        db.session.flush()
-        if product.opening_stock and product.opening_stock > 0:
-            add_stock_layer(
-                product.id,
-                product.opening_stock,
-                product.purchase_price,
-                "opening",
-                sale_price=product.sale_price,
+        try:
+            product = Product(
+                name=form.name.data,
+                sku=form.sku.data,
+                barcode=form.barcode.data,
+                brand=form.brand.data,
+                category_id=form.category_id.data,
+                subcategory_id=sub_id,
+                purchase_price=form.purchase_price.data or 0,
+                sale_price=form.sale_price.data or 0,
+                wholesale_price=form.wholesale_price.data or 0,
+                retail_price=form.retail_price.data or 0,
+                tax_rate=form.tax_rate.data or 0,
+                opening_stock=qty,
+                current_stock=Decimal("0"),  # fifo_receive will add stock
+                minimum_stock=form.minimum_stock.data or 0,
+                description=form.description.data,
             )
-        log_audit("create", "product", product.id, product.name)
-        db.session.commit()
-        flash("Product created.", "success")
-        return redirect(url_for("inventory.detail", product_id=product.id))
+            db.session.add(product)
+            db.session.flush()
+            purchase = record_purchase(
+                vendor_id=vendor.id,
+                items=[
+                    {
+                        "product": product,
+                        "quantity": qty,
+                        "unit_price": product.purchase_price,
+                        "sale_price": product.sale_price,
+                        "batch_number": form.batch_number.data,
+                        "expiry_date": form.expiry_date.data,
+                    }
+                ],
+                user_id=current_user.id,
+                invoice_no=form.invoice_no.data,
+                purchase_date=date.today(),
+                notes=f"Inventory add: {product.name}",
+            )
+            log_audit("create", "product", product.id, product.name)
+            log_audit("create", "purchase", purchase.id, purchase.invoice_no)
+            db.session.commit()
+            flash(
+                f"Product created and purchase {purchase.invoice_no} recorded for {vendor.name}.",
+                "success",
+            )
+            return redirect(url_for("inventory.detail", product_id=product.id))
+        except Exception as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return _inventory_page(form=form, open_modal=True)
     return _inventory_page(form=form, open_modal=True)
 
 
@@ -141,6 +180,8 @@ def edit_product(product_id):
 @login_required
 @permission_required("inventory.view")
 def detail(product_id):
+    from datetime import date
+
     product = db.session.get(Product, product_id)
     if not product or product.is_deleted:
         flash("Product not found.", "danger")
@@ -167,6 +208,7 @@ def detail(product_id):
         movements=movements,
         open_batch_count=open_batch_count,
         form=form,
+        today=date.today(),
         categories=Category.query.filter_by(is_deleted=False, parent_id=None).order_by(Category.name).all(),
     )
 
@@ -182,6 +224,8 @@ def adjust_layer(layer_id):
     try:
         new_qty = Decimal(request.form.get("quantity") or 0)
         notes = request.form.get("notes")
+        layer.batch_number = _parse_optional_text(request.form.get("batch_number"))
+        layer.expiry_date = _parse_optional_date(request.form.get("expiry_date"))
         adjust_batch(layer, new_qty, current_user.id, notes=notes)
         log_audit(
             "adjust",
@@ -191,12 +235,56 @@ def adjust_layer(layer_id):
                 {
                     "product_id": layer.product_id,
                     "new_qty": float(new_qty),
+                    "batch_number": layer.batch_number,
+                    "expiry_date": layer.expiry_date.isoformat() if layer.expiry_date else None,
                     "notes": notes,
                 }
             ),
         )
         db.session.commit()
         flash("Batch quantity updated (remaining stock only).", "success")
+    except Exception as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    return redirect(url_for("inventory.detail", product_id=layer.product_id))
+
+
+@inventory_bp.route("/batches/<int:layer_id>/details", methods=["POST"])
+@login_required
+@permission_required("inventory.*")
+def update_layer_details(layer_id):
+    """Update optional batch number / expiry / vendor / invoice without changing quantity."""
+    layer = db.session.get(StockLayer, layer_id)
+    if not layer:
+        flash("Batch not found.", "danger")
+        return redirect(url_for("inventory.index"))
+    try:
+        vendor_raw = (request.form.get("vendor_id") or "").strip()
+        if not vendor_raw:
+            raise ValueError("Vendor is required.")
+        vendor = db.session.get(Vendor, int(vendor_raw))
+        if not vendor or vendor.is_deleted:
+            raise ValueError("Vendor is required.")
+        layer.vendor_id = vendor.id
+        layer.invoice_no = _parse_optional_text(request.form.get("invoice_no"))
+        layer.batch_number = _parse_optional_text(request.form.get("batch_number"))
+        layer.expiry_date = _parse_optional_date(request.form.get("expiry_date"))
+        log_audit(
+            "update",
+            "stock_layer",
+            layer.id,
+            json.dumps(
+                {
+                    "product_id": layer.product_id,
+                    "vendor_id": layer.vendor_id,
+                    "invoice_no": layer.invoice_no,
+                    "batch_number": layer.batch_number,
+                    "expiry_date": layer.expiry_date.isoformat() if layer.expiry_date else None,
+                }
+            ),
+        )
+        db.session.commit()
+        flash("Batch details updated.", "success")
     except Exception as exc:
         db.session.rollback()
         flash(str(exc), "danger")

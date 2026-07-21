@@ -16,8 +16,24 @@ from app.services.customer_payment_service import (
 )
 from app.services.ledger_service import delete_ledger_entry, post_ledger_entry, update_ledger_entry
 from app.utils.decorators import permission_required
+from app.utils.uploads import delete_image, save_image
 
 customers_bp = Blueprint("customers", __name__)
+
+
+def _apply_customer_photo(customer):
+    """Handle optional photo upload / clear from multipart form."""
+    if request.form.get("clear_photo") == "1":
+        delete_image(customer.photo)
+        customer.photo = None
+        return
+    try:
+        path = save_image(request.files.get("photo"), "customers")
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+    if path:
+        delete_image(customer.photo)
+        customer.photo = path
 
 
 def _customer_page(form=None, open_modal=False):
@@ -71,41 +87,48 @@ def create():
 
     form = CustomerForm()
     if form.validate_on_submit():
-        opening = form.opening_balance.data or 0
+        opening_raw = form.opening_balance.data
+        opening = Decimal("0") if opening_raw in (None, "") else Decimal(str(opening_raw))
         joined = form.joined_date.data or date_cls.today()
-        customer = Customer(
-            name=form.name.data,
-            phone=form.phone.data,
-            cnic=form.cnic.data,
-            customer_type=form.customer_type.data or "good",
-            address=form.address.data,
-            old_book_no=form.old_book_no.data or None,
-            joined_date=joined,
-            opening_balance=opening,
-            credit_limit=form.credit_limit.data or 0,
-            balance=opening,
-            notes=form.notes.data,
-        )
-        db.session.add(customer)
-        db.session.flush()
-        if opening:
-            opening_d = Decimal(str(opening))
-            debit = opening_d if opening_d > 0 else Decimal("0")
-            credit = abs(opening_d) if opening_d < 0 else Decimal("0")
-            post_ledger_entry(
-                "customer",
-                customer.id,
-                "opening",
-                debit=debit,
-                credit=credit,
-                entry_date=joined,
-                notes="Old book balance"
-                + (f" ({customer.old_book_no})" if customer.old_book_no else ""),
+        try:
+            customer = Customer(
+                name=form.name.data,
+                phone=form.phone.data,
+                cnic=form.cnic.data,
+                customer_type=form.customer_type.data or "good",
+                address=form.address.data,
+                old_book_no=form.old_book_no.data or None,
+                joined_date=joined,
+                opening_balance=opening,
+                credit_limit=form.credit_limit.data or 0,
+                balance=opening,
+                notes=form.notes.data,
             )
-        log_audit("create", "customer", None, customer.name)
-        db.session.commit()
-        flash("Customer created.", "success")
-        return redirect(url_for("customers.index"))
+            _apply_customer_photo(customer)
+            db.session.add(customer)
+            db.session.flush()
+            if opening:
+                opening_d = Decimal(str(opening))
+                debit = opening_d if opening_d > 0 else Decimal("0")
+                credit = abs(opening_d) if opening_d < 0 else Decimal("0")
+                post_ledger_entry(
+                    "customer",
+                    customer.id,
+                    "opening",
+                    debit=debit,
+                    credit=credit,
+                    entry_date=joined,
+                    notes="Old book balance"
+                    + (f" ({customer.old_book_no})" if customer.old_book_no else ""),
+                )
+            log_audit("create", "customer", None, customer.name)
+            db.session.commit()
+            flash("Customer created.", "success")
+            return redirect(url_for("customers.index"))
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return _customer_page(form=form, open_modal=True)
     return _customer_page(form=form, open_modal=True)
 
 
@@ -188,20 +211,26 @@ def edit(customer_id):
     if not name:
         flash("Name is required.", "danger")
         return redirect(url_for("customers.index"))
-    customer.name = name
-    customer.phone = (request.form.get("phone") or "").strip() or None
-    customer.address = (request.form.get("address") or "").strip() or None
-    customer.old_book_no = (request.form.get("old_book_no") or "").strip() or None
-    customer.customer_type = request.form.get("customer_type") or "good"
-    joined = request.form.get("joined_date")
-    if joined:
-        customer.joined_date = date_cls.fromisoformat(joined)
-    opening = request.form.get("opening_balance")
-    if opening not in (None, ""):
-        customer.opening_balance = Decimal(str(opening))
-    log_audit("update", "customer", customer.id, customer.name)
-    db.session.commit()
-    flash("Customer updated.", "success")
+    try:
+        customer.name = name
+        customer.phone = (request.form.get("phone") or "").strip() or None
+        customer.address = (request.form.get("address") or "").strip() or None
+        customer.old_book_no = (request.form.get("old_book_no") or "").strip() or None
+        customer.customer_type = request.form.get("customer_type") or "good"
+        joined = request.form.get("joined_date")
+        if joined:
+            customer.joined_date = date_cls.fromisoformat(joined)
+        opening = request.form.get("opening_balance")
+        customer.opening_balance = (
+            Decimal("0") if opening in (None, "") else Decimal(str(opening))
+        )
+        _apply_customer_photo(customer)
+        log_audit("update", "customer", customer.id, customer.name)
+        db.session.commit()
+        flash("Customer updated.", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
     if request.form.get("return_detail"):
         return redirect(url_for("customers.detail", customer_id=customer.id))
     return redirect(url_for("customers.index"))

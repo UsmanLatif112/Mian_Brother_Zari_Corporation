@@ -13,6 +13,21 @@
   document.getElementById('sidebar-toggle')?.addEventListener('click', () => {
     document.getElementById('erp-sidebar')?.classList.toggle('show');
   });
+
+  const searchScope = document.body.dataset.searchScope || 'global';
+  const searchMode = document.body.dataset.searchMode || 'api';
+  const searchTableSel = document.body.dataset.searchTable || '';
+  const pageTableSearch = searchMode === 'table' && searchTableSel;
+
+  const dtDomWithFilter =
+    '<"dt-toolbar"<"dt-left"l><"dt-right"f>>' +
+    't' +
+    '<"dt-footer"<"dt-left"i><"dt-right"p>>';
+  const dtDomNoFilter =
+    '<"dt-toolbar"<"dt-left"l>>' +
+    't' +
+    '<"dt-footer"<"dt-left"i><"dt-right"p>>';
+
   if (window.jQuery && $('.datatable').length) {
     $('.datatable').DataTable({
       pageLength: 25,
@@ -35,10 +50,7 @@
         zeroRecords: 'No matching records',
         emptyTable: 'No data available',
       },
-      dom:
-        '<"dt-toolbar"<"dt-left"l><"dt-right"f>>' +
-        't' +
-        '<"dt-footer"<"dt-left"i><"dt-right"p>>',
+      dom: pageTableSearch ? dtDomNoFilter : dtDomWithFilter,
     });
   }
 
@@ -66,7 +78,6 @@
       bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }
   }
-  // Drop stale ?open_modal= so refresh does not reopen modals
   if (window.location.search.includes('open_modal=')) {
     const url = new URL(window.location.href);
     url.searchParams.delete('open_modal');
@@ -76,19 +87,51 @@
   const searchInput = document.getElementById('global-search-input');
   const results = document.getElementById('global-search-results');
   let timer;
+
+  function getPageDataTable() {
+    if (!pageTableSearch || !window.jQuery) return null;
+    const el = document.querySelector(searchTableSel);
+    if (!el) return null;
+    const $t = $(el);
+    if (!$.fn.dataTable.isDataTable($t)) return null;
+    return $t.DataTable();
+  }
+
   searchInput?.addEventListener('input', () => {
     clearTimeout(timer);
     const q = searchInput.value.trim();
-    if (q.length < 2) { results.classList.add('d-none'); return; }
+    const dt = getPageDataTable();
+    if (dt) {
+      results?.classList.add('d-none');
+      dt.search(q).draw();
+      return;
+    }
+    if (q.length < 2) {
+      results?.classList.add('d-none');
+      return;
+    }
     timer = setTimeout(async () => {
-      const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+      const scopeParam = searchScope && searchScope !== 'global' ? `&scope=${encodeURIComponent(searchScope)}` : '';
+      const res = await fetch('/api/search?q=' + encodeURIComponent(q) + scopeParam);
       const data = await res.json();
-      results.innerHTML = data.results.map(r => `<a class="d-block p-2 text-decoration-none" href="${r.url}">${r.label} <small class="text-muted">(${r.type})</small></a>`).join('') || '<div class="p-2 text-muted">No results</div>';
+      if (!results) return;
+      results.innerHTML =
+        data.results
+          .map(
+            (r) =>
+              `<a class="d-block p-2 text-decoration-none" href="${r.url}">${r.label} <small class="text-muted">(${r.type})</small></a>`
+          )
+          .join('') || '<div class="p-2 text-muted">No results</div>';
       results.classList.remove('d-none');
     }, 250);
   });
 
-  // Modern delete / confirm modal
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.global-search')) {
+      results?.classList.add('d-none');
+    }
+  });
+
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.btn-delete-confirm');
     if (!btn) return;

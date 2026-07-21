@@ -53,8 +53,15 @@ class SaleItem(db.Model):
     tax_rate = db.Column(db.Numeric(5, 2), default=Decimal("0"))
     line_total = db.Column(db.Numeric(14, 2), nullable=False)
     cost_of_goods = db.Column(db.Numeric(14, 2), default=Decimal("0"))
+    photo = db.Column(db.String(255), nullable=True)
 
     product = db.relationship("Product")
+
+    @property
+    def photo_url(self):
+        if not self.photo:
+            return None
+        return f"/static/uploads/{self.photo}"
 
 
 class CustomerReceiving(db.Model):

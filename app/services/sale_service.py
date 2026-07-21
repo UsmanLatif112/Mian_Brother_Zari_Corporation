@@ -56,6 +56,7 @@ def create_sale(data, items, user_id):
             tax_rate=Decimal(str(line.get("tax_rate", 0))),
             line_total=line_total,
             cost_of_goods=cogs,
+            photo=(str(line.get("photo")).strip() or None) if line.get("photo") else None,
         )
         db.session.add(item)
         subtotal += line_total

@@ -86,10 +86,15 @@ class StockLayer(db.Model):
     sale_price = db.Column(db.Numeric(14, 2), nullable=True)  # sell price for this batch
     source_type = db.Column(db.String(30), nullable=False)
     source_id = db.Column(db.Integer, nullable=True)
+    batch_number = db.Column(db.String(80), nullable=True, index=True)
+    expiry_date = db.Column(db.Date, nullable=True, index=True)
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=True, index=True)
+    invoice_no = db.Column(db.String(80), nullable=True, index=True)
     received_at = db.Column(db.DateTime, nullable=False, index=True)
     notes = db.Column(db.Text, nullable=True)
 
     product = db.relationship("Product", backref="stock_layers")
+    vendor = db.relationship("Vendor")
 
 
 class StockMovement(db.Model):

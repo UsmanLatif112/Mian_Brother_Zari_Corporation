@@ -84,6 +84,14 @@ def ensure_customer_type_column():
             alters.append("ALTER TABLE stock_layers ADD COLUMN sale_price NUMERIC(14, 2)")
         if "notes" not in layer_cols:
             alters.append("ALTER TABLE stock_layers ADD COLUMN notes TEXT")
+        if "batch_number" not in layer_cols:
+            alters.append("ALTER TABLE stock_layers ADD COLUMN batch_number VARCHAR(80)")
+        if "expiry_date" not in layer_cols:
+            alters.append("ALTER TABLE stock_layers ADD COLUMN expiry_date DATE")
+        if "vendor_id" not in layer_cols:
+            alters.append("ALTER TABLE stock_layers ADD COLUMN vendor_id INTEGER")
+        if "invoice_no" not in layer_cols:
+            alters.append("ALTER TABLE stock_layers ADD COLUMN invoice_no VARCHAR(80)")
         if alters:
             with db.engine.begin() as conn:
                 for stmt in alters:
@@ -99,6 +107,21 @@ def ensure_customer_type_column():
                 )
     except Exception:
         pass
+
+    # Optional photos on customers / vendors / sale_items
+    for table, col, coltype in (
+        ("customers", "photo", "VARCHAR(255)"),
+        ("vendors", "photo", "VARCHAR(255)"),
+        ("sale_items", "photo", "VARCHAR(255)"),
+    ):
+        try:
+            insp = inspect(db.engine)
+            cols = {c["name"] for c in insp.get_columns(table)}
+            if col not in cols:
+                with db.engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
+        except Exception:
+            pass
 
 
 def _range_for_filter(period: str, start_date=None, end_date=None):

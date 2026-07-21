@@ -81,6 +81,18 @@ def create_app(config_class=None):
         seed_database()
         print("Database initialized.")
 
+    @app.cli.command("reset-db")
+    def reset_db():
+        """Drop all tables, recreate schema, and seed defaults (fresh data for testing)."""
+        from app.services.dashboard_service import ensure_customer_type_column
+        from app.utils.seed import seed_database
+
+        db.drop_all()
+        db.create_all()
+        ensure_customer_type_column()
+        seed_database()
+        print("Database reset: all tables truncated and defaults seeded (admin / admin123).")
+
     return app
 
 
@@ -129,12 +141,21 @@ def register_context_processors(app):
 
     @app.context_processor
     def inject_globals():
+        from flask import request
+
         from app.services.sync_service import get_sync_target_label, is_local_sqlite
+        from app.utils.search_context import resolve_search_context
+
+        search_ctx = resolve_search_context(request.path)
 
         return {
             "business": get_business_info(),
-            "app_name": "MBZC ERP",
-            "brand_short": "MBZC",
+            "app_name": "MBF ERP",
+            "brand_short": "MBF",
             "offline_sqlite": is_local_sqlite(),
             "sync_target_label": get_sync_target_label(),
+            "search_scope": search_ctx.scope,
+            "search_table_selector": search_ctx.table_selector,
+            "search_placeholder": search_ctx.placeholder,
+            "search_mode": search_ctx.mode,
         }

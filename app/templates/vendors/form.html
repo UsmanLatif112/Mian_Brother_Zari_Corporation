@@ -6,7 +6,10 @@
 <form method="post">{{ form.hidden_tag() }}
   <div class="mb-3">{{ form.name.label(class='form-label') }}{{ form.name(class='form-control') }}</div>
   <div class="mb-3">{{ form.phone.label(class='form-label') }}{{ form.phone(class='form-control') }}</div>
-  <div class="mb-3">{{ form.opening_balance.label(class='form-label') }}{{ form.opening_balance(class='form-control') }}</div>
+  <div class="mb-3">
+    <label class="form-label">{{ form.opening_balance.label.text }} <span class="text-muted fw-normal">(optional)</span></label>
+    {{ form.opening_balance(class='form-control', placeholder='Leave blank if none') }}
+  </div>
   <div class="mb-3">{{ form.address.label(class='form-label') }}{{ form.address(class='form-control', rows=2) }}</div>
   {{ form.submit(class='btn btn-success') }}
 </form></div></div>

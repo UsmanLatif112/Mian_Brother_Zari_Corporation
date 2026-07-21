@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from app.extensions import db
 from app.forms import CustomerForm
-from app.models import Category, Customer, Product, Sale
+from app.models import Category, Customer, ExpenseCategory, Product, Sale, Vendor
 
 api_bp = Blueprint("api", __name__)
 
@@ -13,17 +13,16 @@ api_bp = Blueprint("api", __name__)
 @api_bp.route("/search")
 @login_required
 def global_search():
+    from app.services.page_search_service import search_scoped
+    from app.utils.search_context import resolve_search_context
+
     q = (request.args.get("q") or "").strip()
+    scope = (request.args.get("scope") or "").strip().lower()
+    if not scope:
+        scope = resolve_search_context(request.path).scope
     if len(q) < 2:
         return jsonify({"results": []})
-    results = []
-    for c in Customer.query.filter(Customer.name.ilike(f"%{q}%"), Customer.is_deleted.is_(False)).limit(5):
-        results.append({"type": "customer", "id": c.id, "label": c.name, "url": f"/customers/{c.id}"})
-    for p in Product.query.filter(Product.name.ilike(f"%{q}%"), Product.is_deleted.is_(False)).limit(5):
-        results.append({"type": "product", "id": p.id, "label": p.name, "url": "/inventory/"})
-    for s in Sale.query.filter(Sale.invoice_no.ilike(f"%{q}%")).limit(5):
-        results.append({"type": "sale", "id": s.id, "label": s.invoice_no, "url": f"/sales/{s.id}/invoice"})
-    return jsonify({"results": results})
+    return jsonify({"results": search_scoped(scope, q)})
 
 
 @api_bp.route("/categories/lookup")
@@ -114,6 +113,92 @@ def customers_lookup():
             ]
         }
     )
+
+
+@api_bp.route("/vendors/lookup")
+@login_required
+def vendors_lookup():
+    q = (request.args.get("q") or "").strip()
+    query = Vendor.query.filter(Vendor.is_deleted.is_(False))
+    if q:
+        like = f"%{q}%"
+        query = query.filter(or_(Vendor.name.ilike(like), Vendor.phone.ilike(like)))
+    rows = query.order_by(Vendor.name).limit(20).all()
+    return jsonify(
+        {
+            "results": [
+                {
+                    "id": v.id,
+                    "name": v.name,
+                    "phone": v.phone or "",
+                    "label": f"{v.name}" + (f" ({v.phone})" if v.phone else ""),
+                }
+                for v in rows
+            ]
+        }
+    )
+
+
+@api_bp.route("/expense-categories/quick", methods=["POST"])
+@login_required
+def quick_expense_category():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "Category name is required."}), 400
+
+    existing = ExpenseCategory.query.filter(ExpenseCategory.name.ilike(name)).first()
+    if existing:
+        if existing.is_deleted:
+            existing.is_deleted = False
+            existing.deleted_at = None
+            db.session.commit()
+        return jsonify({"ok": True, "id": existing.id, "name": existing.name})
+
+    cat = ExpenseCategory(name=name)
+    db.session.add(cat)
+    db.session.commit()
+    return jsonify({"ok": True, "id": cat.id, "name": cat.name})
+
+
+@api_bp.route("/vendors/quick", methods=["POST"])
+@login_required
+def quick_vendor():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "Vendor name is required."}), 400
+
+    opening = Decimal(str(data.get("opening_balance") or 0))
+    vendor = Vendor(
+        name=name,
+        phone=(data.get("phone") or "").strip() or None,
+        address=(data.get("address") or "").strip() or None,
+        opening_balance=opening,
+        balance=opening,
+        notes=(data.get("notes") or "").strip() or None,
+    )
+    db.session.add(vendor)
+    db.session.commit()
+    return jsonify({"ok": True, "id": vendor.id, "name": vendor.name, "phone": vendor.phone or ""})
+
+
+@api_bp.route("/uploads/photo", methods=["POST"])
+@login_required
+def upload_photo():
+    from app.utils.uploads import image_url, save_image
+
+    folder = (request.form.get("folder") or "misc").strip().lower()
+    allowed = {"customers", "vendors", "sales", "misc"}
+    if folder not in allowed:
+        return jsonify({"ok": False, "error": "Invalid upload folder."}), 400
+    try:
+        path = save_image(request.files.get("photo"), folder)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    if not path:
+        return jsonify({"ok": False, "error": "No image selected."}), 400
+    return jsonify({"ok": True, "path": path, "url": image_url(path)})
 
 
 @api_bp.route("/products/lookup")
@@ -223,6 +308,17 @@ def quick_product():
     except (TypeError, ValueError):
         sub_id = None
 
+    batch_number = (data.get("batch_number") or "").strip() or None
+    expiry_raw = (data.get("expiry_date") or "").strip()
+    expiry_date = None
+    if expiry_raw:
+        from datetime import datetime
+
+        try:
+            expiry_date = datetime.strptime(expiry_raw, "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"ok": False, "error": "Invalid expiry date. Use YYYY-MM-DD."}), 400
+
     sku = (data.get("sku") or "").strip() or f"SKU-{Product.query.count() + 1}"
     barcode = (data.get("barcode") or "").strip() or None
     product = Product(
@@ -248,6 +344,8 @@ def quick_product():
             purchase or sale_price,
             "opening",
             sale_price=sale_price,
+            batch_number=batch_number,
+            expiry_date=expiry_date,
         )
     db.session.commit()
     return jsonify(

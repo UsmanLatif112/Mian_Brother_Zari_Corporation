@@ -13,10 +13,26 @@
         <div class="col-md-4">{{ form.category_id.label(class='form-label') }}{{ form.category_id(class='form-select') }}</div>
         <div class="col-md-4">{{ form.subcategory_id.label(class='form-label') }}{{ form.subcategory_id(class='form-select') }}</div>
         <div class="col-md-4">{{ form.brand.label(class='form-label') }}{{ form.brand(class='form-control') }}</div>
+        <div class="col-md-6">
+          <label class="form-label">Vendor <span class="text-danger">*</span></label>
+          {{ form.vendor_id(class='form-control', placeholder='Vendor ID') }}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Invoice No. <span class="text-muted fw-normal">(optional)</span></label>
+          {{ form.invoice_no(class='form-control') }}
+        </div>
         <div class="col-md-3">{{ form.purchase_price.label(class='form-label') }}{{ form.purchase_price(class='form-control') }}</div>
         <div class="col-md-3">{{ form.sale_price.label(class='form-label') }}{{ form.sale_price(class='form-control') }}</div>
         <div class="col-md-3">{{ form.opening_stock.label(class='form-label') }}{{ form.opening_stock(class='form-control') }}</div>
         <div class="col-md-3">{{ form.minimum_stock.label(class='form-label') }}{{ form.minimum_stock(class='form-control') }}</div>
+        <div class="col-md-6">
+          <label class="form-label">Batch No. <span class="text-muted fw-normal">(optional)</span></label>
+          {{ form.batch_number(class='form-control', placeholder='For opening stock') }}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Expiry Date <span class="text-muted fw-normal">(optional)</span></label>
+          {{ form.expiry_date(class='form-control', type='date') }}
+        </div>
         <div class="col-12">{{ form.description.label(class='form-label') }}{{ form.description(class='form-control', rows=3) }}</div>
       </div>
       <div class="mt-4">{{ form.submit(class='btn btn-success') }}</div>

@@ -30,10 +30,17 @@ class Customer(SoftDeleteMixin, TimestampMixin, db.Model):
     notes = db.Column(db.Text, nullable=True)
     balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     remote_id = db.Column(db.Integer, nullable=True, index=True)
+    photo = db.Column(db.String(255), nullable=True)
 
     @property
     def customer_type_label(self):
         return dict(CUSTOMER_TYPE_CHOICES).get(self.customer_type, self.customer_type)
+
+    @property
+    def photo_url(self):
+        if not self.photo:
+            return None
+        return f"/static/uploads/{self.photo}"
 
 
 class Vendor(SoftDeleteMixin, TimestampMixin, db.Model):
@@ -47,6 +54,13 @@ class Vendor(SoftDeleteMixin, TimestampMixin, db.Model):
     notes = db.Column(db.Text, nullable=True)
     balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     remote_id = db.Column(db.Integer, nullable=True, index=True)
+    photo = db.Column(db.String(255), nullable=True)
+
+    @property
+    def photo_url(self):
+        if not self.photo:
+            return None
+        return f"/static/uploads/{self.photo}"
 
 
 class LedgerEntry(db.Model):
