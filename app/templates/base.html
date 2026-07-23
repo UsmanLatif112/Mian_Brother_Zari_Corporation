@@ -55,6 +55,7 @@
       company_address: {{ (business.company_address or '')|tojson }},
       company_phone: {{ (business.company_phone or '')|tojson }},
       company_email: {{ (business.company_email or '')|tojson }},
+      logo_url: {{ url_for('static', filename='img/logo.png')|tojson }},
     };
   </script>
   <script src="{{ url_for('static', filename='js/print-filtered.js') }}"></script>

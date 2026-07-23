@@ -3,6 +3,7 @@ from wtforms import (
     BooleanField,
     DateField,
     DecimalField,
+    HiddenField,
     IntegerField,
     PasswordField,
     SelectField,
@@ -40,6 +41,10 @@ class UserForm(FlaskForm):
 
 class ProductForm(FlaskForm):
     name = StringField("Product Name", validators=[DataRequired()])
+    existing_product_id = HiddenField(
+        "Existing Product",
+        filters=[lambda v: None if v in (None, "", 0, "0") else v],
+    )
     sku = StringField("SKU", validators=[DataRequired()])
     barcode = StringField("Barcode", validators=[Optional()])
     brand = StringField("Brand", validators=[Optional()])

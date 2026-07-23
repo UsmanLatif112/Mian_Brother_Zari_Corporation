@@ -75,6 +75,7 @@
         <tr>
           <th>Date</th>
           <th>Type</th>
+          <th>Status</th>
           <th>Notes</th>
           <th class="text-end">Debit</th>
           <th class="text-end">Credit</th>
@@ -86,7 +87,10 @@
         {% for l in ledger %}
         <tr>
           <td>{{ l.entry_date }}</td>
-          <td>{{ l.entry_type }}</td>
+          <td>{{ l.entry_type.replace('_', ' ')|title }}</td>
+          <td>
+            <span class="badge {{ l.status_badge_class }}">{{ l.status_label }}</span>
+          </td>
           <td class="small text-muted">{{ l.notes or '—' }}</td>
           <td class="text-end">{{ '%.2f'|format(l.debit|float) }}</td>
           <td class="text-end">{{ '%.2f'|format(l.credit|float) }}</td>
@@ -111,46 +115,6 @@
             </div>
           </td>
         </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card dash-panel border-0 shadow-sm">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center">
-      <strong>Payment Records</strong>
-      <span class="text-muted small">{{ receivings|length }} records</span>
-    </div>
-    <table class="table mb-0">
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Type</th>
-          <th class="text-end">Amount</th>
-          <th>Remarks</th>
-          <th class="col-actions">Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in receivings %}
-        <tr>
-          <td>{{ r.receiving_date }}</td>
-          <td><span class="badge bg-light text-dark border">{{ r.payment_type_label }}</span></td>
-          <td class="text-end">{{ '%.2f'|format(r.amount|float) }}</td>
-          <td>{{ r.notes or '—' }}</td>
-          <td class="col-actions">
-            <div class="table-actions">
-            <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
-                    data-action="{{ url_for('customers.delete_payment', receiving_id=r.id) }}"
-                    data-title="Delete payment?"
-                    data-message="Cash and balance for this payment will be reversed.">
-              <i class="fa-solid fa-trash"></i>
-            </button>
-            </div>
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="5" class="text-muted small text-center py-3">No payments recorded yet</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -322,14 +286,21 @@ document.addEventListener('click', (e) => {
 });
 
 document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
-  // Printed cols (Action skipped): Date, Type, Notes, Debit, Credit, Balance
   window.PrintFiltered?.print({
     table: '#customer-ledger-table',
     title: 'Customer Ledger',
     partyLabel: 'Customer',
     partyName: {{ customer.name|tojson }},
-    partyMeta: {{ ([customer.phone, customer.address]|select|list|join(' · '))|tojson }},
-    sumColumns: [3, 4],
+    partyFields: [
+      { label: 'Phone', value: {{ (customer.phone or '—')|tojson }} },
+      { label: 'Address', value: {{ (customer.address or '—')|tojson }} },
+      { label: 'Old Book No', value: {{ (customer.old_book_no or '—')|tojson }} },
+      { label: 'Type', value: {{ customer.customer_type_label|tojson }} },
+      { label: 'Opening Balance', value: {{ '%.2f'|format((customer.opening_balance or 0)|float)|tojson }} },
+      { label: 'Current Balance', value: {{ '%.2f'|format(customer.balance|float)|tojson }} },
+      { label: 'Date Added', value: {{ (customer.joined_date or (customer.created_at.date() if customer.created_at else '—'))|string|tojson }} },
+    ],
+    sumColumns: [4, 5],
   });
 });
 </script>

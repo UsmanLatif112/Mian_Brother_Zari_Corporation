@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import traceback
+from pathlib import Path
 
 
 def _prepare_env() -> None:
@@ -22,6 +23,71 @@ def _prepare_env() -> None:
     os.environ.setdefault("SYNC_AUTO_ENABLED", "false")
     # Stable secret for local desktop sessions
     os.environ.setdefault("SECRET_KEY", "mian-brother-fertilizers-desktop-local-key")
+
+
+def _app_dirs() -> list[Path]:
+    """Folders that may contain DLLs blocked after a zip download."""
+    dirs: list[Path] = []
+    if getattr(sys, "frozen", False):
+        dirs.append(Path(sys.executable).resolve().parent)
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            dirs.append(Path(meipass))
+    return dirs
+
+
+def _clear_mark_of_the_web() -> None:
+    """
+    Clear Windows 'downloaded from internet' marks (Zone.Identifier).
+
+    After unzipping a shared zip, Windows often blocks pythonnet / .NET DLLs
+    until this mark is removed — causing:
+    Failed to resolve Python.Runtime.Loader.Initialize
+    """
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
+        return
+
+    cleared = 0
+    for root in _app_dirs():
+        if not root.exists():
+            continue
+        try:
+            for path in root.rglob("*"):
+                if not path.is_file():
+                    continue
+                ads = f"{path}:Zone.Identifier"
+                try:
+                    os.remove(ads)
+                    cleared += 1
+                except OSError:
+                    pass
+        except OSError:
+            pass
+
+    # Also try PowerShell Unblock-File (covers stubborn cases)
+    try:
+        import subprocess
+
+        for root in _app_dirs():
+            subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    f"Get-ChildItem -LiteralPath '{root}' -Recurse -File -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue",
+                ],
+                check=False,
+                capture_output=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                timeout=60,
+            )
+    except Exception:
+        pass
+
+    if cleared:
+        logging.getLogger(__name__).info("Cleared Windows download marks on %s files", cleared)
 
 
 def _free_port() -> int:
@@ -44,9 +110,28 @@ def _init_database(app) -> None:
         seed_database()
 
 
+def _run_in_browser(url: str, server_thread: threading.Thread) -> int:
+    import webbrowser
+
+    webbrowser.open(url)
+    _show_error(
+        "Opened in browser",
+        "The desktop window could not open (often after downloading a zip).\n\n"
+        "The app was opened in your browser instead.\n"
+        "Leave this message open while you use the app, or close it after you are done.\n\n"
+        f"Address: {url}",
+    )
+    while server_thread.is_alive():
+        time.sleep(1)
+    return 0
+
+
 def main() -> int:
     _prepare_env()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+    # Must run before importing webview / pythonnet
+    _clear_mark_of_the_web()
 
     try:
         import webview
@@ -86,20 +171,21 @@ def main() -> int:
         _show_error("Server did not start", "Local server failed to open a port.")
         return 1
 
-    webview.create_window(
-        APP_DISPLAY_NAME,
-        url,
-        width=1360,
-        height=860,
-        min_size=(1024, 700),
-        confirm_close=True,
-    )
-    # Windows window/taskbar icon comes from the .exe (PyInstaller); Edge WebView2 hosts UI
     try:
+        webview.create_window(
+            APP_DISPLAY_NAME,
+            url,
+            width=1360,
+            height=860,
+            min_size=(1024, 700),
+            confirm_close=True,
+        )
+        # On Windows, Edge WebView2 is the renderer; window shell still uses WinForms.
         webview.start(gui="edgechromium")
+        return 0
     except Exception:
-        webview.start()
-    return 0
+        logging.getLogger(__name__).exception("Native window failed; falling back to browser")
+        return _run_in_browser(url, thread)
 
 
 def _show_error(title: str, detail: str) -> None:

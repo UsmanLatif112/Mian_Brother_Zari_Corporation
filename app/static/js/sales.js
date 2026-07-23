@@ -5,6 +5,7 @@
   let activeRow = null;
   let customerTimer = null;
   let productTimer = null;
+  let editingSaleId = null;
 
   function headers() {
     return {
@@ -13,22 +14,27 @@
     };
   }
 
+  function setProductThumb(tr, url) {
+    const preview = tr.querySelector('.product-line-thumb .line-photo-preview');
+    const wrap = tr.querySelector('.product-line-thumb');
+    if (!preview || !wrap) return;
+    if (url) {
+      preview.style.backgroundImage = `url('${url}')`;
+      preview.classList.add('has-photo');
+      wrap.classList.add('has-photo');
+    } else {
+      preview.style.backgroundImage = '';
+      preview.classList.remove('has-photo');
+      wrap.classList.remove('has-photo');
+    }
+  }
+
   function rowTemplate() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="line-photo-td">
-        <div class="photo-picker photo-picker-line" data-icon="fa-camera" data-upload="ajax" data-folder="sales" data-aspect="1" title="Add item photo">
-          <input type="file" accept="image/*" class="d-none photo-file-input">
-          <input type="hidden" class="photo-path" value="">
-          <div class="line-photo-frame" role="button" tabindex="0" aria-label="Add photo">
-            <div class="photo-preview line-photo-preview" aria-hidden="true">
-              <i class="fa-solid fa-camera"></i>
-            </div>
-            <span class="line-photo-hint">Add</span>
-            <button type="button" class="line-photo-clear photo-clear" title="Remove photo" aria-label="Remove photo">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
-          </div>
+        <div class="product-line-thumb" title="Product photo from inventory">
+          <div class="line-photo-preview"><i class="fa-solid fa-box"></i></div>
         </div>
       </td>
       <td>
@@ -38,9 +44,7 @@
             <button type="button" class="btn erp-btn-quick-add btn-quick-product" title="Add product"><i class="fa-solid fa-plus"></i></button>
           </div>
           <input type="hidden" class="product-id" value="">
-          <input type="hidden" class="list-price" value="0">
           <div class="lookup-results d-none product-results"></div>
-          <div class="small text-muted list-price-hint d-none"></div>
         </div>
       </td>
       <td><input type="number" min="0.001" step="0.001" class="form-control form-control-sm qty" value="1"></td>
@@ -74,16 +78,16 @@
     return Math.max(0, subtotal() - discountAmount());
   }
 
-  function setListPriceHint(tr, listPrice) {
-    const hint = tr.querySelector('.list-price-hint');
-    const listEl = tr.querySelector('.list-price');
-    if (listEl) listEl.value = money(listPrice);
+  function updateCustomerRequirement() {
+    const status = document.getElementById('payment-status')?.value || 'paid';
+    const hint = document.getElementById('customer-optional-hint');
     if (!hint) return;
-    if (listPrice > 0) {
-      hint.textContent = 'List: ' + money(listPrice);
-      hint.classList.remove('d-none');
+    if (status === 'paid') {
+      hint.textContent = '(optional)';
+      hint.className = 'text-muted fw-normal';
     } else {
-      hint.classList.add('d-none');
+      hint.textContent = '*';
+      hint.className = 'text-danger';
     }
   }
 
@@ -94,6 +98,7 @@
     const remainWrap = document.getElementById('remain-wrap');
     const advanceWrap = document.getElementById('advance-wrap');
     const paidWrap = document.getElementById('amount-paid-wrap');
+    updateCustomerRequirement();
 
     if (status === 'unpaid') {
       paidEl.value = '0.00';
@@ -109,8 +114,9 @@
     paidEl.readOnly = false;
 
     if (status === 'paid') {
-      const current = Number(paidEl.value || 0);
-      if (current <= grand) paidEl.value = money(grand);
+      // Paid: settle bill at minimum; keep higher amount as overpay/advance
+      const cur = Number(paidEl.value || 0);
+      if (cur < grand - 0.001) paidEl.value = money(grand);
     }
 
     const paid = Number(paidEl.value || 0);
@@ -160,14 +166,13 @@
     const tr = rowTemplate();
     tbody.appendChild(tr);
     if (prefill) {
-      tr.querySelector('.product-id').value = prefill.id;
-      tr.querySelector('.product-search').value = prefill.name;
-      tr.querySelector('.price').value = money(prefill.sale_price);
-      setListPriceHint(tr, prefill.sale_price);
+      tr.querySelector('.product-id').value = prefill.id || prefill.product_id || '';
+      tr.querySelector('.product-search').value = prefill.name || '';
+      tr.querySelector('.price').value = money(prefill.sale_price ?? prefill.unit_price ?? 0);
+      if (prefill.quantity != null) tr.querySelector('.qty').value = prefill.quantity;
+      setProductThumb(tr, prefill.photo_url || null);
     }
     bindRow(tr);
-    const picker = tr.querySelector('.photo-picker');
-    if (picker && window.PhotoPicker) window.PhotoPicker.bind(picker);
     recalc();
     return tr;
   }
@@ -183,6 +188,7 @@
       activeRow = tr;
       const q = tr.querySelector('.product-search')?.value?.trim();
       if (q) document.getElementById('qp-name').value = q;
+      window.PhotoPicker?.clear?.(document.getElementById('qp-photo-picker'));
       bootstrap.Modal.getOrCreateInstance(document.getElementById('quickProductModal')).show();
     });
 
@@ -192,25 +198,33 @@
       clearTimeout(productTimer);
       const q = search.value.trim();
       tr.querySelector('.product-id').value = '';
+      setProductThumb(tr, null);
       if (q.length < 1) {
         results.classList.add('d-none');
         return;
       }
       productTimer = setTimeout(async () => {
-        const res = await fetch('/api/products/lookup?q=' + encodeURIComponent(q));
-        const data = await res.json();
-        if (!data.results.length) {
-          results.innerHTML = `<button type="button" class="lookup-item lookup-create" data-name="${q}">+ Add "${q}"</button>`;
-        } else {
-          results.innerHTML = data.results
-            .map(
-              (p) =>
-                `<button type="button" class="lookup-item" data-id="${p.id}" data-name="${p.name}" data-price="${p.sale_price}">${p.label}</button>`
-            )
-            .join('') +
-            `<button type="button" class="lookup-item lookup-create" data-name="${q}">+ Add new product</button>`;
+        try {
+          const res = await fetch('/api/products/lookup?q=' + encodeURIComponent(q));
+          const data = await res.json();
+          const rows = data.results || [];
+          if (!rows.length) {
+            results.innerHTML = `<button type="button" class="lookup-item lookup-create" data-name="${q}">+ Add "${q}"</button>`;
+          } else {
+            results.innerHTML =
+              rows
+                .map(
+                  (p) =>
+                    `<button type="button" class="lookup-item" data-id="${p.id}" data-name="${p.name}" data-price="${p.sale_price}" data-photo="${p.photo_url || ''}">${p.label}</button>`
+                )
+                .join('') +
+              `<button type="button" class="lookup-item lookup-create" data-name="${q}">+ Add new product</button>`;
+          }
+          results.classList.remove('d-none');
+        } catch (_) {
+          results.innerHTML = `<div class="p-2 text-danger small">Search failed. Try again.</div>`;
+          results.classList.remove('d-none');
         }
-        results.classList.remove('d-none');
       }, 200);
     });
 
@@ -221,19 +235,110 @@
         activeRow = tr;
         document.getElementById('qp-name').value = btn.dataset.name || '';
         results.classList.add('d-none');
+        window.PhotoPicker?.clear?.(document.getElementById('qp-photo-picker'));
         bootstrap.Modal.getOrCreateInstance(document.getElementById('quickProductModal')).show();
         return;
       }
       tr.querySelector('.product-id').value = btn.dataset.id;
       tr.querySelector('.product-search').value = btn.dataset.name;
       tr.querySelector('.price').value = money(btn.dataset.price);
-      setListPriceHint(tr, btn.dataset.price);
+      setProductThumb(tr, btn.dataset.photo || null);
       results.classList.add('d-none');
       recalc();
     });
   }
 
+  function resetSaleModal() {
+    editingSaleId = null;
+    const title = document.getElementById('sale-modal-title');
+    if (title) title.textContent = 'Add Sale';
+    const saveBtn = document.getElementById('btn-save-sale');
+    if (saveBtn) saveBtn.textContent = 'Save Sale';
+    document.getElementById('sale-date').value =
+      document.getElementById('sale-date').dataset.today || new Date().toISOString().slice(0, 10);
+    document.getElementById('customer-id').value = '';
+    document.getElementById('customer-search').value = '';
+    document.getElementById('customer-selected').textContent = 'Walk-in';
+    document.getElementById('payment-status').value = 'paid';
+    document.getElementById('sale-discount').value = '0';
+    document.getElementById('amount-paid').value = '0';
+    document.getElementById('sale-notes').value = '';
+    const err = document.getElementById('sale-error');
+    if (err) {
+      err.classList.add('d-none');
+      err.textContent = '';
+    }
+    tbody.innerHTML = '';
+    addRow();
+    recalc();
+    updateCustomerRequirement();
+  }
+
+  async function openSaleForEdit(saleId) {
+    const err = document.getElementById('sale-error');
+    err?.classList.add('d-none');
+    try {
+      const res = await fetch('/sales/' + saleId);
+      const data = await res.json();
+      if (!data.ok || !data.sale) {
+        window.alert(data.error || 'Could not load sale.');
+        return;
+      }
+      const s = data.sale;
+      editingSaleId = s.id;
+      const title = document.getElementById('sale-modal-title');
+      if (title) title.textContent = 'Edit Sale ' + (s.invoice_no || '');
+      const saveBtn = document.getElementById('btn-save-sale');
+      if (saveBtn) saveBtn.textContent = 'Update Sale';
+
+      document.getElementById('sale-date').value = s.sale_date || '';
+      document.getElementById('customer-id').value = s.customer_id || '';
+      document.getElementById('customer-search').value = s.customer_id ? s.customer_name || '' : '';
+      document.getElementById('customer-selected').textContent = s.customer_name || 'Walk-in';
+      document.getElementById('payment-status').value = s.payment_status || 'paid';
+      document.getElementById('sale-discount').value = money(s.discount || 0);
+      document.getElementById('sale-notes').value = s.notes || '';
+
+      tbody.innerHTML = '';
+      (s.items || []).forEach((it) => addRow(it));
+      if (!tbody.rows.length) addRow();
+
+      document.getElementById('amount-paid').value = money(s.amount_paid || 0);
+      recalc();
+      if ((s.payment_status || '') !== 'paid') {
+        document.getElementById('amount-paid').value = money(s.amount_paid || 0);
+        updatePaymentUI();
+      }
+
+      bootstrap.Modal.getOrCreateInstance(document.getElementById('saleModal')).show();
+    } catch (_) {
+      window.alert('Network error loading sale.');
+    }
+  }
+
   document.getElementById('btn-add-row')?.addEventListener('click', () => addRow());
+
+  document.getElementById('btn-add-sale')?.addEventListener('click', () => {
+    resetSaleModal();
+  });
+
+  document.getElementById('saleModal')?.addEventListener('show.bs.modal', (e) => {
+    // Opening via Add Sale button already resets; skip when edit loaded the form
+    if (e.relatedTarget && e.relatedTarget.id === 'btn-add-sale') {
+      resetSaleModal();
+    }
+  });
+
+  document.getElementById('saleModal')?.addEventListener('hidden.bs.modal', () => {
+    editingSaleId = null;
+  });
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-edit-sale');
+    if (!btn) return;
+    e.preventDefault();
+    openSaleForEdit(btn.dataset.id);
+  });
 
   // Customer search
   const custSearch = document.getElementById('customer-search');
@@ -304,7 +409,6 @@
     const paidEl = document.getElementById('amount-paid');
     const grand = grandTotal();
     if (status === 'partial') {
-      // Suggest half if empty / full
       const cur = Number(paidEl.value || 0);
       if (cur <= 0 || cur >= grand) paidEl.value = money(grand / 2);
     }
@@ -388,6 +492,7 @@
       batch_number: document.getElementById('qp-batch')?.value.trim() || '',
       expiry_date: document.getElementById('qp-expiry')?.value || '',
       description: document.getElementById('qp-description')?.value.trim() || '',
+      photo: document.querySelector('#qp-photo-picker .photo-path')?.value || '',
     };
     const res = await fetch('/api/products/quick', {
       method: 'POST',
@@ -404,7 +509,7 @@
       activeRow.querySelector('.product-id').value = data.id;
       activeRow.querySelector('.product-search').value = data.name;
       activeRow.querySelector('.price').value = money(data.sale_price);
-      setListPriceHint(activeRow, data.sale_price);
+      setProductThumb(activeRow, data.photo_url || null);
       activeRow.querySelector('.product-results')?.classList.add('d-none');
       recalc();
     }
@@ -433,6 +538,7 @@
       parentIdGetter: () => document.getElementById('qp-category')?.value || '',
     });
   }
+
   document.getElementById('btn-save-sale')?.addEventListener('click', async () => {
     const err = document.getElementById('sale-error');
     err.classList.add('d-none');
@@ -444,7 +550,6 @@
         product_id: Number(pid),
         quantity: Number(tr.querySelector('.qty')?.value || 0),
         unit_price: Number(tr.querySelector('.price')?.value || 0),
-        photo: tr.querySelector('.photo-path')?.value || null,
       });
     });
     if (!items.length) {
@@ -452,10 +557,17 @@
       err.classList.remove('d-none');
       return;
     }
+    const paymentStatus = document.getElementById('payment-status').value;
+    const customerId = document.getElementById('customer-id').value || null;
+    if ((paymentStatus === 'unpaid' || paymentStatus === 'partial') && !customerId) {
+      err.textContent = 'Select a customer for credit or partial sales.';
+      err.classList.remove('d-none');
+      return;
+    }
     const payload = {
       sale_date: document.getElementById('sale-date').value,
-      customer_id: document.getElementById('customer-id').value || null,
-      payment_status: document.getElementById('payment-status').value,
+      customer_id: customerId,
+      payment_status: paymentStatus,
       amount_paid: document.getElementById('amount-paid').value,
       discount: document.getElementById('sale-discount')?.value || 0,
       notes: document.getElementById('sale-notes').value,
@@ -463,8 +575,9 @@
     };
     const btn = document.getElementById('btn-save-sale');
     btn.disabled = true;
+    const url = editingSaleId ? `/sales/${editingSaleId}/replace` : '/sales/create';
     try {
-      const res = await fetch('/sales/create', {
+      const res = await fetch(url, {
         method: 'POST',
         headers: headers(),
         body: JSON.stringify(payload),
@@ -485,7 +598,6 @@
     }
   });
 
-  // Nested modals: keep sale modal visible
   ['quickCustomerModal', 'quickProductModal'].forEach((id) => {
     const el = document.getElementById(id);
     el?.addEventListener('show.bs.modal', () => {
@@ -500,12 +612,12 @@
     });
   });
 
-  // Init
   if (tbody && !tbody.rows.length) addRow();
+  updateCustomerRequirement();
   if (window.OPEN_SALE_MODAL) {
+    resetSaleModal();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('saleModal')).show();
   }
-  // Drop stale ?open_modal= from URL so refresh does not reopen the modal
   if (window.location.search.includes('open_modal=')) {
     const url = new URL(window.location.href);
     url.searchParams.delete('open_modal');

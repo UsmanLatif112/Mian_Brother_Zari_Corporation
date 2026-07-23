@@ -78,6 +78,7 @@
           <th>Particulars</th>
           <th>Party</th>
           <th>Status</th>
+          <th class="text-end">Total Paid</th>
           <th class="text-end">In</th>
           <th class="text-end">Out</th>
           <th></th>
@@ -92,6 +93,11 @@
           <td>{{ r.particulars }}</td>
           <td>{{ r.party }}</td>
           <td>{{ r.status or '—' }}</td>
+          <td class="text-end">
+            {% if r.total_paid is defined and r.total_paid|float > 0 %}
+            {{ '%.2f'|format(r.total_paid|float) }}
+            {% else %}—{% endif %}
+          </td>
           <td class="text-end {% if r.amount_in|float > 0 %}text-success{% endif %}">
             {% if r.amount_in|float > 0 %}{{ '%.2f'|format(r.amount_in|float) }}{% else %}—{% endif %}
           </td>

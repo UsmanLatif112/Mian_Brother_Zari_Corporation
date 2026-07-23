@@ -9,6 +9,11 @@
   <style>
     body { font-family: "Plus Jakarta Sans", sans-serif; background: #f3f5f7; color: #1f2937; font-size: 0.9rem; }
     .invoice-wrap { max-width: 820px; margin: 1.25rem auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.5rem; }
+    .brand-row { display: flex; align-items: center; gap: 0.75rem; }
+    .brand-logo {
+      width: 56px; height: 56px; border-radius: 50%; object-fit: cover;
+      flex-shrink: 0; border: 1px solid #e5e7eb;
+    }
     .brand { font-weight: 750; font-size: 1.15rem; letter-spacing: -0.02em; }
     .meta { color: #6b7280; font-size: 0.8rem; }
     table { font-size: 0.84rem; }
@@ -28,10 +33,13 @@
   </div>
   <div class="invoice-wrap">
     <div class="d-flex justify-content-between align-items-start mb-3">
-      <div>
-        <div class="brand">{{ business.company_name or 'Mian Brother Fertilizer' }}</div>
-        <div class="meta">{{ business.company_address or '' }}</div>
-        <div class="meta">{{ business.company_phone or '' }} {% if business.company_email %}· {{ business.company_email }}{% endif %}</div>
+      <div class="brand-row">
+        <img class="brand-logo" src="{{ url_for('static', filename='img/logo.png') }}" alt="Mian Brother Fertilizers">
+        <div>
+          <div class="brand">{{ business.company_name or 'Mian Brother Fertilizers' }}</div>
+          <div class="meta">{{ business.company_address or '' }}</div>
+          <div class="meta">{{ business.company_phone or '' }} {% if business.company_email %}· {{ business.company_email }}{% endif %}</div>
+        </div>
       </div>
       <div class="text-end">
         <div class="fw-bold">INVOICE</div>
@@ -58,7 +66,6 @@
       <thead>
         <tr>
           <th>#</th>
-          <th></th>
           <th>Item</th>
           <th class="text-end">Qty</th>
           <th class="text-end">Price</th>
@@ -69,13 +76,6 @@
         {% for i in sale.items %}
         <tr>
           <td>{{ loop.index }}</td>
-          <td style="width:42px">
-            {% if i.photo_url %}
-            <div style="width:36px;height:36px;border-radius:8px;background:url('{{ i.photo_url }}') center/cover"></div>
-            {% else %}
-            <div style="width:36px;height:36px;border-radius:8px;background:linear-gradient(145deg,#e2e8f0,#f8fafc);display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px">☐</div>
-            {% endif %}
-          </td>
           <td>{{ i.product.name if i.product else 'Item' }}</td>
           <td class="text-end">{{ i.quantity }}</td>
           <td class="text-end">{{ '%.2f'|format(i.unit_price|float) }}</td>
@@ -85,32 +85,32 @@
       </tbody>
       <tfoot class="totals">
         <tr>
-          <td colspan="5" class="text-end">Subtotal</td>
+          <td colspan="4" class="text-end">Subtotal</td>
           <td class="text-end">{{ '%.2f'|format(sale.subtotal|float) }}</td>
         </tr>
         {% if sale.discount and sale.discount|float > 0 %}
         <tr>
-          <td colspan="5" class="text-end">Discount</td>
+          <td colspan="4" class="text-end">Discount</td>
           <td class="text-end">{{ '%.2f'|format(sale.discount|float) }}</td>
         </tr>
         {% endif %}
         {% if sale.tax_amount and sale.tax_amount|float > 0 %}
         <tr>
-          <td colspan="5" class="text-end">Tax</td>
+          <td colspan="4" class="text-end">Tax</td>
           <td class="text-end">{{ '%.2f'|format(sale.tax_amount|float) }}</td>
         </tr>
         {% endif %}
         <tr>
-          <td colspan="5" class="text-end">Grand Total</td>
+          <td colspan="4" class="text-end">Grand Total</td>
           <td class="text-end">{{ '%.2f'|format(sale.grand_total|float) }}</td>
         </tr>
         <tr>
-          <td colspan="5" class="text-end">Amount Paid</td>
+          <td colspan="4" class="text-end">Amount Paid</td>
           <td class="text-end">{{ '%.2f'|format(sale.amount_paid|float) }}</td>
         </tr>
         <tr>
-          <td colspan="5" class="text-end">Balance Due</td>
-          <td class="text-end">{{ '%.2f'|format((sale.grand_total - sale.amount_paid)|float) }}</td>
+          <td colspan="4" class="text-end">Balance Due</td>
+          <td class="text-end">{% set bal = (sale.grand_total|float - sale.amount_paid|float) %}{{ '%.2f'|format(bal if bal > 0 else 0) }}</td>
         </tr>
       </tfoot>
     </table>

@@ -61,6 +61,7 @@ class Product(SoftDeleteMixin, TimestampMixin, db.Model):
     retail_price = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     tax_rate = db.Column(db.Numeric(5, 2), default=Decimal("0"))
     description = db.Column(db.Text, nullable=True)
+    photo = db.Column(db.String(255), nullable=True)
     remote_id = db.Column(db.Integer, nullable=True, index=True)
 
     category = db.relationship("Category", foreign_keys=[category_id])
@@ -72,6 +73,12 @@ class Product(SoftDeleteMixin, TimestampMixin, db.Model):
     @property
     def is_low_stock(self):
         return self.current_stock <= self.minimum_stock
+
+    @property
+    def photo_url(self):
+        if not self.photo:
+            return None
+        return f"/static/uploads/{self.photo}"
 
 
 class StockLayer(db.Model):

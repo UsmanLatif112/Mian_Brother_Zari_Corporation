@@ -93,35 +93,6 @@
       </tbody>
     </table>
   </div>
-
-  <div class="card dash-panel border-0 shadow-sm">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center">
-      <strong>Payment Records</strong>
-      <span class="text-muted small">{{ payments|length }} records</span>
-    </div>
-    <table class="table mb-0">
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Type</th>
-          <th class="text-end">Amount</th>
-          <th>Remarks</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in payments %}
-        <tr>
-          <td>{{ p.payment_date }}</td>
-          <td><span class="badge bg-light text-dark border">{{ p.payment_type_label }}</span></td>
-          <td class="text-end">{{ '%.2f'|format(p.amount|float) }}</td>
-          <td>{{ p.notes or '—' }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="4" class="text-muted small text-center py-3">No payments recorded yet</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
 </div>
 
 <div class="modal fade erp-form-modal" id="paymentModal" tabindex="-1" aria-hidden="true">
@@ -238,7 +209,13 @@ document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
     title: 'Vendor Ledger',
     partyLabel: 'Vendor',
     partyName: {{ vendor.name|tojson }},
-    partyMeta: {{ ([vendor.phone, vendor.address]|select|list|join(' · '))|tojson }},
+    partyFields: [
+      { label: 'Phone', value: {{ (vendor.phone or '—')|tojson }} },
+      { label: 'Address', value: {{ (vendor.address or '—')|tojson }} },
+      { label: 'Opening Balance', value: {{ '%.2f'|format((vendor.opening_balance or 0)|float)|tojson }} },
+      { label: 'Current Balance', value: {{ '%.2f'|format(vendor.balance|float)|tojson }} },
+      { label: 'Notes', value: {{ (vendor.notes or '—')|tojson }} },
+    ],
     sumColumns: [3, 4],
   });
 });

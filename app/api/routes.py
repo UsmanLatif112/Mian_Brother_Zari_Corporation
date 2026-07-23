@@ -193,7 +193,7 @@ def upload_photo():
     from app.utils.uploads import image_url, save_image
 
     folder = (request.form.get("folder") or "misc").strip().lower()
-    allowed = {"customers", "vendors", "sales", "misc"}
+    allowed = {"customers", "vendors", "sales", "products", "misc"}
     if folder not in allowed:
         return jsonify({"ok": False, "error": "Invalid upload folder."}), 400
     try:
@@ -226,9 +226,20 @@ def products_lookup():
                 "id": p.id,
                 "name": p.name,
                 "sku": p.sku,
+                "barcode": p.barcode or "",
+                "brand": p.brand or "",
+                "category_id": p.category_id,
+                "category_name": p.category.name if p.category else "",
+                "subcategory_id": p.subcategory_id or "",
+                "subcategory_name": p.subcategory.name if p.subcategory else "",
                 "sale_price": fifo_price,
                 "list_price": float(p.sale_price or 0),
+                "purchase_price": float(p.purchase_price or 0),
+                "minimum_stock": float(p.minimum_stock or 0),
+                "description": p.description or "",
                 "stock": float(p.current_stock or 0),
+                "photo_url": p.photo_url,
+                "photo": p.photo or "",
                 "label": f"{p.name} ({p.sku}) — {fifo_price:.2f} · stock {float(p.current_stock or 0):.3g}",
             }
         )
@@ -326,8 +337,11 @@ def quick_product():
         except ValueError:
             return jsonify({"ok": False, "error": "Invalid expiry date. Use YYYY-MM-DD."}), 400
 
+    from app.utils.uploads import accept_uploaded_path
+
     sku = (data.get("sku") or "").strip() or f"SKU-{Product.query.count() + 1}"
     barcode = (data.get("barcode") or "").strip() or None
+    photo = accept_uploaded_path(data.get("photo"), "products")
     product = Product(
         name=name,
         sku=sku,
@@ -341,6 +355,7 @@ def quick_product():
         opening_stock=opening,
         minimum_stock=data.get("minimum_stock") or 0,
         description=(data.get("description") or "").strip() or None,
+        photo=photo,
     )
     db.session.add(product)
     db.session.flush()
@@ -363,5 +378,6 @@ def quick_product():
             "sku": product.sku,
             "sale_price": float(product.sale_price or 0),
             "stock": float(product.current_stock or 0),
+            "photo_url": product.photo_url,
         }
     )

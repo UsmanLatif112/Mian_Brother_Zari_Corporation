@@ -56,7 +56,6 @@ def create_sale(data, items, user_id):
             tax_rate=Decimal(str(line.get("tax_rate", 0))),
             line_total=line_total,
             cost_of_goods=cogs,
-            photo=(str(line.get("photo")).strip() or None) if line.get("photo") else None,
         )
         db.session.add(item)
         subtotal += line_total
@@ -75,7 +74,8 @@ def create_sale(data, items, user_id):
     due = grand - applied
     excess = cash_received - applied if cash_received > applied else Decimal("0")
 
-    sale.amount_paid = applied
+    # Store full cash received (Total Paid). Applied vs advance is handled in ledger.
+    sale.amount_paid = cash_received
     if due <= 0:
         sale.payment_status = PaymentStatus.PAID
         sale.payment_method = PaymentMethod.CASH if cash_received > 0 else PaymentMethod.CREDIT
@@ -97,24 +97,25 @@ def create_sale(data, items, user_id):
             entry_date=sale.sale_date,
         )
 
-    if sale.customer_id and (due > 0 or excess > 0):
+    if sale.customer_id:
         from app.models import Customer
 
         customer = db.session.get(Customer, sale.customer_id)
+        # Always record the sale on customer ledger (paid = debit + credit equal → no balance change)
+        post_ledger_entry(
+            "customer",
+            customer.id,
+            "sale",
+            debit=grand,
+            credit=applied,
+            entry_date=sale.sale_date,
+            reference_type="sale",
+            reference_id=sale.id,
+            notes=f"Sale {sale.invoice_no}",
+        )
         if due > 0:
             customer.balance = Decimal(str(customer.balance or 0)) + due
-            post_ledger_entry(
-                "customer",
-                customer.id,
-                "sale",
-                debit=grand,
-                credit=applied,
-                entry_date=sale.sale_date,
-                reference_type="sale",
-                reference_id=sale.id,
-                notes="Sale credit (unpaid/partial)",
-            )
-        elif excess > 0:
+        if excess > 0:
             customer.balance = Decimal(str(customer.balance or 0)) - excess
             post_ledger_entry(
                 "customer",
@@ -155,21 +156,22 @@ def update_sale(sale_id, sale_date=None, notes=None, amount_paid=None, user_id=N
         if new_paid < 0:
             raise ValueError("Paid amount cannot be negative.")
         grand = Decimal(str(sale.grand_total or 0))
-        old_applied = Decimal(str(sale.amount_paid or 0))
+        old_cash = Decimal(str(sale.amount_paid or 0))
 
         cash_rows = CashBookEntry.query.filter_by(reference_type="sale", reference_id=sale.id).all()
-        old_cash = sum(
-            (Decimal(str(r.amount)) for r in cash_rows if (r.entry_type or "").lower() == "in"),
-            Decimal("0"),
-        )
-        if not cash_rows:
-            old_cash = old_applied
+        if cash_rows:
+            old_cash = sum(
+                (Decimal(str(r.amount)) for r in cash_rows if (r.entry_type or "").lower() == "in"),
+                Decimal("0"),
+            )
+
+        old_applied = min(old_cash, grand)
+        old_due = grand - old_applied
+        old_excess = old_cash - old_applied if old_cash > old_applied else Decimal("0")
 
         new_applied = min(new_paid, grand)
         new_due = grand - new_applied
         new_excess = new_paid - new_applied if new_paid > new_applied else Decimal("0")
-        old_due = grand - old_applied
-        old_excess = old_cash - old_applied if old_cash > old_applied else Decimal("0")
 
         if sale.customer_id:
             customer = db.session.get(Customer, sale.customer_id)
@@ -180,20 +182,19 @@ def update_sale(sale_id, sale_date=None, notes=None, amount_paid=None, user_id=N
                 customer.balance = bal
 
         delete_ledger_by_reference("sale", sale.id, rebuild=False)
-        if sale.customer_id and (new_due > 0 or new_excess > 0):
-            if new_due > 0:
-                post_ledger_entry(
-                    "customer",
-                    sale.customer_id,
-                    "sale",
-                    debit=grand,
-                    credit=new_applied,
-                    entry_date=sale.sale_date,
-                    reference_type="sale",
-                    reference_id=sale.id,
-                    notes="Sale credit (unpaid/partial)",
-                )
-            elif new_excess > 0:
+        if sale.customer_id:
+            post_ledger_entry(
+                "customer",
+                sale.customer_id,
+                "sale",
+                debit=grand,
+                credit=new_applied,
+                entry_date=sale.sale_date,
+                reference_type="sale",
+                reference_id=sale.id,
+                notes=f"Sale {sale.invoice_no}",
+            )
+            if new_excess > 0:
                 post_ledger_entry(
                     "customer",
                     sale.customer_id,
@@ -205,7 +206,6 @@ def update_sale(sale_id, sale_date=None, notes=None, amount_paid=None, user_id=N
                     reference_id=sale.id,
                     notes=f"Overpayment advance from sale {sale.invoice_no}",
                 )
-        if sale.customer_id:
             rebuild_party_balances("customer", sale.customer_id)
 
         reverse_cash_by_reference(
@@ -222,7 +222,7 @@ def update_sale(sale_id, sale_date=None, notes=None, amount_paid=None, user_id=N
                 entry_date=sale.sale_date,
             )
 
-        sale.amount_paid = new_applied
+        sale.amount_paid = new_paid
         if new_due <= 0:
             sale.payment_status = PaymentStatus.PAID
             sale.payment_method = PaymentMethod.CASH if new_paid > 0 else PaymentMethod.CREDIT
@@ -284,3 +284,15 @@ def void_sale(sale_id, user_id=None):
     log_audit("delete", "sale", sale_id, invoice)
     enqueue_sync("sales", sale_id, "delete")
     return True
+
+
+def replace_sale(sale_id, data, items, user_id):
+    """Fully replace a sale (void + recreate) keeping the same invoice number."""
+    sale = db.session.get(Sale, sale_id)
+    if not sale:
+        raise ValueError("Sale not found.")
+    invoice_no = sale.invoice_no
+    void_sale(sale_id, user_id)
+    payload = dict(data or {})
+    payload["invoice_no"] = invoice_no
+    return create_sale(payload, items, user_id)

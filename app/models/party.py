@@ -82,3 +82,48 @@ class LedgerEntry(db.Model):
     __table_args__ = (
         db.Index("ix_ledger_party", "party_type", "party_id"),
     )
+
+    @property
+    def status_label(self):
+        """Human status for customer/vendor ledger rows."""
+        et = (self.entry_type or "").strip().lower()
+        debit = Decimal(str(self.debit or 0))
+        credit = Decimal(str(self.credit or 0))
+
+        if et in ("advance", "sale_advance"):
+            return "Advance"
+        if et == "loan":
+            return "Loan"
+        if et == "account_settle":
+            return "Settle"
+        if et == "opening":
+            return "Opening"
+        if et == "sale":
+            if debit <= 0 and credit <= 0:
+                return "Sale"
+            if credit <= 0:
+                return "Unpaid"
+            if credit + Decimal("0.001") >= debit:
+                return "Paid"
+            return "Partial"
+        if et == "purchase":
+            if credit <= 0 and debit > 0:
+                return "Unpaid"
+            if debit <= 0 and credit > 0:
+                return "Paid"
+            return "Purchase"
+        # Fallback: title-case entry type
+        return (self.entry_type or "—").replace("_", " ").title()
+
+    @property
+    def status_badge_class(self):
+        label = self.status_label
+        return {
+            "Paid": "bg-success-subtle text-success border border-success-subtle",
+            "Unpaid": "bg-danger-subtle text-danger border border-danger-subtle",
+            "Partial": "bg-warning-subtle text-warning border border-warning-subtle",
+            "Advance": "bg-info-subtle text-info border border-info-subtle",
+            "Loan": "bg-primary-subtle text-primary border border-primary-subtle",
+            "Settle": "bg-success-subtle text-success border border-success-subtle",
+            "Opening": "bg-secondary-subtle text-secondary border border-secondary-subtle",
+        }.get(label, "bg-light text-dark border")

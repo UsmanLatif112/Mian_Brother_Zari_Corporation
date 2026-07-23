@@ -29,7 +29,8 @@
      title="{{ label }} (optional)">
   <input type="file" {% if upload != 'ajax' %}name="{{ name }}"{% endif %} accept="image/*" class="d-none photo-file-input">
   {% if upload == 'ajax' %}
-  <input type="hidden" class="photo-path" value="">
+  <input type="hidden" name="photo_path" class="photo-path" value="">
+  <input type="hidden" name="{{ clear_name }}" value="" class="photo-clear-flag">
   {% else %}
   <input type="hidden" name="{{ clear_name }}" value="" class="photo-clear-flag">
   {% endif %}

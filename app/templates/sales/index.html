@@ -25,7 +25,7 @@
         <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm custom-date-field">
         <button type="submit" class="btn btn-sm btn-outline-secondary custom-date-field">Apply</button>
       </form>
-      <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#saleModal">
+      <button type="button" class="btn btn-sm btn-success" id="btn-add-sale" data-bs-toggle="modal" data-bs-target="#saleModal">
         <i class="fa-solid fa-plus me-1"></i> Add Sale
       </button>
     </div>
@@ -69,6 +69,7 @@
     <table class="table datatable mb-0 w-100" id="sales-table">
       <thead>
         <tr>
+          <th style="width:72px">Items</th>
           <th>ID</th>
           <th>Invoice</th>
           <th>Date</th>
@@ -82,7 +83,26 @@
       </thead>
       <tbody>
         {% for s in sales %}
+        {% set paid = s.amount_paid|float %}
+        {% set total = s.grand_total|float %}
+        {% set due = (total - paid) if total > paid else 0 %}
         <tr>
+          <td>
+            <div class="sale-item-thumbs">
+              {% for i in s.items[:4] %}
+                {% if i.product and i.product.photo_url %}
+                <span class="sale-thumb" style="background-image:url('{{ i.product.photo_url }}')" title="{{ i.product.name }}"></span>
+                {% else %}
+                <span class="sale-thumb sale-thumb-empty" title="{{ i.product.name if i.product else 'Item' }}"><i class="fa-solid fa-box"></i></span>
+                {% endif %}
+              {% else %}
+                <span class="text-muted small">—</span>
+              {% endfor %}
+              {% if s.items|length > 4 %}
+              <span class="sale-thumb-more">+{{ s.items|length - 4 }}</span>
+              {% endif %}
+            </div>
+          </td>
           <td>{{ s.id }}</td>
           <td>{{ s.invoice_no }}</td>
           <td>{{ s.sale_date }}</td>
@@ -96,21 +116,16 @@
             <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Unpaid</span>
             {% endif %}
           </td>
-          <td class="text-end">{{ '%.2f'|format(s.grand_total|float) }}</td>
-          <td class="text-end">{{ '%.2f'|format(s.amount_paid|float) }}</td>
-          <td class="text-end">{{ '%.2f'|format((s.grand_total - s.amount_paid)|float) }}</td>
+          <td class="text-end">{{ '%.2f'|format(total) }}</td>
+          <td class="text-end">{{ '%.2f'|format(paid) }}</td>
+          <td class="text-end {% if due > 0 %}text-danger{% endif %}">{{ '%.2f'|format(due) }}</td>
           <td class="col-actions">
             <div class="table-actions">
             <a href="{{ url_for('sales.invoice', sale_id=s.id) }}" class="action-icon-btn" title="Invoice / Print">
               <i class="fa-solid fa-up-right-from-square"></i>
             </a>
             <button type="button" class="action-icon-btn action-edit btn-edit-sale" title="Edit"
-                    data-id="{{ s.id }}"
-                    data-invoice="{{ s.invoice_no }}"
-                    data-date="{{ s.sale_date.isoformat() if s.sale_date else '' }}"
-                    data-paid="{{ '%.2f'|format(s.amount_paid|float) }}"
-                    data-total="{{ '%.2f'|format(s.grand_total|float) }}"
-                    data-notes="{{ s.notes or '' }}">
+                    data-id="{{ s.id }}">
               <i class="fa-solid fa-pen"></i>
             </button>
             <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
@@ -130,22 +145,22 @@
 
 {# ===== Add Sale Modal ===== #}
 <div class="modal fade erp-form-modal" id="saleModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Add Sale</h5>
+        <h5 class="modal-title" id="sale-modal-title">Add Sale</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <div class="row g-2 mb-2">
           <div class="col-md-3">
             <label class="form-label">Sale Date</label>
-            <input type="date" id="sale-date" class="form-control" value="{{ today }}">
+            <input type="date" id="sale-date" class="form-control" value="{{ today }}" data-today="{{ today }}">
           </div>
           <div class="col-md-6">
-            <label class="form-label">Customer</label>
+            <label class="form-label" id="customer-label">Customer <span class="text-muted fw-normal" id="customer-optional-hint">(optional)</span></label>
             <div class="input-group erp-input-group-quick">
-              <input type="text" id="customer-search" class="form-control" placeholder="Search customer..." autocomplete="off">
+              <input type="text" id="customer-search" class="form-control" placeholder="Search customer or leave blank for walk-in…" autocomplete="off">
               <button type="button" class="btn erp-btn-quick-add" id="btn-add-customer" title="Add new customer">
                 <i class="fa-solid fa-plus"></i>
               </button>
@@ -303,8 +318,11 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <div class="row g-2">
-          <div class="col-md-6">
+        <div class="row g-2 align-items-end">
+          <div class="col-auto">
+            {{ photo_field(icon='fa-box', label='Product photo', upload='ajax', folder='products', picker_id='qp-photo-picker') }}
+          </div>
+          <div class="col-md-5">
             <label class="form-label">Product Name</label>
             <input id="qp-name" class="form-control" placeholder="Product name">
           </div>
@@ -375,57 +393,10 @@
   </div>
 </div>
 
-<div class="modal fade erp-form-modal" id="editSaleModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <form method="post" id="edit-sale-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="modal-header">
-          <h5 class="modal-title">Edit Sale <span class="text-muted fw-normal" id="edit-sale-invoice"></span></h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <p class="small text-muted">Change date, payment or notes. To change products, delete the sale and create a new one.</p>
-          <div class="row g-2">
-            <div class="col-md-6">
-              <label class="form-label">Sale date</label>
-              <input type="date" name="sale_date" id="edit-sale-date" class="form-control" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Amount paid <span class="text-muted small" id="edit-sale-total-hint"></span></label>
-              <input type="number" step="0.01" min="0" name="amount_paid" id="edit-sale-paid" class="form-control" required>
-            </div>
-            <div class="col-12">
-              <label class="form-label">Notes</label>
-              <textarea name="notes" id="edit-sale-notes" class="form-control" rows="2"></textarea>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="submit" class="btn btn-success">Save Changes</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('.btn-edit-sale');
-  if (!btn) return;
-  const form = document.getElementById('edit-sale-form');
-  form.action = `/sales/${btn.dataset.id}/edit`;
-  document.getElementById('edit-sale-invoice').textContent = btn.dataset.invoice || '';
-  document.getElementById('edit-sale-date').value = btn.dataset.date || '';
-  document.getElementById('edit-sale-paid').value = btn.dataset.paid || '0';
-  document.getElementById('edit-sale-notes').value = btn.dataset.notes || '';
-  document.getElementById('edit-sale-total-hint').textContent = `(invoice ${btn.dataset.total || '0'})`;
-  bootstrap.Modal.getOrCreateInstance(document.getElementById('editSaleModal')).show();
-});
-
 window.OPEN_SALE_MODAL = {{ 'true' if open_modal else 'false' }};
 
 function toggleCustomDates() {
@@ -454,6 +425,7 @@ document.getElementById('btn-print-sales')?.addEventListener('click', () => {
     table: '#sales-table',
     title: 'Sales Report',
     subtitle: 'Period: ' + periodLabel,
+    sectionTitle: 'Sales',
     sumColumns: [5, 6, 7],
   });
 });

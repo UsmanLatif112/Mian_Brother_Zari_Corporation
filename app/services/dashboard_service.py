@@ -108,10 +108,11 @@ def ensure_customer_type_column():
     except Exception:
         pass
 
-    # Optional photos on customers / vendors / sale_items
+    # Optional photos on customers / vendors / products / sale_items
     for table, col, coltype in (
         ("customers", "photo", "VARCHAR(255)"),
         ("vendors", "photo", "VARCHAR(255)"),
+        ("products", "photo", "VARCHAR(255)"),
         ("sale_items", "photo", "VARCHAR(255)"),
     ):
         try:

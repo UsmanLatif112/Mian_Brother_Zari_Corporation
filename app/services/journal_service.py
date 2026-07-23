@@ -29,7 +29,10 @@ def _row(
     status="",
     link=None,
     sort_id=0,
+    total_paid=None,
+    invoice_total=None,
 ):
+    paid = _d(total_paid) if total_paid is not None else (_d(amount_in) if _d(amount_in) > 0 else Decimal("0"))
     return {
         "date": entry_date,
         "type": entry_type,
@@ -38,6 +41,8 @@ def _row(
         "party": party or "—",
         "amount_in": _d(amount_in),
         "amount_out": _d(amount_out),
+        "total_paid": paid,
+        "invoice_total": _d(invoice_total) if invoice_total is not None else None,
         "status": status,
         "link": link,
         "sort_id": sort_id,
@@ -61,9 +66,11 @@ def get_general_journal(period="all", start_date=None, end_date=None):
     if range_end:
         sq = sq.filter(Sale.sale_date <= range_end)
     for s in sq.order_by(Sale.sale_date.desc(), Sale.id.desc()).all():
-        paid = _d(s.amount_paid)
         total = _d(s.grand_total)
-        due = total - paid if total > paid else Decimal("0")
+        total_paid = _d(s.amount_paid)  # full cash received (may exceed invoice)
+        applied = min(total_paid, total)
+        due = total - applied if total > applied else Decimal("0")
+        advance = total_paid - applied if total_paid > applied else Decimal("0")
         status = s.payment_status.value if s.payment_status else ""
         party = s.customer.name if s.customer else "Walk-in"
         note = f"Sale total {total:.2f}"
@@ -71,8 +78,8 @@ def get_general_journal(period="all", start_date=None, end_date=None):
             note += f" · Discount {_d(s.discount):.2f}"
         if due > 0:
             note += f" · Credit {due:.2f}"
-        if paid > total:
-            note += f" · Advance {paid - total:.2f}"
+        if advance > 0:
+            note += f" · Advance {advance:.2f}"
         rows.append(
             _row(
                 s.sale_date,
@@ -80,11 +87,13 @@ def get_general_journal(period="all", start_date=None, end_date=None):
                 s.invoice_no,
                 note,
                 party,
-                paid if paid > 0 else Decimal("0"),
-                due,
+                total_paid if total_paid > 0 else Decimal("0"),  # In = cash received
+                due,  # Out = unpaid credit
                 status.title(),
                 f"/sales/{s.id}/invoice",
                 s.id,
+                total_paid=total_paid,
+                invoice_total=total,
             )
         )
 
