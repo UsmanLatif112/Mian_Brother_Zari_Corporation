@@ -1,17 +1,23 @@
-<header class="erp-topbar d-flex align-items-center justify-content-between px-3">
-  <div class="d-flex align-items-center gap-2">
-    <button class="btn btn-sm btn-outline-secondary d-lg-none" id="sidebar-toggle"><i class="fa-solid fa-bars"></i></button>
+<header class="erp-topbar d-flex align-items-center justify-content-between px-3 gap-2">
+  <div class="d-flex align-items-center gap-2 topbar-left min-w-0">
+    <button class="btn btn-sm btn-outline-secondary d-lg-none" id="sidebar-toggle" type="button"><i class="fa-solid fa-bars"></i></button>
     <form class="global-search" action="#" onsubmit="return false;">
       <div class="input-group input-group-sm">
         <span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
-        <input type="search" class="form-control" id="global-search-input" placeholder="{{ search_placeholder }}" autocomplete="off">
+        <input type="search" class="form-control" id="global-search-input" placeholder="{{ search_placeholder }}" autocomplete="off"{% if search_mode == 'none' %} disabled title="Search is not available on this page"{% endif %}>
       </div>
       <div class="search-results d-none" id="global-search-results"></div>
     </form>
   </div>
-  <div class="d-flex align-items-center gap-3">
+  <div class="d-flex align-items-center gap-2 topbar-right flex-shrink-0">
+    <div class="topbar-page-filters d-flex align-items-center">
+      {% block page_filters %}{% endblock %}
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary page-refresh-btn" id="page-refresh-btn" title="Refresh page stats">
+      <i class="fa-solid fa-arrows-rotate"></i>
+    </button>
     <div class="dropdown">
-      <button class="btn btn-sm btn-light dropdown-toggle" data-bs-toggle="dropdown" title="User menu">
+      <button class="btn btn-sm btn-light dropdown-toggle" data-bs-toggle="dropdown" title="User menu" type="button">
         <i class="fa-solid fa-user-circle"></i>
       </button>
       <ul class="dropdown-menu dropdown-menu-end">

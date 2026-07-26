@@ -13,8 +13,9 @@ from app.models import (
     Vendor,
 )
 from app.models.sales import PaymentStatus, SaleItem
-from app.services.cashbook_service import get_cash_balance
+from app.services.cashbook_service import get_cash_dashboard_metrics
 from app.services.fifo_service import stock_valuation
+from app.services.account_service import account_previous_amount
 
 # Customer payment / credit types and allowed due days
 CUSTOMER_TYPE_META = {
@@ -92,12 +93,21 @@ def ensure_customer_type_column():
             alters.append("ALTER TABLE stock_layers ADD COLUMN vendor_id INTEGER")
         if "invoice_no" not in layer_cols:
             alters.append("ALTER TABLE stock_layers ADD COLUMN invoice_no VARCHAR(80)")
+        if "quantity_received" not in layer_cols:
+            alters.append(
+                "ALTER TABLE stock_layers ADD COLUMN quantity_received NUMERIC(14, 3)"
+            )
         if alters:
             with db.engine.begin() as conn:
                 for stmt in alters:
                     conn.execute(text(stmt))
-            # Backfill sale_price from product for existing open layers
-            with db.engine.begin() as conn:
+                # Backfill only when columns were just added (avoid write locks every request)
+                conn.execute(
+                    text(
+                        "UPDATE stock_layers SET quantity_received = quantity_remaining "
+                        "WHERE quantity_received IS NULL"
+                    )
+                )
                 conn.execute(
                     text(
                         "UPDATE stock_layers SET sale_price = ("
@@ -157,25 +167,27 @@ def _filters(date_field, start, end):
     return []
 
 
-def _customer_due_info(customer: Customer, today: date):
+def _customer_due_info(customer: Customer, today: date, oldest_sale_date=None, *, batched=False):
     ctype = getattr(customer, "customer_type", None) or "good"
     meta = CUSTOMER_TYPE_META.get(ctype, CUSTOMER_TYPE_META["good"])
     allowed = meta["due_days"]
-    oldest = (
-        Sale.query.filter(
-            Sale.customer_id == customer.id,
-            Sale.payment_status != PaymentStatus.PAID,
-        )
-        .order_by(Sale.sale_date.asc())
-        .first()
-    )
-    if not oldest:
+    if not batched and oldest_sale_date is None:
         oldest = (
-            Sale.query.filter_by(customer_id=customer.id)
-            .order_by(Sale.sale_date.desc())
+            Sale.query.filter(
+                Sale.customer_id == customer.id,
+                Sale.payment_status != PaymentStatus.PAID,
+            )
+            .order_by(Sale.sale_date.asc())
             .first()
         )
-    if not oldest:
+        if not oldest:
+            oldest = (
+                Sale.query.filter_by(customer_id=customer.id)
+                .order_by(Sale.sale_date.desc())
+                .first()
+            )
+        oldest_sale_date = oldest.sale_date if oldest else None
+    if not oldest_sale_date:
         return {
             "type": ctype,
             "type_label": meta["label"],
@@ -183,7 +195,7 @@ def _customer_due_info(customer: Customer, today: date):
             "due_days": 0,
             "overdue_days": 0,
         }
-    age = (today - oldest.sale_date).days
+    age = (today - oldest_sale_date).days
     overdue = max(0, age - allowed) if allowed else age
     return {
         "type": ctype,
@@ -194,8 +206,24 @@ def _customer_due_info(customer: Customer, today: date):
     }
 
 
+def _oldest_unpaid_sale_dates(customer_ids):
+    """One query: oldest unpaid sale date per customer."""
+    if not customer_ids:
+        return {}
+    rows = (
+        db.session.query(Sale.customer_id, func.min(Sale.sale_date))
+        .filter(
+            Sale.customer_id.in_(customer_ids),
+            Sale.payment_status != PaymentStatus.PAID,
+        )
+        .group_by(Sale.customer_id)
+        .all()
+    )
+    return {cid: d for cid, d in rows}
+
+
 def get_dashboard_metrics(period="all", start_date=None, end_date=None):
-    ensure_customer_type_column()
+    # Schema ensure runs once at app startup — not on every dashboard hit
     start, end = _range_for_filter(period, start_date, end_date)
     today = date.today()
 
@@ -217,7 +245,15 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
         .filter(Customer.is_deleted.is_(False), Customer.balance > 0)
         .scalar()
     ) or Decimal("0")
-    cash_in_hand = get_cash_balance()
+    cash_metrics = get_cash_dashboard_metrics(
+        total_sale=total_sale,
+        previous_amount=account_previous_amount(),
+        total_expense=total_expense,
+    )
+    previous_balance = cash_metrics["previous_balance"]
+    cash_in_hand = cash_metrics["cash_in_hand"]
+    cash_without_expense = cash_metrics["cash_without_expense"]
+    cash_without_prev_and_expense = cash_metrics["cash_without_prev_and_expense"]
     stock_value = stock_valuation()
 
     # Chart series (aligned labels)
@@ -291,9 +327,12 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
         .limit(5)
         .all()
     )
+    oldest_dates = _oldest_unpaid_sale_dates([c.id for c in credit_customers])
     top_credit = []
     for c in credit_customers:
-        due = _customer_due_info(c, today)
+        due = _customer_due_info(
+            c, today, oldest_sale_date=oldest_dates.get(c.id), batched=True
+        )
         top_credit.append(
             {
                 "id": c.id,
@@ -341,6 +380,9 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
         "total_expense": total_expense,
         "net_profit": net_profit,
         "total_credit": total_credit,
+        "cash_without_prev_and_expense": cash_without_prev_and_expense,
+        "previous_balance": previous_balance,
+        "cash_without_expense": cash_without_expense,
         "cash_in_hand": cash_in_hand,
         "stock_value": stock_value,
         "total_purchasing": total_purchasing,

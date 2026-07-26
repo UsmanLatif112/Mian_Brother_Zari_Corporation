@@ -1,3 +1,4 @@
+from app.models.account import AccountAmountTaken, AccountCashSetup
 from app.models.expenses import Expense, ExpenseCategory, ExpenseSettlement
 from app.models.inventory import (
     Category,
@@ -28,6 +29,8 @@ __all__ = [
     "Notification",
     "AccountBalance",
     "CashBookEntry",
+    "AccountCashSetup",
+    "AccountAmountTaken",
     "UnitType",
     "Unit",
     "Category",

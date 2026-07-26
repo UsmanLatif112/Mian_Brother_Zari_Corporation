@@ -26,28 +26,60 @@ def _expense_form():
     return form
 
 
+def _parse_date(value):
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _expense_page(form=None, open_modal=False):
-    expenses = (
-        Expense.query.filter_by(is_deleted=False)
-        .order_by(Expense.expense_date.desc(), Expense.id.desc())
-        .all()
-    )
+    from app.services.dashboard_service import _range_for_filter
+
+    period = request.args.get("period", "all")
+    period_start = _parse_date(request.args.get("start_date"))
+    period_end = _parse_date(request.args.get("end_date"))
+    range_start, range_end = _range_for_filter(period, period_start, period_end)
+    category_id = request.args.get("category_id", type=int)
+
+    query = Expense.query.filter_by(is_deleted=False)
+    if range_start:
+        query = query.filter(Expense.expense_date >= range_start)
+    if range_end:
+        query = query.filter(Expense.expense_date <= range_end)
+    if category_id:
+        query = query.filter(Expense.category_id == category_id)
+
+    expenses = query.order_by(Expense.expense_date.desc(), Expense.id.desc()).all()
+
+    base_filters = [Expense.is_deleted.is_(False)]
+    if range_start:
+        base_filters.append(Expense.expense_date >= range_start)
+    if range_end:
+        base_filters.append(Expense.expense_date <= range_end)
+    if category_id:
+        base_filters.append(Expense.category_id == category_id)
+
     total_amount = (
         db.session.query(func.coalesce(func.sum(Expense.amount), 0))
-        .filter(Expense.is_deleted.is_(False))
+        .filter(*base_filters)
         .scalar()
     ) or Decimal("0")
     settled_amount = (
         db.session.query(func.coalesce(func.sum(Expense.amount), 0))
-        .filter(Expense.is_deleted.is_(False), Expense.is_settled.is_(True))
+        .filter(*base_filters, Expense.is_settled.is_(True))
         .scalar()
     ) or Decimal("0")
     pending_amount = (
         db.session.query(func.coalesce(func.sum(Expense.amount), 0))
-        .filter(Expense.is_deleted.is_(False), Expense.is_settled.is_(False))
+        .filter(*base_filters, Expense.is_settled.is_(False))
         .scalar()
     ) or Decimal("0")
-    pending_count = Expense.query.filter_by(is_deleted=False, is_settled=False).count()
+    pending_count = (
+        Expense.query.filter(*base_filters, Expense.is_settled.is_(False)).count()
+    )
     categories = ExpenseCategory.query.filter_by(is_deleted=False).order_by(ExpenseCategory.name).all()
     return render_template(
         "expenses/index.html",
@@ -61,6 +93,10 @@ def _expense_page(form=None, open_modal=False):
         categories=categories,
         today=date.today().isoformat(),
         open_modal=open_modal or request.args.get("open_modal") == "1",
+        selected_period=period,
+        start_date=period_start.isoformat() if period_start else "",
+        end_date=period_end.isoformat() if period_end else "",
+        selected_category=category_id or "",
     )
 
 

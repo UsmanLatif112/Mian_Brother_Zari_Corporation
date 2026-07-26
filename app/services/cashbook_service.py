@@ -1,8 +1,28 @@
 from decimal import Decimal
 
+from sqlalchemy import func
+
 from app.extensions import db
 from app.models import AccountBalance, CashBookEntry
 from app.models.mixins import utcnow
+
+# Paid-to-vendor cash outs — excluded from all cash-in-hand displays
+VENDOR_PAY_CATEGORIES = (
+    "vendor_settle",
+    "vendor_advance",
+    "void_vendor_settle",
+    "void_vendor_advance",
+)
+EXPENSE_CATEGORIES = (
+    "expense_spent",
+    "expense_settlement",
+    "void_expense_spent",
+    "void_expense_settlement",
+)
+AMOUNT_TAKEN_CATEGORIES = (
+    "amount_taken",
+    "void_amount_taken",
+)
 
 
 def _get_or_create_balance(account_type: str) -> AccountBalance:
@@ -15,11 +35,69 @@ def _get_or_create_balance(account_type: str) -> AccountBalance:
 
 
 def get_cash_balance() -> Decimal:
-    return _get_or_create_balance("cash").balance
+    """Raw till balance (includes all recorded movements)."""
+    return Decimal(str(_get_or_create_balance("cash").balance or 0))
 
 
 def get_bank_balance() -> Decimal:
     return _get_or_create_balance("bank").balance
+
+
+def net_cash_effect(categories) -> Decimal:
+    """
+    Net effect of categories on cash: sum(in) - sum(out).
+    Positive means those entries increased cash overall.
+    """
+    cats = list(categories)
+    if not cats:
+        return Decimal("0")
+    inflow = (
+        db.session.query(func.coalesce(func.sum(CashBookEntry.amount), 0))
+        .filter(
+            CashBookEntry.entry_type == "in",
+            CashBookEntry.category.in_(cats),
+        )
+        .scalar()
+    ) or Decimal("0")
+    outflow = (
+        db.session.query(func.coalesce(func.sum(CashBookEntry.amount), 0))
+        .filter(
+            CashBookEntry.entry_type == "out",
+            CashBookEntry.category.in_(cats),
+        )
+        .scalar()
+    ) or Decimal("0")
+    return Decimal(str(inflow)) - Decimal(str(outflow))
+
+
+def get_cash_balance_excluding(categories) -> Decimal:
+    """Cash as if listed category movements never happened."""
+    return get_cash_balance() - net_cash_effect(categories)
+
+
+def get_cash_in_hand() -> Decimal:
+    """Shop cash in hand — excludes amounts paid to vendors (settle / advance)."""
+    return get_cash_balance_excluding(VENDOR_PAY_CATEGORIES)
+
+
+def get_cash_dashboard_metrics(total_sale=None, previous_amount=None, total_expense=None) -> dict:
+    """
+    Dashboard cash cards:
+    - Cash (w/o Prev. Bal. & Expense) = Total Sale only
+    - Previous Balance = Account previous amount
+    - Cash (w/o Expense) = Total Sale + Previous Amount
+    - Cash In Hand = Total Sale + Previous Amount - Expense
+    """
+    sale = Decimal(str(total_sale if total_sale is not None else 0))
+    prev = Decimal(str(previous_amount if previous_amount is not None else 0))
+    expense = Decimal(str(total_expense if total_expense is not None else 0))
+    without_expense = sale + prev
+    return {
+        "cash_without_prev_and_expense": sale,
+        "previous_balance": prev,
+        "cash_without_expense": without_expense,
+        "cash_in_hand": without_expense - expense,
+    }
 
 
 def record_cash_movement(

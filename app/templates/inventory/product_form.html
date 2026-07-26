@@ -25,11 +25,11 @@
         <div class="col-md-3">{{ form.sale_price.label(class='form-label') }}{{ form.sale_price(class='form-control') }}</div>
         <div class="col-md-3">{{ form.opening_stock.label(class='form-label') }}{{ form.opening_stock(class='form-control') }}</div>
         <div class="col-md-3">{{ form.minimum_stock.label(class='form-label') }}{{ form.minimum_stock(class='form-control') }}</div>
-        <div class="col-md-6">
-          <label class="form-label">Batch No. <span class="text-muted fw-normal">(optional)</span></label>
-          {{ form.batch_number(class='form-control', placeholder='For opening stock') }}
+        <div class="col-md-3">
+          <label class="form-label">Batch</label>
+          <input type="text" id="product-batch" class="form-control bg-light" readonly tabindex="-1" placeholder="Auto on save">
         </div>
-        <div class="col-md-6">
+        <div class="col-md-3">
           <label class="form-label">Expiry Date <span class="text-muted fw-normal">(optional)</span></label>
           {{ form.expiry_date(class='form-control', type='date') }}
         </div>
@@ -39,4 +39,12 @@
     </form>
   </div>
 </div>
+{% endblock %}
+{% block extra_js %}
+<script>
+fetch('/api/products/next-codes').then((r) => r.json()).then((data) => {
+  const batch = document.getElementById('product-batch');
+  if (batch && data.ok && data.next_batch_id != null) batch.value = '#' + data.next_batch_id;
+}).catch(() => {});
+</script>
 {% endblock %}

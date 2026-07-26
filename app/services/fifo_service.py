@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+from sqlalchemy import func
+
 from app.extensions import db
 from app.models import InventoryAdjustment, StockLayer, StockMovement
 from app.models.mixins import utcnow
@@ -17,9 +19,11 @@ def add_stock_layer(
     expiry_date=None,
     vendor_id=None,
     invoice_no=None,
+    received_at=None,
 ):
     layer = StockLayer(
         product_id=product_id,
+        quantity_received=Decimal(str(quantity)),
         quantity_remaining=Decimal(str(quantity)),
         unit_cost=Decimal(str(unit_cost)),
         sale_price=Decimal(str(sale_price)) if sale_price is not None else None,
@@ -29,16 +33,26 @@ def add_stock_layer(
         expiry_date=expiry_date,
         vendor_id=int(vendor_id) if vendor_id else None,
         invoice_no=(str(invoice_no).strip() or None) if invoice_no else None,
-        received_at=utcnow(),
+        received_at=received_at or utcnow(),
         notes=notes,
     )
     db.session.add(layer)
     return layer
 
 
-def fifo_deduct(product, quantity, movement_type, reference_type, reference_id, user_id, notes=None):
+def fifo_deduct(
+    product,
+    quantity,
+    movement_type,
+    reference_type,
+    reference_id,
+    user_id,
+    notes=None,
+    entry_at=None,
+):
     qty_needed = Decimal(str(quantity))
     total_cost = Decimal("0")
+    when = entry_at or utcnow()
     layers = (
         StockLayer.query.filter_by(product_id=product.id)
         .filter(StockLayer.quantity_remaining > 0)
@@ -65,7 +79,7 @@ def fifo_deduct(product, quantity, movement_type, reference_type, reference_id, 
         reference_id=reference_id,
         notes=notes,
         created_by_id=user_id,
-        created_at=utcnow(),
+        created_at=when,
     )
     db.session.add(movement)
     return total_cost
@@ -84,8 +98,10 @@ def fifo_receive(
     expiry_date=None,
     vendor_id=None,
     invoice_no=None,
+    entry_at=None,
 ):
     qty = Decimal(str(quantity))
+    when = entry_at or utcnow()
     product.current_stock += qty
     # Keep product list prices as latest defaults for display
     product.purchase_price = Decimal(str(unit_cost))
@@ -107,6 +123,7 @@ def fifo_receive(
         expiry_date=expiry_date,
         vendor_id=vendor_id,
         invoice_no=invoice_no,
+        received_at=when,
     )
     movement = StockMovement(
         product_id=product.id,
@@ -118,7 +135,7 @@ def fifo_receive(
         reference_id=source_id,
         notes=notes,
         created_by_id=user_id,
-        created_at=utcnow(),
+        created_at=when,
     )
     db.session.add(movement)
 
@@ -136,7 +153,7 @@ def next_fifo_sale_price(product):
     return Decimal(str(product.sale_price or 0))
 
 
-def adjust_batch(layer, new_qty, user_id, notes=None):
+def adjust_batch(layer, new_qty, user_id, notes=None, entry_at=None):
     """Set remaining qty on a batch; sync product.current_stock. Does not touch sold history."""
     layer = db.session.get(StockLayer, layer.id if hasattr(layer, "id") else int(layer))
     if not layer:
@@ -150,7 +167,14 @@ def adjust_batch(layer, new_qty, user_id, notes=None):
     if delta == 0:
         return layer
 
+    when = entry_at or utcnow()
     layer.quantity_remaining = new_qty
+    # Keep purchased qty as original; if stock is increased above it, raise purchased too
+    received = Decimal(str(layer.quantity_received if layer.quantity_received is not None else old_qty))
+    if new_qty > received:
+        layer.quantity_received = new_qty
+    elif layer.quantity_received is None:
+        layer.quantity_received = received
     product.current_stock = Decimal(str(product.current_stock or 0)) + delta
 
     adj_type = "increase" if delta > 0 else "decrease"
@@ -161,7 +185,7 @@ def adjust_batch(layer, new_qty, user_id, notes=None):
             quantity=abs(delta),
             notes=notes or f"Batch #{layer.id} adjust {old_qty} → {new_qty}",
             created_by_id=user_id,
-            created_at=utcnow(),
+            created_at=when,
         )
     )
     db.session.add(
@@ -175,7 +199,7 @@ def adjust_batch(layer, new_qty, user_id, notes=None):
             reference_id=layer.id,
             notes=notes,
             created_by_id=user_id,
-            created_at=utcnow(),
+            created_at=when,
         )
     )
     return layer
@@ -222,6 +246,7 @@ def reprice_batch(layer, unit_cost=None, sale_price=None, user_id=None, notes=No
     return layer
 
 
+
 def reprice_all_remaining(product, unit_cost=None, sale_price=None, user_id=None, notes=None):
     """Reprice every open batch for a product (remaining stock only)."""
     layers = (
@@ -241,22 +266,15 @@ def reprice_all_remaining(product, unit_cost=None, sale_price=None, user_id=None
 
 
 def stock_valuation():
-    from app.models import Product
-
-    total = Decimal("0")
-    products = Product.query.filter_by(is_deleted=False).all()
-    for product in products:
-        remaining = product.current_stock
-        layers = (
-            StockLayer.query.filter_by(product_id=product.id)
-            .filter(StockLayer.quantity_remaining > 0)
-            .order_by(StockLayer.received_at.asc())
-            .all()
+    """Sum open layer cost in one query (dashboard-safe; no per-product N+1)."""
+    total = (
+        db.session.query(
+            func.coalesce(
+                func.sum(StockLayer.quantity_remaining * StockLayer.unit_cost),
+                0,
+            )
         )
-        for layer in layers:
-            if remaining <= 0:
-                break
-            take = min(layer.quantity_remaining, remaining)
-            total += take * layer.unit_cost
-            remaining -= take
-    return total
+        .filter(StockLayer.quantity_remaining > 0)
+        .scalar()
+    )
+    return Decimal(str(total or 0))

@@ -106,17 +106,7 @@ def record_vendor_payment(
             reference_id=payment.id,
             notes=note or label,
         )
-        category = "vendor_advance" if ptype == "advance" else "vendor_settle"
-        record_cash_movement(
-            "out",
-            category,
-            amount,
-            "vendor_payment",
-            payment.id,
-            notes=f"{label} to {vendor.name}" + (f" — {note}" if note else ""),
-            created_by_id=uid,
-            entry_date=entry_date,
-        )
+        # Paying vendor does not change shop cash-in-hand / cash book
 
     enqueue_sync("vendor_payments", payment.id, "create")
     enqueue_sync("vendors", vendor.id, "update")

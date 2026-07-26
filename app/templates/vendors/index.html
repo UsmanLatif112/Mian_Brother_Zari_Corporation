@@ -1,6 +1,48 @@
 {% extends 'base.html' %}
-{% from 'partials/macros.html' import form_modal, photo_field %}
+{% from 'partials/macros.html' import form_modal, photo_field, header_period_filter, header_status_filter %}
 {% block title %}Vendors{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='vendors-period-form',
+  persist_key='vendors-period',
+  clear_url=url_for(
+    'vendors.index',
+    period='all',
+    status=selected_status if selected_status != 'all' else None
+  ),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onVendorsPeriodChange()',
+  preserve={
+    'status': selected_status if selected_status != 'all' else '',
+  }
+) }}
+{{ header_status_filter(
+  form_id='vendors-status-form',
+  persist_key='vendors-status',
+  clear_url=url_for(
+    'vendors.index',
+    period=selected_period or 'all',
+    start_date=start_date if selected_period == 'custom' else None,
+    end_date=end_date if selected_period == 'custom' else None
+  ),
+  selected=selected_status,
+  label='Balance',
+  field_name='status',
+  options=[
+    ('all', 'All'),
+    ('payable', 'Payable'),
+    ('prepaid', 'Prepaid'),
+    ('settled', 'Settled'),
+  ],
+  preserve={
+    'period': selected_period or 'all',
+    'start_date': start_date if selected_period == 'custom' else '',
+    'end_date': end_date if selected_period == 'custom' else '',
+  }
+) }}
+{% endblock %}
 {% block content %}
 <div class="dashboard-page">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
@@ -59,7 +101,7 @@
       <strong>Vendor List</strong>
       <span class="text-muted small">{{ vendors|length }} records</span>
     </div>
-    <table class="table datatable mb-0 w-100">
+    <table class="table datatable mb-0 w-100" id="vendors-table">
       <thead>
         <tr>
           <th>Name</th>
@@ -223,6 +265,22 @@
 {% block extra_js %}
 <script>
 window.OPEN_FORM_MODAL = {{ 'true' if open_modal else 'false' }};
+
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onVendorsPeriodChange() {
+  const period = document.getElementById('period-filter')?.value;
+  toggleCustomDates();
+  if (period !== 'custom') {
+    document.getElementById('vendors-period-form')?.submit();
+  }
+}
+toggleCustomDates();
+
 document.querySelectorAll('.btn-pay-vendor').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.getElementById('pay-vendor').value = btn.dataset.id;

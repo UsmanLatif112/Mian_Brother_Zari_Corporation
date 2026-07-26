@@ -36,21 +36,54 @@ def _apply_customer_photo(customer):
         customer.photo = path
 
 
+def _parse_date(value):
+    if not value:
+        return None
+    try:
+        return date_cls.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _customer_page(form=None, open_modal=False):
+    from app.services.dashboard_service import _range_for_filter
+
     form = form or CustomerForm()
     if not form.joined_date.data:
         form.joined_date.data = date_cls.today()
 
-    customers = Customer.query.filter_by(is_deleted=False).order_by(Customer.name).all()
+    period = request.args.get("period", "all")
+    period_start = _parse_date(request.args.get("start_date"))
+    period_end = _parse_date(request.args.get("end_date"))
+    range_start, range_end = _range_for_filter(period, period_start, period_end)
+    ctype = (request.args.get("type") or "all").strip().lower()
+
+    query = Customer.query.filter_by(is_deleted=False)
+    if range_start:
+        query = query.filter(Customer.joined_date >= range_start)
+    if range_end:
+        query = query.filter(Customer.joined_date <= range_end)
+    if ctype and ctype != "all":
+        query = query.filter(Customer.customer_type == ctype)
+
+    customers = query.order_by(Customer.name).all()
+
+    base = [Customer.is_deleted.is_(False)]
+    if range_start:
+        base.append(Customer.joined_date >= range_start)
+    if range_end:
+        base.append(Customer.joined_date <= range_end)
+    if ctype and ctype != "all":
+        base.append(Customer.customer_type == ctype)
     total_credit = (
         db.session.query(func.coalesce(func.sum(Customer.balance), 0))
-        .filter(Customer.is_deleted.is_(False), Customer.balance > 0)
+        .filter(*base, Customer.balance > 0)
         .scalar()
         or Decimal("0")
     )
     total_advance = (
         db.session.query(func.coalesce(func.sum(-Customer.balance), 0))
-        .filter(Customer.is_deleted.is_(False), Customer.balance < 0)
+        .filter(*base, Customer.balance < 0)
         .scalar()
         or Decimal("0")
     )
@@ -67,6 +100,10 @@ def _customer_page(form=None, open_modal=False):
         open_modal=open_modal,
         today=date_cls.today().isoformat(),
         payment_types=PAYMENT_TYPES,
+        selected_period=period,
+        start_date=period_start.isoformat() if period_start else "",
+        end_date=period_end.isoformat() if period_end else "",
+        selected_type=ctype if ctype != "all" else "all",
     )
 
 
@@ -175,20 +212,29 @@ def payment():
 @login_required
 @permission_required("customers.view")
 def detail(customer_id):
+    from app.services.dashboard_service import _range_for_filter
+
     customer = db.session.get(Customer, customer_id)
     if not customer or customer.is_deleted:
         flash("Customer not found.", "danger")
         return redirect(url_for("customers.index"))
-    ledger = (
-        LedgerEntry.query.filter_by(party_type="customer", party_id=customer_id)
-        .order_by(LedgerEntry.entry_date, LedgerEntry.id)
-        .all()
-    )
-    receivings = (
-        CustomerReceiving.query.filter_by(customer_id=customer_id)
-        .order_by(CustomerReceiving.receiving_date.desc())
-        .all()
-    )
+
+    period = request.args.get("period", "all")
+    period_start = _parse_date(request.args.get("start_date"))
+    period_end = _parse_date(request.args.get("end_date"))
+    range_start, range_end = _range_for_filter(period, period_start, period_end)
+
+    ledger_q = LedgerEntry.query.filter_by(party_type="customer", party_id=customer_id)
+    recv_q = CustomerReceiving.query.filter_by(customer_id=customer_id)
+    if range_start:
+        ledger_q = ledger_q.filter(LedgerEntry.entry_date >= range_start)
+        recv_q = recv_q.filter(CustomerReceiving.receiving_date >= range_start)
+    if range_end:
+        ledger_q = ledger_q.filter(LedgerEntry.entry_date <= range_end)
+        recv_q = recv_q.filter(CustomerReceiving.receiving_date <= range_end)
+
+    ledger = ledger_q.order_by(LedgerEntry.entry_date, LedgerEntry.id).all()
+    receivings = recv_q.order_by(CustomerReceiving.receiving_date.desc()).all()
     return render_template(
         "customers/detail.html",
         customer=customer,
@@ -196,6 +242,9 @@ def detail(customer_id):
         receivings=receivings,
         today=date_cls.today().isoformat(),
         payment_types=PAYMENT_TYPES,
+        selected_period=period,
+        start_date=period_start.isoformat() if period_start else "",
+        end_date=period_end.isoformat() if period_end else "",
     )
 
 

@@ -489,7 +489,6 @@
       purchase_price: document.getElementById('qp-purchase').value,
       opening_stock: document.getElementById('qp-stock').value,
       minimum_stock: document.getElementById('qp-min-stock')?.value || 0,
-      batch_number: document.getElementById('qp-batch')?.value.trim() || '',
       expiry_date: document.getElementById('qp-expiry')?.value || '',
       description: document.getElementById('qp-description')?.value.trim() || '',
       photo: document.querySelector('#qp-photo-picker .photo-path')?.value || '',
@@ -600,8 +599,24 @@
 
   ['quickCustomerModal', 'quickProductModal'].forEach((id) => {
     const el = document.getElementById(id);
-    el?.addEventListener('show.bs.modal', () => {
+    el?.addEventListener('show.bs.modal', async () => {
       document.getElementById('saleModal')?.classList.add('modal-nested-open');
+      if (id === 'quickProductModal') {
+        try {
+          const res = await fetch('/api/products/next-codes');
+          const data = await res.json();
+          if (data.ok) {
+            const sku = document.getElementById('qp-sku');
+            const barcode = document.getElementById('qp-barcode');
+            const batch = document.getElementById('qp-batch');
+            if (sku) sku.value = data.sku || '';
+            if (barcode) barcode.value = data.barcode || '';
+            if (batch && data.next_batch_id != null) batch.value = `#${data.next_batch_id}`;
+          }
+        } catch (_) {
+          /* server will auto-fill on save if left empty */
+        }
+      }
     });
     el?.addEventListener('hidden.bs.modal', () => {
       const saleModal = document.getElementById('saleModal');

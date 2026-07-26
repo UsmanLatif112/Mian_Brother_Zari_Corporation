@@ -88,6 +88,7 @@ class StockLayer(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False, index=True)
+    quantity_received = db.Column(db.Numeric(14, 3), nullable=False, default=Decimal("0"))
     quantity_remaining = db.Column(db.Numeric(14, 3), nullable=False)
     unit_cost = db.Column(db.Numeric(14, 2), nullable=False)  # purchase / cost price
     sale_price = db.Column(db.Numeric(14, 2), nullable=True)  # sell price for this batch
@@ -102,6 +103,21 @@ class StockLayer(db.Model):
 
     product = db.relationship("Product", backref="stock_layers")
     vendor = db.relationship("Vendor")
+
+    @property
+    def quantity_purchased(self):
+        """Original bought qty for this batch (falls back to remaining for old rows)."""
+        recv = self.quantity_received
+        if recv is None:
+            return self.quantity_remaining or Decimal("0")
+        return Decimal(str(recv))
+
+    @property
+    def quantity_used(self):
+        bought = self.quantity_purchased
+        left = Decimal(str(self.quantity_remaining or 0))
+        used = bought - left
+        return used if used > 0 else Decimal("0")
 
 
 class StockMovement(db.Model):

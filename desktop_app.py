@@ -15,13 +15,49 @@ import traceback
 from pathlib import Path
 
 
+def _desktop_env_candidates() -> list[Path]:
+    """Where we look for MySQL / sync settings (.env)."""
+    paths: list[Path] = []
+    if getattr(sys, "frozen", False):
+        home = Path(sys.executable).resolve().parent
+        paths.append(home / "data" / ".env")
+        paths.append(home / ".env")
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            paths.append(Path(meipass) / ".env")
+    else:
+        root = Path(__file__).resolve().parent
+        paths.append(root / "data" / ".env")
+        paths.append(root / ".env")
+    return paths
+
+
+def _load_desktop_dotenv() -> Path | None:
+    """Load MySQL connection + sync settings shipped with the desktop zip."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return None
+    for path in _desktop_env_candidates():
+        if path.is_file():
+            load_dotenv(path, override=False)
+            logging.getLogger(__name__).info("Loaded connection settings from %s", path)
+            return path
+    return None
+
+
 def _prepare_env() -> None:
-    os.environ.setdefault("DESKTOP_APP", "true")
-    os.environ.setdefault("FLASK_ENV", "production")
+    # Load packaged .env first (MySQL URI for Sync), then apply desktop defaults
+    _load_desktop_dotenv()
+
+    os.environ["DESKTOP_APP"] = "true"
+    # Always run desktop in production mode (ignore FLASK_ENV=development from .env)
+    os.environ["FLASK_ENV"] = "production"
     os.environ.setdefault("OFFLINE_FIRST", "true")
     os.environ.setdefault("DATABASE_MODE", "sqlite")
+    # Keep SYNC_AUTO_ENABLED from .env when present; otherwise off by default
     os.environ.setdefault("SYNC_AUTO_ENABLED", "false")
-    # Stable secret for local desktop sessions
+    os.environ.setdefault("AUTO_BACKUP_ENABLED", "true")
     os.environ.setdefault("SECRET_KEY", "mian-brother-fertilizers-desktop-local-key")
 
 
@@ -126,6 +162,41 @@ def _run_in_browser(url: str, server_thread: threading.Thread) -> int:
     return 0
 
 
+class DesktopApi:
+    """JS bridge for native Windows Save / folder dialogs."""
+
+    def choose_backup_path(self, default_filename: str = "sqlite_backup.zip"):
+        import webview
+
+        name = (default_filename or "sqlite_backup.zip").strip() or "sqlite_backup.zip"
+        lower = name.lower()
+        if not (lower.endswith(".zip") or lower.endswith(".db")):
+            name = f"{name}.zip"
+        windows = webview.windows
+        if not windows:
+            return None
+        # Start in Documents so the explorer dialog is familiar
+        start_dir = os.path.join(os.path.expanduser("~"), "Documents")
+        if not os.path.isdir(start_dir):
+            start_dir = os.path.expanduser("~")
+        file_types = (
+            "Backup ZIP (*.zip)",
+            "SQLite Database (*.db)",
+            "All files (*.*)",
+        )
+        result = windows[0].create_file_dialog(
+            webview.SAVE_DIALOG,
+            directory=start_dir,
+            save_filename=name,
+            file_types=file_types,
+        )
+        if not result:
+            return None
+        if isinstance(result, (list, tuple)):
+            return result[0] if result else None
+        return str(result)
+
+
 def main() -> int:
     _prepare_env()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -155,7 +226,8 @@ def main() -> int:
     url = f"http://{host}:{port}/"
 
     def run_server() -> None:
-        serve(app, host=host, port=port, threads=8)
+        # Fewer threads = less SQLite lock contention on desktop
+        serve(app, host=host, port=port, threads=4)
 
     thread = threading.Thread(target=run_server, daemon=True)
     thread.start()
@@ -179,6 +251,7 @@ def main() -> int:
             height=860,
             min_size=(1024, 700),
             confirm_close=True,
+            js_api=DesktopApi(),
         )
         # On Windows, Edge WebView2 is the renderer; window shell still uses WinForms.
         webview.start(gui="edgechromium")

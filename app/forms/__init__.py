@@ -45,7 +45,7 @@ class ProductForm(FlaskForm):
         "Existing Product",
         filters=[lambda v: None if v in (None, "", 0, "0") else v],
     )
-    sku = StringField("SKU", validators=[DataRequired()])
+    sku = StringField("SKU", validators=[Optional()])
     barcode = StringField("Barcode", validators=[Optional()])
     brand = StringField("Brand", validators=[Optional()])
     category_id = IntegerField("Category", validators=[DataRequired()])
@@ -109,6 +109,12 @@ class VendorForm(FlaskForm):
         default=None,
     )
     notes = TextAreaField("Notes", validators=[Optional()])
+    submit = SubmitField("Save")
+
+
+class CategoryForm(FlaskForm):
+    name = StringField("Name", validators=[DataRequired(), Length(max=100)])
+    description = TextAreaField("Description", validators=[Optional()])
     submit = SubmitField("Save")
 
 

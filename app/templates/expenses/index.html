@@ -1,6 +1,34 @@
 {% extends 'base.html' %}
-{% from 'partials/macros.html' import form_modal %}
+{% from 'partials/macros.html' import form_modal, header_period_filter, header_category_filter %}
 {% block title %}Expenses{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='expenses-period-form',
+  persist_key='expenses-period',
+  clear_url=(url_for('expenses.index', category_id=selected_category, period='all') if selected_category else url_for('expenses.index', period='all')),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onExpensesPeriodChange()',
+  preserve={'category_id': selected_category} if selected_category else None
+) }}
+{{ header_category_filter(
+  categories=categories,
+  selected_category=selected_category,
+  clear_url=url_for(
+    'expenses.index',
+    period=selected_period or 'all',
+    start_date=start_date if selected_period == 'custom' else None,
+    end_date=end_date if selected_period == 'custom' else None
+  ),
+  persist_key='expenses-category',
+  preserve={
+    'period': selected_period or 'all',
+    'start_date': start_date if selected_period == 'custom' else '',
+    'end_date': end_date if selected_period == 'custom' else '',
+  }
+) }}
+{% endblock %}
 {% block content %}
 <div class="dashboard-page">
   <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 dash-hero">
@@ -74,7 +102,7 @@
       <span class="text-muted small">{{ total_count }} records</span>
     </div>
     <div class="table-responsive">
-      <table class="table table-hover datatable mb-0">
+      <table class="table table-hover datatable mb-0" id="expenses-table">
         <thead>
           <tr>
             <th>Date</th>
@@ -312,6 +340,22 @@
 {% block extra_js %}
 <script>
 window.OPEN_FORM_MODAL = {{ 'true' if open_modal else 'false' }};
+
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onExpensesPeriodChange() {
+  const period = document.getElementById('period-filter')?.value;
+  toggleCustomDates();
+  if (period !== 'custom') {
+    document.getElementById('expenses-period-form')?.submit();
+  }
+}
+toggleCustomDates();
+
 (function () {
   const tbody = document.querySelector('#expense-lines tbody');
   const addBtn = document.getElementById('btn-add-expense-row');

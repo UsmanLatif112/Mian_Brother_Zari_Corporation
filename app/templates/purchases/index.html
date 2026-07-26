@@ -1,5 +1,17 @@
 {% extends 'base.html' %}
+{% from 'partials/macros.html' import header_period_filter %}
 {% block title %}Purchases{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='purchases-filter-form',
+  persist_key='purchases',
+  clear_url=url_for('purchases.index', period='all'),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onPurchasesPeriodChange()'
+) }}
+{% endblock %}
 {% block content %}
 <div class="dashboard-page">
   <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 dash-hero">
@@ -37,10 +49,10 @@
   <div class="card dash-panel border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
       <strong>Purchase History</strong>
-      <span class="text-muted small">From inventory additions</span>
+      <span class="text-muted small">{{ purchases|length }} records</span>
     </div>
     <div class="table-responsive">
-      <table class="table datatable mb-0">
+      <table class="table datatable mb-0" id="purchases-table">
         <thead>
           <tr>
             <th>Invoice</th>
@@ -74,4 +86,23 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onPurchasesPeriodChange() {
+  const period = document.getElementById('period-filter')?.value;
+  toggleCustomDates();
+  if (period !== 'custom') {
+    document.getElementById('purchases-filter-form')?.submit();
+  }
+}
+toggleCustomDates();
+</script>
 {% endblock %}

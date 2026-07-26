@@ -1,5 +1,17 @@
 {% extends 'base.html' %}
+{% from 'partials/macros.html' import header_period_filter %}
 {% block title %}{{ vendor.name }}{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='vendor-detail-period-form',
+  persist_key='vendor-detail-' ~ vendor.id,
+  clear_url=url_for('vendors.detail', vendor_id=vendor.id, period='all'),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onVendorDetailPeriodChange()'
+) }}
+{% endblock %}
 {% block content %}
 <div class="dashboard-page">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
@@ -193,6 +205,21 @@
 
 {% block extra_js %}
 <script>
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onVendorDetailPeriodChange() {
+  const period = document.getElementById('period-filter')?.value;
+  toggleCustomDates();
+  if (period !== 'custom') {
+    document.getElementById('vendor-detail-period-form')?.submit();
+  }
+}
+toggleCustomDates();
+
 document.getElementById('pay-type')?.addEventListener('change', () => {
   const hints = {
     account_settle: 'Account settle: we pay against what we owe the vendor (cash out).',

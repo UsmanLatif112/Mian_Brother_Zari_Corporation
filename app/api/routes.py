@@ -14,13 +14,11 @@ api_bp = Blueprint("api", __name__)
 @login_required
 def global_search():
     from app.services.page_search_service import search_scoped
-    from app.utils.search_context import resolve_search_context
 
     q = (request.args.get("q") or "").strip()
+    # Scope must come from the page (client). Never infer from /api/search.
     scope = (request.args.get("scope") or "").strip().lower()
-    if not scope:
-        scope = resolve_search_context(request.path).scope
-    if len(q) < 2:
+    if len(q) < 2 or not scope or scope == "none":
         return jsonify({"results": []})
     return jsonify({"results": search_scoped(scope, q)})
 
@@ -205,6 +203,26 @@ def upload_photo():
     return jsonify({"ok": True, "path": path, "url": image_url(path)})
 
 
+@api_bp.route("/products/next-codes")
+@login_required
+def products_next_codes():
+    from app.models import StockLayer
+    from app.utils.product_codes import generate_unique_barcode, generate_unique_sku
+
+    try:
+        next_batch = (db.session.query(db.func.max(StockLayer.id)).scalar() or 0) + 1
+        return jsonify(
+            {
+                "ok": True,
+                "sku": generate_unique_sku(),
+                "barcode": generate_unique_barcode(),
+                "next_batch_id": int(next_batch),
+            }
+        )
+    except RuntimeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @api_bp.route("/products/lookup")
 @login_required
 def products_lookup():
@@ -337,10 +355,17 @@ def quick_product():
         except ValueError:
             return jsonify({"ok": False, "error": "Invalid expiry date. Use YYYY-MM-DD."}), 400
 
+    from app.utils.product_codes import ensure_product_codes
     from app.utils.uploads import accept_uploaded_path
 
-    sku = (data.get("sku") or "").strip() or f"SKU-{Product.query.count() + 1}"
-    barcode = (data.get("barcode") or "").strip() or None
+    try:
+        sku, barcode = ensure_product_codes(data.get("sku"), data.get("barcode"))
+    except RuntimeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    if Product.query.filter_by(sku=sku).first():
+        return jsonify({"ok": False, "error": f"SKU '{sku}' already exists."}), 400
+    if barcode and Product.query.filter_by(barcode=barcode).first():
+        return jsonify({"ok": False, "error": f"Barcode '{barcode}' already exists."}), 400
     photo = accept_uploaded_path(data.get("photo"), "products")
     product = Product(
         name=name,

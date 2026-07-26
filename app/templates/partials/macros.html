@@ -1,3 +1,176 @@
+{# Period filter for topbar: inline on desktop, dropdown on mobile (incl. custom dates). #}
+{% macro header_period_filter(
+  form_id,
+  persist_key,
+  clear_url,
+  selected_period='all',
+  start_date='',
+  end_date='',
+  onchange='onPeriodFilterChange()',
+  label='Period',
+  variant='standard',
+  preserve=None
+) %}
+{% if variant == 'dashboard' %}
+  {% set periods = [
+    ('all', 'All'),
+    ('today', 'Today'),
+    ('week', 'Week'),
+    ('month', 'Month'),
+    ('3_month', '3 Month'),
+    ('6_month', '6 Month'),
+    ('12_month', '12 Month'),
+    ('custom', 'Custom'),
+  ] %}
+{% else %}
+  {% set periods = [
+    ('all', 'All'),
+    ('today', 'Today'),
+    ('week', 'One Week'),
+    ('month', 'One Month'),
+    ('3_month', 'Three Month'),
+    ('12_month', '12 Month'),
+    ('custom', 'Custom'),
+  ] %}
+{% endif %}
+<div class="header-page-filter dropdown" data-header-filter>
+  <button type="button"
+          class="btn btn-sm btn-outline-secondary header-filter-toggle"
+          data-bs-toggle="dropdown"
+          data-bs-auto-close="outside"
+          aria-expanded="false"
+          title="Filter">
+    <i class="fa-solid fa-filter"></i>
+    {% if selected_period and selected_period != 'all' %}
+    <span class="header-filter-dot" aria-hidden="true"></span>
+    {% endif %}
+  </button>
+  <div class="dropdown-menu dropdown-menu-end header-filter-menu p-0">
+    <form method="get"
+          class="header-filter-form"
+          id="{{ form_id }}"
+          data-persist-filters="{{ persist_key }}">
+      {% if preserve %}
+        {% for key, val in preserve.items() %}
+          {% if val not in (None, '') %}
+          <input type="hidden" name="{{ key }}" value="{{ val }}">
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+      <label class="dash-filter-label">{{ label }}</label>
+      <select name="period" class="form-select form-select-sm" id="period-filter" onchange="{{ onchange }}">
+        {% for value, text in periods %}
+        <option value="{{ value }}" {% if selected_period == value %}selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+      </select>
+      <span class="custom-date-field dash-filter-label">From</span>
+      <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm custom-date-field">
+      <span class="custom-date-field dash-filter-label">To</span>
+      <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm custom-date-field">
+      <button type="submit" class="btn btn-sm btn-outline-secondary custom-date-field header-filter-apply">Apply</button>
+      {% if selected_period and selected_period != 'all' %}
+      <a href="{{ clear_url }}" class="header-filter-clear" data-clear-page-filters="{{ persist_key }}" title="Clear filter" aria-label="Clear filter">
+        <i class="fa-solid fa-xmark"></i>
+      </a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endmacro %}
+
+
+{% macro header_category_filter(categories, selected_category, clear_url, persist_key='inventory', preserve=None) %}
+<div class="header-page-filter dropdown" data-header-filter>
+  <button type="button"
+          class="btn btn-sm btn-outline-secondary header-filter-toggle"
+          data-bs-toggle="dropdown"
+          data-bs-auto-close="outside"
+          aria-expanded="false"
+          title="Filter">
+    <i class="fa-solid fa-filter"></i>
+    {% if selected_category %}
+    <span class="header-filter-dot" aria-hidden="true"></span>
+    {% endif %}
+  </button>
+  <div class="dropdown-menu dropdown-menu-end header-filter-menu p-0">
+    <form method="get" class="header-filter-form" data-persist-filters="{{ persist_key }}">
+      {% if preserve %}
+        {% for key, val in preserve.items() %}
+          {% if val not in (None, '') %}
+          <input type="hidden" name="{{ key }}" value="{{ val }}">
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+      <label class="dash-filter-label">Category</label>
+      <select name="category_id" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">All categories</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}" {% if selected_category == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      {% if selected_category %}
+      <a href="{{ clear_url }}" class="header-filter-clear" data-clear-page-filters="{{ persist_key }}" title="Clear filter" aria-label="Clear filter">
+        <i class="fa-solid fa-xmark"></i>
+      </a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endmacro %}
+
+
+{% macro header_status_filter(
+  form_id,
+  persist_key,
+  clear_url,
+  selected='all',
+  label='Filter',
+  options=None,
+  field_name='status',
+  preserve=None
+) %}
+{% set options = options or [('all', 'All'), ('with_products', 'With products'), ('empty', 'No products')] %}
+<div class="header-page-filter dropdown" data-header-filter>
+  <button type="button"
+          class="btn btn-sm btn-outline-secondary header-filter-toggle"
+          data-bs-toggle="dropdown"
+          data-bs-auto-close="outside"
+          aria-expanded="false"
+          title="Filter">
+    <i class="fa-solid fa-filter"></i>
+    {% if selected and selected != 'all' %}
+    <span class="header-filter-dot" aria-hidden="true"></span>
+    {% endif %}
+  </button>
+  <div class="dropdown-menu dropdown-menu-end header-filter-menu p-0">
+    <form method="get"
+          class="header-filter-form"
+          id="{{ form_id }}"
+          data-persist-filters="{{ persist_key }}">
+      {% if preserve %}
+        {% for key, val in preserve.items() %}
+          {% if val not in (None, '') %}
+          <input type="hidden" name="{{ key }}" value="{{ val }}">
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+      <label class="dash-filter-label">{{ label }}</label>
+      <select name="{{ field_name }}" class="form-select form-select-sm" onchange="this.form.submit()">
+        {% for value, text in options %}
+        <option value="{{ value }}" {% if selected == value %}selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+      </select>
+      {% if selected and selected != 'all' %}
+      <a href="{{ clear_url }}" class="header-filter-clear" data-clear-page-filters="{{ persist_key }}" title="Clear filter" aria-label="Clear filter">
+        <i class="fa-solid fa-xmark"></i>
+      </a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endmacro %}
+
+
 {% macro form_modal(title, submit_label='Save', size='modal-lg', form_id='entity-form') %}
 <div class="modal fade erp-form-modal" id="formModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered {{ size }} modal-dialog-scrollable">

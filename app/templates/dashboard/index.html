@@ -1,5 +1,19 @@
 {% extends 'base.html' %}
+{% from 'partials/macros.html' import header_period_filter %}
 {% block title %}Dashboard — {{ app_name }}{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='dash-filter-form',
+  persist_key='dashboard',
+  clear_url=url_for('dashboard.index', period='all'),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onDashPeriodChange()',
+  label='Filter',
+  variant='dashboard'
+) }}
+{% endblock %}
 {% block content %}
 <div class="dashboard-page">
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
@@ -7,24 +21,6 @@
     <h1 class="h3 mb-1">Dashboard</h1>
     <p class="text-muted mb-0">Business overview by selected period</p>
   </div>
-  <form method="get" class="dash-filter dash-filter-inline" id="dash-filter-form">
-    <label class="dash-filter-label">Filter</label>
-    <select name="period" class="form-select form-select-sm" id="period-filter" onchange="toggleCustomDates()">
-      <option value="all" {% if selected_period == 'all' %}selected{% endif %}>All</option>
-      <option value="today" {% if selected_period == 'today' %}selected{% endif %}>Today</option>
-      <option value="week" {% if selected_period == 'week' %}selected{% endif %}>Week</option>
-      <option value="month" {% if selected_period == 'month' %}selected{% endif %}>Month</option>
-      <option value="3_month" {% if selected_period == '3_month' %}selected{% endif %}>3 Month</option>
-      <option value="6_month" {% if selected_period == '6_month' %}selected{% endif %}>6 Month</option>
-      <option value="12_month" {% if selected_period == '12_month' %}selected{% endif %}>12 Month</option>
-      <option value="custom" {% if selected_period == 'custom' %}selected{% endif %}>Custom</option>
-    </select>
-    <span class="custom-date-field dash-filter-label">From</span>
-    <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm custom-date-field">
-    <span class="custom-date-field dash-filter-label">To</span>
-    <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm custom-date-field">
-    <button type="submit" class="btn btn-sm btn-success">Apply</button>
-  </form>
 </div>
 
 <div class="row g-3 mb-4">
@@ -32,12 +28,15 @@
     ('Total Sale', metrics.total_sale, 'fa-sack-dollar', 'success'),
     ('Total Cost', metrics.total_cost, 'fa-boxes-packing', 'secondary'),
     ('Gross Profit', metrics.gross_profit, 'fa-chart-line', 'primary'),
+    ('Cash (w/o Prev. Bal. & Expense)', metrics.cash_without_prev_and_expense, 'fa-wallet', 'info'),
+    ('Previous Balance', metrics.previous_balance, 'fa-scale-balanced', 'secondary'),
     ('Total Expense', metrics.total_expense, 'fa-receipt', 'danger'),
+    ('Cash (w/o Expense) (with Prev.)', metrics.cash_without_expense, 'fa-money-bills', 'primary'),
+    ('Cash In Hand (with Prev. & Expense)', metrics.cash_in_hand, 'fa-money-bill-wave', 'success'),
     ('Net Profit', metrics.net_profit, 'fa-coins', 'success'),
     ('Total Credit', metrics.total_credit, 'fa-hand-holding-dollar', 'warning'),
-    ('Cash In Hand', metrics.cash_in_hand, 'fa-money-bill-wave', 'success'),
-    ('Stock Value', metrics.stock_value, 'fa-warehouse', 'info'),
     ('Total Purchasing', metrics.total_purchasing, 'fa-truck', 'dark'),
+    ('Stock Value', metrics.stock_value, 'fa-warehouse', 'info'),
   ] %}
   {% for title, value, icon, color in kpis %}
   <div class="col-6 col-md-4 col-xl-3">
@@ -72,23 +71,23 @@
   <div class="col-lg-6">
     <div class="card dash-panel border-0 shadow-sm h-100">
       <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <strong>Recent Expenses</strong>
-        <a href="{{ url_for('expenses.index') }}" class="redirect-icon-btn" title="Open Expenses">
+        <strong>Recent Sales</strong>
+        <a href="{{ url_for('sales.index') }}" class="redirect-icon-btn" title="Open Sales">
           <i class="fa-solid fa-up-right-from-square"></i>
         </a>
       </div>
       <div class="table-responsive">
         <table class="table table-sm mb-0">
-          <thead><tr><th>Expense</th><th>Date</th><th class="text-end">Amount</th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Date</th><th class="text-end">Total</th></tr></thead>
           <tbody>
-            {% for e in metrics.recent_expenses %}
+            {% for s in metrics.recent_sales %}
             <tr>
-              <td>{{ e.name }}</td>
-              <td>{{ e.expense_date }}</td>
-              <td class="text-end">{{ '%.2f'|format(e.amount|float) }}</td>
+              <td><a href="{{ url_for('sales.invoice', sale_id=s.id) }}">{{ s.invoice_no }}</a></td>
+              <td>{{ s.sale_date }}</td>
+              <td class="text-end">{{ '%.2f'|format(s.grand_total|float) }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="3" class="text-muted small">No expenses yet</td></tr>
+            <tr><td colspan="3" class="text-muted small">No sales yet</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -133,6 +132,60 @@
             </tr>
             {% else %}
             <tr><td colspan="4" class="text-muted small">No credit balances</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card dash-panel border-0 shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <strong>Recent Expenses</strong>
+        <a href="{{ url_for('expenses.index') }}" class="redirect-icon-btn" title="Open Expenses">
+          <i class="fa-solid fa-up-right-from-square"></i>
+        </a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Expense</th><th>Date</th><th class="text-end">Amount</th></tr></thead>
+          <tbody>
+            {% for e in metrics.recent_expenses %}
+            <tr>
+              <td>{{ e.name }}</td>
+              <td>{{ e.expense_date }}</td>
+              <td class="text-end">{{ '%.2f'|format(e.amount|float) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-muted small">No expenses yet</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card dash-panel border-0 shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <strong>Recent Purchases</strong>
+        <a href="{{ url_for('purchases.index') }}" class="redirect-icon-btn" title="Open Purchases">
+          <i class="fa-solid fa-up-right-from-square"></i>
+        </a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Invoice</th><th>Date</th><th class="text-end">Total</th></tr></thead>
+          <tbody>
+            {% for p in metrics.recent_purchases %}
+            <tr>
+              <td>{{ p.invoice_no }}</td>
+              <td>{{ p.purchase_date }}</td>
+              <td class="text-end">{{ '%.2f'|format(p.grand_total|float) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-muted small">No purchases yet</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -193,60 +246,6 @@
       </div>
     </div>
   </div>
-
-  <div class="col-lg-6">
-    <div class="card dash-panel border-0 shadow-sm h-100">
-      <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <strong>Recent Sales</strong>
-        <a href="{{ url_for('sales.index') }}" class="redirect-icon-btn" title="Open Sales">
-          <i class="fa-solid fa-up-right-from-square"></i>
-        </a>
-      </div>
-      <div class="table-responsive">
-        <table class="table table-sm mb-0">
-          <thead><tr><th>Invoice</th><th>Date</th><th class="text-end">Total</th></tr></thead>
-          <tbody>
-            {% for s in metrics.recent_sales %}
-            <tr>
-              <td><a href="{{ url_for('sales.invoice', sale_id=s.id) }}">{{ s.invoice_no }}</a></td>
-              <td>{{ s.sale_date }}</td>
-              <td class="text-end">{{ '%.2f'|format(s.grand_total|float) }}</td>
-            </tr>
-            {% else %}
-            <tr><td colspan="3" class="text-muted small">No sales yet</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-lg-6">
-    <div class="card dash-panel border-0 shadow-sm h-100">
-      <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <strong>Recent Purchases</strong>
-        <a href="{{ url_for('purchases.index') }}" class="redirect-icon-btn" title="Open Purchases">
-          <i class="fa-solid fa-up-right-from-square"></i>
-        </a>
-      </div>
-      <div class="table-responsive">
-        <table class="table table-sm mb-0">
-          <thead><tr><th>Invoice</th><th>Date</th><th class="text-end">Total</th></tr></thead>
-          <tbody>
-            {% for p in metrics.recent_purchases %}
-            <tr>
-              <td>{{ p.invoice_no }}</td>
-              <td>{{ p.purchase_date }}</td>
-              <td class="text-end">{{ '%.2f'|format(p.grand_total|float) }}</td>
-            </tr>
-            {% else %}
-            <tr><td colspan="3" class="text-muted small">No purchases yet</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
 </div>
 </div>
 {% endblock %}
@@ -258,6 +257,12 @@ function toggleCustomDates() {
   document.querySelectorAll('.custom-date-field').forEach((el) => {
     el.style.display = isCustom ? '' : 'none';
   });
+}
+function onDashPeriodChange() {
+  toggleCustomDates();
+  if (document.getElementById('period-filter')?.value !== 'custom') {
+    document.getElementById('dash-filter-form')?.submit();
+  }
 }
 toggleCustomDates();
 

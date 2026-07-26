@@ -14,10 +14,98 @@
     document.getElementById('erp-sidebar')?.classList.toggle('show');
   });
 
-  const searchScope = document.body.dataset.searchScope || 'global';
-  const searchMode = document.body.dataset.searchMode || 'api';
+  document.getElementById('page-refresh-btn')?.addEventListener('click', (e) => {
+    const btn = e.currentTarget;
+    btn.classList.add('is-refreshing');
+    btn.disabled = true;
+    document.getElementById('global-loader')?.classList.remove('d-none');
+    // Hard reload so server-rendered stats and tables refresh
+    window.location.reload();
+  });
+
+  // Remember GET filters per page until the user clears them (All / Clear).
+  (function persistPageFilters() {
+    const storagePrefix = 'erp-page-filters:';
+
+    function formFieldNames(form) {
+      return [...new Set([...form.elements].map((el) => el.name).filter(Boolean))];
+    }
+
+    function isDefaultFilter(saved) {
+      if (!saved || typeof saved !== 'object') return true;
+      const period = saved.period;
+      const category = saved.category_id;
+      const start = saved.start_date || saved.start;
+      const end = saved.end_date || saved.end;
+      const periodDefault = !period || period === 'all';
+      const categoryDefault = !category;
+      const datesDefault = !start && !end;
+      return periodDefault && categoryDefault && datesDefault;
+    }
+
+    function readSaved(key) {
+      try {
+        return JSON.parse(localStorage.getItem(storagePrefix + key) || 'null');
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function writeSaved(key, values) {
+      if (isDefaultFilter(values)) {
+        localStorage.removeItem(storagePrefix + key);
+        return;
+      }
+      localStorage.setItem(storagePrefix + key, JSON.stringify(values));
+    }
+
+    document.querySelectorAll('[data-clear-page-filters]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const key = el.dataset.clearPageFilters;
+        if (key) localStorage.removeItem(storagePrefix + key);
+      });
+    });
+
+    const form = document.querySelector('form[data-persist-filters]');
+    if (!form) return;
+
+    const key = form.dataset.persistFilters;
+    if (!key) return;
+
+    const fields = formFieldNames(form);
+    const url = new URL(window.location.href);
+    // Any filter query key present (even empty / "all") means user applied a filter this visit
+    const hasFilterInUrl = fields.some((name) => url.searchParams.has(name));
+
+    if (hasFilterInUrl) {
+      const values = {};
+      fields.forEach((name) => {
+        if (url.searchParams.has(name)) values[name] = url.searchParams.get(name) || '';
+      });
+      writeSaved(key, values);
+      return;
+    }
+
+    const saved = readSaved(key);
+    if (isDefaultFilter(saved)) return;
+
+    let changed = false;
+    Object.entries(saved).forEach(([name, value]) => {
+      if (value == null || value === '') return;
+      if (url.searchParams.get(name) === String(value)) return;
+      url.searchParams.set(name, String(value));
+      changed = true;
+    });
+    if (changed) {
+      window.location.replace(url.pathname + '?' + url.searchParams.toString());
+    }
+  })();
+
+  const searchScope = document.body.dataset.searchScope || 'none';
+  const searchMode = document.body.dataset.searchMode || 'none';
   const searchTableSel = document.body.dataset.searchTable || '';
   const pageTableSearch = searchMode === 'table' && searchTableSel;
+  const pageApiSearch = searchMode === 'api' && searchScope && searchScope !== 'none';
 
   const dtDomWithFilter =
     '<"dt-toolbar"<"dt-left"l><"dt-right"f>>' +
@@ -50,6 +138,7 @@
         zeroRecords: 'No matching records',
         emptyTable: 'No data available',
       },
+      // When navbar owns search for this page, hide DataTables' own filter.
       dom: pageTableSearch ? dtDomNoFilter : dtDomWithFilter,
     });
   }
@@ -88,6 +177,11 @@
   const results = document.getElementById('global-search-results');
   let timer;
 
+  if (searchInput && searchMode === 'none') {
+    searchInput.disabled = true;
+    searchInput.setAttribute('title', 'Search is not available on this page');
+  }
+
   function getPageDataTable() {
     if (!pageTableSearch || !window.jQuery) return null;
     const el = document.querySelector(searchTableSel);
@@ -100,31 +194,56 @@
   searchInput?.addEventListener('input', () => {
     clearTimeout(timer);
     const q = searchInput.value.trim();
-    const dt = getPageDataTable();
-    if (dt) {
-      results?.classList.add('d-none');
-      dt.search(q).draw();
+    results?.classList.add('d-none');
+
+    // Table pages: filter only this page's DataTable — never call cross-module API.
+    if (pageTableSearch) {
+      const dt = getPageDataTable();
+      if (dt) dt.search(q).draw();
       return;
     }
+
+    if (!pageApiSearch) {
+      return;
+    }
+
     if (q.length < 2) {
-      results?.classList.add('d-none');
       return;
     }
     timer = setTimeout(async () => {
-      const scopeParam = searchScope && searchScope !== 'global' ? `&scope=${encodeURIComponent(searchScope)}` : '';
-      const res = await fetch('/api/search?q=' + encodeURIComponent(q) + scopeParam);
+      const res = await fetch(
+        '/api/search?q=' + encodeURIComponent(q) + '&scope=' + encodeURIComponent(searchScope)
+      );
       const data = await res.json();
       if (!results) return;
-      results.innerHTML =
-        data.results
-          .map(
-            (r) =>
-              `<a class="d-block p-2 text-decoration-none" href="${r.url}">${r.label} <small class="text-muted">(${r.type})</small></a>`
-          )
-          .join('') || '<div class="p-2 text-muted">No results</div>';
+      if (!data.results?.length) {
+        results.innerHTML = '<div class="lookup-item text-muted">No results</div>';
+        results.classList.remove('d-none');
+        return;
+      }
+      results.innerHTML = data.results
+        .map(
+          (r) =>
+            `<a class="lookup-item search-result-item" href="${r.url}" role="option">${r.label} <small class="text-muted">(${r.type})</small></a>`
+        )
+        .join('');
       results.classList.remove('d-none');
+      results.setAttribute('role', 'listbox');
     }, 250);
   });
+
+  // Deep-link from dashboard global search: ?search=term filters this page's table.
+  (function applySearchFromQuery() {
+    const term = new URLSearchParams(window.location.search).get('search');
+    if (!term || !searchInput) return;
+    searchInput.value = term;
+    if (pageTableSearch) {
+      const dt = getPageDataTable();
+      if (dt) dt.search(term).draw();
+    } else if (pageApiSearch && term.trim().length >= 2) {
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  })();
 
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.global-search')) {
@@ -148,4 +267,98 @@
     submitBtn.className = `btn px-4 ${btn.dataset.confirmClass || 'btn-danger'}`;
     bootstrap.Modal.getOrCreateInstance(modalEl).show();
   });
+
+  // Arrow Up/Down + Enter for all search lookup dropdowns
+  function findLookupPanel(input) {
+    if (!(input instanceof HTMLElement)) return null;
+    const scopes = [
+      input.closest('.position-relative'),
+      input.closest('td'),
+      input.closest('[class*="col-"]'),
+      input.closest('.global-search'),
+      input.parentElement,
+      input.parentElement?.parentElement,
+    ].filter(Boolean);
+    for (const scope of scopes) {
+      const panel =
+        scope.querySelector('.lookup-results') ||
+        scope.querySelector('#global-search-results') ||
+        scope.querySelector('.search-results');
+      if (panel && !panel.classList.contains('d-none')) return panel;
+    }
+    return null;
+  }
+
+  function lookupItems(panel) {
+    return [...panel.querySelectorAll('button.lookup-item, a.lookup-item, a.search-result-item')].filter(
+      (el) => !el.classList.contains('text-muted') && !el.classList.contains('text-danger')
+    );
+  }
+
+  function setLookupActive(items, index) {
+    items.forEach((el, i) => {
+      const on = i === index;
+      el.classList.toggle('is-active', on);
+      if (on) {
+        el.setAttribute('aria-selected', 'true');
+        el.scrollIntoView({ block: 'nearest' });
+      } else {
+        el.removeAttribute('aria-selected');
+      }
+    });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const input = e.target;
+    if (!(input instanceof HTMLInputElement) && !(input instanceof HTMLTextAreaElement)) return;
+    if (input.type === 'hidden') return;
+
+    const panel = findLookupPanel(input);
+    if (!panel) return;
+
+    const items = lookupItems(panel);
+    if (!items.length) return;
+
+    let idx = items.findIndex((el) => el.classList.contains('is-active'));
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      e.stopPropagation();
+      idx = idx < 0 ? 0 : idx < items.length - 1 ? idx + 1 : 0;
+      setLookupActive(items, idx);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+      idx = idx < 0 ? items.length - 1 : idx > 0 ? idx - 1 : items.length - 1;
+      setLookupActive(items, idx);
+      return;
+    }
+    if (e.key === 'Enter') {
+      // Open highlighted result, or the first one if none highlighted yet.
+      const target = idx >= 0 ? items[idx] : items[0];
+      if (target) {
+        e.preventDefault();
+        e.stopPropagation();
+        target.click();
+      }
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      panel.classList.add('d-none');
+      items.forEach((el) => el.classList.remove('is-active'));
+    }
+  });
+
+  // When lookup HTML is replaced, drop stale active state
+  document.addEventListener(
+    'input',
+    (e) => {
+      const panel = findLookupPanel(e.target);
+      panel?.querySelectorAll('.is-active').forEach((el) => el.classList.remove('is-active'));
+    },
+    true
+  );
 })();

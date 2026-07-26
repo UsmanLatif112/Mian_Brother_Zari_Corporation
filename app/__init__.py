@@ -61,6 +61,42 @@ def _apply_desktop_paths(app: Flask) -> None:
     )
 
 
+def _configure_sqlite_engine(app: Flask) -> None:
+    """Timeout + WAL so desktop Waitress threads don't stall on locks."""
+    uri = app.config.get("SQLALCHEMY_DATABASE_URI") or ""
+    if not uri.startswith("sqlite"):
+        return
+
+    options = dict(app.config.get("SQLALCHEMY_ENGINE_OPTIONS") or {})
+    connect_args = dict(options.get("connect_args") or {})
+    connect_args.setdefault("timeout", 30)
+    connect_args.setdefault("check_same_thread", False)
+    options["connect_args"] = connect_args
+    options.setdefault("pool_pre_ping", True)
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = options
+
+
+def _enable_sqlite_wal(app: Flask) -> None:
+    uri = app.config.get("SQLALCHEMY_DATABASE_URI") or ""
+    if not uri.startswith("sqlite"):
+        return
+
+    from sqlalchemy import event
+
+    with app.app_context():
+        engine = db.engine
+
+        @event.listens_for(engine, "connect")
+        def _sqlite_on_connect(dbapi_conn, connection_record):  # noqa: ARG001
+            cursor = dbapi_conn.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+            finally:
+                cursor.close()
+
+
 def create_app(config_class=None):
     desktop = os.environ.get("DESKTOP_APP", "").lower() in ("1", "true", "yes")
     if desktop:
@@ -92,8 +128,10 @@ def create_app(config_class=None):
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
     _normalize_sqlite_uri(app)
+    _configure_sqlite_engine(app)
 
     db.init_app(app)
+    _enable_sqlite_wal(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
     csrf.init_app(app)
@@ -115,14 +153,35 @@ def create_app(config_class=None):
             ensure_customer_type_column()
         except Exception:
             logging.getLogger(__name__).warning("Could not ensure customer_type column")
+        try:
+            from app.models.account import AccountAmountTaken, AccountCashSetup
 
-    if app.config.get("SYNC_AUTO_ENABLED"):
+            AccountCashSetup.__table__.create(db.engine, checkfirst=True)
+            AccountAmountTaken.__table__.create(db.engine, checkfirst=True)
+        except Exception:
+            logging.getLogger(__name__).warning("Could not ensure account tables", exc_info=True)
+
+    if app.config.get("SYNC_AUTO_ENABLED") or app.config.get("AUTO_BACKUP_ENABLED", True):
         try:
             from app.services.scheduler import init_scheduler
 
             init_scheduler(app)
+            if app.config.get("SYNC_AUTO_ENABLED"):
+                logging.getLogger(__name__).info(
+                    "Background MySQL sync enabled (every %s min when online)",
+                    app.config.get("SYNC_INTERVAL_MINUTES", 15),
+                )
+            if app.config.get("AUTO_BACKUP_ENABLED", True):
+                logging.getLogger(__name__).info(
+                    "Background SQLite backup enabled (every %s hour(s))",
+                    app.config.get("AUTO_BACKUP_INTERVAL_HOURS", 1),
+                )
         except Exception:
-            logging.getLogger(__name__).warning("Scheduler not started")
+            logging.getLogger(__name__).warning("Scheduler not started", exc_info=True)
+    else:
+        logging.getLogger(__name__).info(
+            "Background jobs off (SYNC_AUTO_ENABLED / AUTO_BACKUP_ENABLED)"
+        )
 
     @app.cli.command("init-db")
     def init_db():
@@ -156,6 +215,8 @@ def register_blueprints(app):
     from app.expenses.routes import expenses_bp
     from app.customers.routes import customers_bp
     from app.vendors.routes import vendors_bp
+    from app.categories.routes import categories_bp
+    from app.account.routes import account_bp
     from app.maintenance.routes import maintenance_bp
     from app.journal.routes import journal_bp
     from app.api.routes import api_bp
@@ -168,6 +229,8 @@ def register_blueprints(app):
     app.register_blueprint(expenses_bp, url_prefix="/expenses")
     app.register_blueprint(customers_bp, url_prefix="/customers")
     app.register_blueprint(vendors_bp, url_prefix="/vendors")
+    app.register_blueprint(categories_bp, url_prefix="/categories")
+    app.register_blueprint(account_bp, url_prefix="/account")
     app.register_blueprint(maintenance_bp, url_prefix="/sync-backup")
     app.register_blueprint(journal_bp, url_prefix="/journal")
     app.register_blueprint(api_bp, url_prefix="/api")

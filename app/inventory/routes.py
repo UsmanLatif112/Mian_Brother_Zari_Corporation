@@ -14,7 +14,7 @@ from app.services.fifo_service import (
     reprice_all_remaining,
     reprice_batch,
 )
-from app.services.purchase_service import record_purchase
+from app.services.purchase_service import amend_purchase_for_layer, record_purchase
 from app.utils.decorators import permission_required
 from app.utils.uploads import accept_uploaded_path, delete_image, save_image
 
@@ -55,12 +55,42 @@ def _parse_optional_text(raw):
 
 
 def _inventory_page(form=None, open_modal=False):
+    from datetime import time
+
+    from app.services.dashboard_service import _range_for_filter
+
     category_id = request.args.get("category_id", type=int)
+    period = request.args.get("period", "all")
+    start_raw = request.args.get("start_date") or ""
+    end_raw = request.args.get("end_date") or ""
+    try:
+        period_start = date.fromisoformat(start_raw) if start_raw else None
+    except ValueError:
+        period_start = None
+    try:
+        period_end = date.fromisoformat(end_raw) if end_raw else None
+    except ValueError:
+        period_end = None
+    range_start, range_end = _range_for_filter(period, period_start, period_end)
+
     q = Product.query.filter_by(is_deleted=False)
     if category_id:
         q = q.filter(
             db.or_(Product.category_id == category_id, Product.subcategory_id == category_id)
         )
+    if range_start and range_end:
+        start_dt = datetime.combine(range_start, time.min)
+        end_dt = datetime.combine(range_end, time.max)
+        product_ids = (
+            db.session.query(StockLayer.product_id)
+            .filter(
+                StockLayer.received_at >= start_dt,
+                StockLayer.received_at <= end_dt,
+            )
+            .distinct()
+        )
+        q = q.filter(Product.id.in_(product_ids))
+
     products = q.order_by(Product.name).all()
     categories = Category.query.filter_by(is_deleted=False, parent_id=None).order_by(Category.name).all()
     if not open_modal:
@@ -72,6 +102,9 @@ def _inventory_page(form=None, open_modal=False):
         open_modal=open_modal,
         categories=categories,
         selected_category=category_id or "",
+        selected_period=period,
+        start_date=start_raw,
+        end_date=end_raw,
     )
 
 
@@ -86,8 +119,7 @@ def index():
 @login_required
 @permission_required("inventory.view")
 def categories():
-    cats = Category.query.filter_by(is_deleted=False, parent_id=None).all()
-    return render_template("inventory/categories.html", categories=cats)
+    return redirect(url_for("categories.index"))
 
 
 @inventory_bp.route("/products/create", methods=["GET", "POST"])
@@ -111,6 +143,8 @@ def create_product():
         if not sub_id:
             sub_id = None
         try:
+            from app.utils.product_codes import ensure_product_codes
+
             existing_id = form.existing_product_id.data
             if existing_id:
                 product = db.session.get(Product, int(existing_id))
@@ -118,7 +152,9 @@ def create_product():
                     flash("Selected product not found.", "danger")
                     return _inventory_page(form=form, open_modal=True)
                 product.name = form.name.data
-                product.barcode = form.barcode.data
+                # Keep existing SKU; allow barcode update (auto only if blank on create)
+                barcode_val = (form.barcode.data or "").strip() or product.barcode
+                product.barcode = barcode_val
                 product.brand = form.brand.data
                 product.category_id = form.category_id.data
                 product.subcategory_id = sub_id
@@ -129,10 +165,17 @@ def create_product():
                 _apply_product_photo(product)
                 action = "update"
             else:
+                sku_val, barcode_val = ensure_product_codes(form.sku.data, form.barcode.data)
+                if Product.query.filter_by(sku=sku_val).first():
+                    flash(f"SKU '{sku_val}' already exists. Clear and use a different SKU.", "danger")
+                    return _inventory_page(form=form, open_modal=True)
+                if barcode_val and Product.query.filter_by(barcode=barcode_val).first():
+                    flash(f"Barcode '{barcode_val}' already exists. Clear and use a different barcode.", "danger")
+                    return _inventory_page(form=form, open_modal=True)
                 product = Product(
                     name=form.name.data,
-                    sku=form.sku.data,
-                    barcode=form.barcode.data,
+                    sku=sku_val,
+                    barcode=barcode_val,
                     brand=form.brand.data,
                     category_id=form.category_id.data,
                     subcategory_id=sub_id,
@@ -230,24 +273,48 @@ def edit_product(product_id):
 @login_required
 @permission_required("inventory.view")
 def detail(product_id):
-    from datetime import date
+    from datetime import date, datetime, time
+
+    from app.services.dashboard_service import _range_for_filter
 
     product = db.session.get(Product, product_id)
     if not product or product.is_deleted:
         flash("Product not found.", "danger")
         return redirect(url_for("inventory.index"))
-    layers = (
-        StockLayer.query.filter_by(product_id=product.id)
-        .order_by(StockLayer.received_at.desc(), StockLayer.id.desc())
-        .all()
-    )
+
+    period = request.args.get("period", "all")
+    start_raw = request.args.get("start_date") or ""
+    end_raw = request.args.get("end_date") or ""
+    period_start = date.fromisoformat(start_raw) if start_raw else None
+    period_end = date.fromisoformat(end_raw) if end_raw else None
+    range_start, range_end = _range_for_filter(period, period_start, period_end)
+
+    layers_q = StockLayer.query.filter_by(product_id=product.id)
+    movements_q = StockMovement.query.filter_by(product_id=product.id)
+    if range_start and range_end:
+        start_dt = datetime.combine(range_start, time.min)
+        end_dt = datetime.combine(range_end, time.max)
+        layers_q = layers_q.filter(
+            StockLayer.received_at >= start_dt,
+            StockLayer.received_at <= end_dt,
+        )
+        movements_q = movements_q.filter(
+            StockMovement.created_at >= start_dt,
+            StockMovement.created_at <= end_dt,
+        )
+
+    layers = layers_q.order_by(StockLayer.received_at.desc(), StockLayer.id.desc()).all()
     movements = (
-        StockMovement.query.filter_by(product_id=product.id)
-        .order_by(StockMovement.created_at.desc())
-        .limit(50)
-        .all()
+        movements_q.order_by(StockMovement.created_at.desc()).limit(100).all()
     )
     open_batch_count = sum(1 for L in layers if (L.quantity_remaining or 0) > 0)
+    closed_batch_count = sum(1 for L in layers if (L.quantity_remaining or 0) <= 0)
+    total_stock = sum((L.quantity_remaining or 0) for L in layers)
+    total_stock_value = sum(
+        (L.quantity_remaining or 0) * (L.unit_cost or 0)
+        for L in layers
+        if (L.quantity_remaining or 0) > 0
+    )
     form = ProductForm(obj=product)
     form.category_id.data = product.category_id
     form.subcategory_id.data = product.subcategory_id
@@ -256,9 +323,15 @@ def detail(product_id):
         product=product,
         layers=layers,
         movements=movements,
+        total_stock=total_stock,
+        total_stock_value=total_stock_value,
         open_batch_count=open_batch_count,
+        closed_batch_count=closed_batch_count,
         form=form,
         today=date.today(),
+        selected_period=period,
+        start_date=start_raw,
+        end_date=end_raw,
         categories=Category.query.filter_by(is_deleted=False, parent_id=None).order_by(Category.name).all(),
     )
 
@@ -345,17 +418,37 @@ def edit_layer_entry(layer_id):
         product.purchase_price = purchase_price
         product.sale_price = sale_price
 
+        old_purchased = Decimal(str(layer.quantity_received or 0))
+        old_unit_cost = Decimal(str(layer.unit_cost or 0))
+        old_vendor_id = layer.vendor_id
+
         layer.vendor_id = vendor.id
         layer.invoice_no = _parse_optional_text(request.form.get("invoice_no"))
         layer.batch_number = _parse_optional_text(request.form.get("batch_number"))
         layer.expiry_date = _parse_optional_date(request.form.get("expiry_date"))
 
+        new_purchased = Decimal(
+            request.form.get("quantity_received")
+            or request.form.get("purchased_qty")
+            or 0
+        )
         new_qty = Decimal(request.form.get("opening_stock") or request.form.get("quantity") or 0)
-        if new_qty < 0:
-            raise ValueError("Quantity cannot be negative.")
+        if new_purchased < 0 or new_qty < 0:
+            raise ValueError("Quantities cannot be negative.")
+        if new_qty > new_purchased:
+            raise ValueError("Available qty cannot be more than purchased qty.")
+
+        layer.quantity_received = new_purchased
         current_qty = Decimal(str(layer.quantity_remaining or 0))
         if new_qty != current_qty:
-            adjust_batch(layer, new_qty, current_user.id, notes="Edited inventory entry")
+            adj_notes = (request.form.get("adjustment_notes") or "").strip() or "Edited batch quantity"
+            adjust_batch(
+                layer,
+                new_qty,
+                current_user.id,
+                notes=adj_notes,
+            )
+        layer.quantity_received = new_purchased
 
         if Decimal(str(layer.quantity_remaining or 0)) > 0:
             reprice_batch(
@@ -369,6 +462,17 @@ def edit_layer_entry(layer_id):
             layer.unit_cost = purchase_price
             layer.sale_price = sale_price
 
+        # Keep linked purchase + vendor payable / ledger in sync with this batch
+        amend_purchase_for_layer(
+            layer,
+            old_purchased=old_purchased,
+            new_purchased=new_purchased,
+            old_unit_cost=old_unit_cost,
+            new_unit_cost=purchase_price,
+            new_vendor_id=vendor.id,
+            new_invoice_no=layer.invoice_no,
+        )
+
         log_audit(
             "update",
             "stock_layer",
@@ -381,6 +485,7 @@ def edit_layer_entry(layer_id):
                     "vendor_id": layer.vendor_id,
                     "invoice_no": layer.invoice_no,
                     "quantity": float(layer.quantity_remaining or 0),
+                    "quantity_received": float(layer.quantity_received or 0),
                     "unit_cost": float(layer.unit_cost or 0),
                     "sale_price": float(layer.sale_price or 0) if layer.sale_price is not None else None,
                     "batch_number": layer.batch_number,
@@ -389,7 +494,7 @@ def edit_layer_entry(layer_id):
             ),
         )
         db.session.commit()
-        flash("Inventory entry updated.", "success")
+        flash("Inventory entry updated (purchase & vendor payable synced).", "success")
     except Exception as exc:
         db.session.rollback()
         flash(str(exc), "danger")
@@ -412,10 +517,21 @@ def update_layer_details(layer_id):
         vendor = db.session.get(Vendor, int(vendor_raw))
         if not vendor or vendor.is_deleted:
             raise ValueError("Vendor is required.")
+        old_purchased = Decimal(str(layer.quantity_received or 0))
+        old_unit_cost = Decimal(str(layer.unit_cost or 0))
         layer.vendor_id = vendor.id
         layer.invoice_no = _parse_optional_text(request.form.get("invoice_no"))
         layer.batch_number = _parse_optional_text(request.form.get("batch_number"))
         layer.expiry_date = _parse_optional_date(request.form.get("expiry_date"))
+        amend_purchase_for_layer(
+            layer,
+            old_purchased=old_purchased,
+            new_purchased=old_purchased,
+            old_unit_cost=old_unit_cost,
+            new_unit_cost=old_unit_cost,
+            new_vendor_id=vendor.id,
+            new_invoice_no=layer.invoice_no,
+        )
         log_audit(
             "update",
             "stock_layer",
@@ -431,7 +547,7 @@ def update_layer_details(layer_id):
             ),
         )
         db.session.commit()
-        flash("Batch details updated.", "success")
+        flash("Batch details updated (purchase synced).", "success")
     except Exception as exc:
         db.session.rollback()
         flash(str(exc), "danger")
@@ -452,6 +568,8 @@ def reprice_layer(layer_id):
         unit_cost = Decimal(cost_raw) if cost_raw not in (None, "") else None
         sale_price = Decimal(sale_raw) if sale_raw not in (None, "") else None
         notes = request.form.get("notes")
+        old_purchased = Decimal(str(layer.quantity_received or 0))
+        old_unit_cost = Decimal(str(layer.unit_cost or 0))
         reprice_batch(
             layer,
             unit_cost=unit_cost,
@@ -459,6 +577,14 @@ def reprice_layer(layer_id):
             user_id=current_user.id,
             notes=notes,
         )
+        if unit_cost is not None:
+            amend_purchase_for_layer(
+                layer,
+                old_purchased=old_purchased,
+                new_purchased=old_purchased,
+                old_unit_cost=old_unit_cost,
+                new_unit_cost=Decimal(str(layer.unit_cost or 0)),
+            )
         log_audit(
             "reprice",
             "stock_layer",
@@ -474,7 +600,7 @@ def reprice_layer(layer_id):
             ),
         )
         db.session.commit()
-        flash("Batch pricing updated for remaining stock only (sold history unchanged).", "success")
+        flash("Batch pricing updated (purchase & vendor payable synced).", "success")
     except Exception as exc:
         db.session.rollback()
         flash(str(exc), "danger")

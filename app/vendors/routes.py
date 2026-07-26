@@ -30,17 +30,57 @@ def _apply_vendor_photo(vendor):
         vendor.photo = path
 
 
+def _parse_date(value):
+    if not value:
+        return None
+    try:
+        return date_cls.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _vendor_page(form=None, open_modal=False):
-    vendors = Vendor.query.filter_by(is_deleted=False).order_by(Vendor.name).all()
+    from datetime import datetime, time
+
+    from app.services.dashboard_service import _range_for_filter
+
+    period = request.args.get("period", "all")
+    period_start = _parse_date(request.args.get("start_date"))
+    period_end = _parse_date(request.args.get("end_date"))
+    range_start, range_end = _range_for_filter(period, period_start, period_end)
+    status = (request.args.get("status") or "all").strip().lower()
+    if status not in ("all", "payable", "prepaid", "settled"):
+        status = "all"
+
+    query = Vendor.query.filter_by(is_deleted=False)
+    if range_start and range_end:
+        start_dt = datetime.combine(range_start, time.min)
+        end_dt = datetime.combine(range_end, time.max)
+        query = query.filter(Vendor.created_at >= start_dt, Vendor.created_at <= end_dt)
+    if status == "payable":
+        query = query.filter(Vendor.balance > 0)
+    elif status == "prepaid":
+        query = query.filter(Vendor.balance < 0)
+    elif status == "settled":
+        query = query.filter(Vendor.balance == 0)
+
+    vendors = query.order_by(Vendor.name).all()
+
+    base = [Vendor.is_deleted.is_(False)]
+    if range_start and range_end:
+        start_dt = datetime.combine(range_start, time.min)
+        end_dt = datetime.combine(range_end, time.max)
+        base.extend([Vendor.created_at >= start_dt, Vendor.created_at <= end_dt])
+
     total_payable = (
         db.session.query(func.coalesce(func.sum(Vendor.balance), 0))
-        .filter(Vendor.is_deleted.is_(False), Vendor.balance > 0)
+        .filter(*base, Vendor.balance > 0)
         .scalar()
         or Decimal("0")
     )
     total_prepaid = (
         db.session.query(func.coalesce(func.sum(-Vendor.balance), 0))
-        .filter(Vendor.is_deleted.is_(False), Vendor.balance < 0)
+        .filter(*base, Vendor.balance < 0)
         .scalar()
         or Decimal("0")
     )
@@ -53,6 +93,10 @@ def _vendor_page(form=None, open_modal=False):
         payment_types=PAYMENT_TYPES,
         total_payable=total_payable,
         total_prepaid=total_prepaid,
+        selected_period=period,
+        start_date=period_start.isoformat() if period_start else "",
+        end_date=period_end.isoformat() if period_end else "",
+        selected_status=status,
     )
 
 
@@ -171,20 +215,50 @@ def payment():
 @login_required
 @permission_required("vendors.view")
 def detail(vendor_id):
+    from app.services.dashboard_service import _range_for_filter
+
     vendor = db.session.get(Vendor, vendor_id)
     if not vendor or vendor.is_deleted:
         flash("Vendor not found.", "danger")
         return redirect(url_for("vendors.index"))
-    ledger = (
-        LedgerEntry.query.filter_by(party_type="vendor", party_id=vendor_id)
-        .order_by(LedgerEntry.entry_date, LedgerEntry.id)
-        .all()
-    )
-    payments = (
-        VendorPayment.query.filter_by(vendor_id=vendor_id)
-        .order_by(VendorPayment.payment_date.desc())
-        .all()
-    )
+
+    period = request.args.get("period", "all")
+    period_start = _parse_date(request.args.get("start_date"))
+    period_end = _parse_date(request.args.get("end_date"))
+    range_start, range_end = _range_for_filter(period, period_start, period_end)
+
+    ledger_q = LedgerEntry.query.filter_by(party_type="vendor", party_id=vendor_id)
+    pay_q = VendorPayment.query.filter_by(vendor_id=vendor_id)
+    if range_start:
+        ledger_q = ledger_q.filter(LedgerEntry.entry_date >= range_start)
+        pay_q = pay_q.filter(VendorPayment.payment_date >= range_start)
+    if range_end:
+        ledger_q = ledger_q.filter(LedgerEntry.entry_date <= range_end)
+        pay_q = pay_q.filter(VendorPayment.payment_date <= range_end)
+
+    ledger = ledger_q.order_by(LedgerEntry.entry_date, LedgerEntry.id).all()
+
+    # Show what was purchased on purchase ledger rows
+    from app.models import Purchase
+    from app.services.purchase_service import purchase_items_summary
+
+    purchase_ids = [
+        int(l.reference_id)
+        for l in ledger
+        if (l.reference_type or "") == "purchase" and l.reference_id
+    ]
+    purchases_by_id = {}
+    if purchase_ids:
+        for p in Purchase.query.filter(Purchase.id.in_(set(purchase_ids))).all():
+            purchases_by_id[p.id] = p
+    for entry in ledger:
+        if (entry.reference_type or "") == "purchase" and entry.reference_id:
+            purchase = purchases_by_id.get(int(entry.reference_id))
+            summary = purchase_items_summary(purchase) if purchase else ""
+            if summary:
+                entry.notes = summary
+
+    payments = pay_q.order_by(VendorPayment.payment_date.desc()).all()
     return render_template(
         "vendors/detail.html",
         vendor=vendor,
@@ -192,4 +266,7 @@ def detail(vendor_id):
         payments=payments,
         today=date_cls.today().isoformat(),
         payment_types=PAYMENT_TYPES,
+        selected_period=period,
+        start_date=period_start.isoformat() if period_start else "",
+        end_date=period_end.isoformat() if period_end else "",
     )

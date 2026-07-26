@@ -2,17 +2,20 @@ import enum
 import json
 import logging
 import os
+import threading
+import time
 from datetime import date, datetime
 from decimal import Decimal
 
 from flask import current_app
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.mysql import insert as mysql_insert
-from sqlalchemy.orm import sessionmaker
 
 from app.extensions import db
 from app.models import (
     AccountBalance,
+    AccountAmountTaken,
+    AccountCashSetup,
     AuditLog,
     CashBookEntry,
     Category,
@@ -69,9 +72,17 @@ SYNC_MODELS = [
     StockMovement,
     InventoryAdjustment,
     CashBookEntry,
+    AccountCashSetup,
+    AccountAmountTaken,
     Notification,
     AuditLog,
 ]
+
+# Process-wide guards — keep UI / request threads free
+_sync_lock = threading.Lock()
+_mysql_cache = {"ok": False, "checked_at": 0.0}
+_MYSQL_CACHE_TTL_SEC = 45.0
+_MYSQL_CONNECT_TIMEOUT_SEC = 2
 
 
 def is_local_sqlite() -> bool:
@@ -93,18 +104,53 @@ def get_sync_target_label() -> str:
     return "MySQL (production)"
 
 
-def is_mysql_available() -> bool:
+def is_mysql_available(force: bool = False, timeout: float | None = None) -> bool:
+    """
+    Fast reachability check with short TCP timeout + short-lived cache.
+
+    Cached results avoid slowing page loads / frequent scheduler probes.
+    """
+    now = time.monotonic()
+    ttl = float(current_app.config.get("SYNC_MYSQL_CACHE_SECONDS", _MYSQL_CACHE_TTL_SEC))
+    if not force and (now - _mysql_cache["checked_at"]) < ttl:
+        return bool(_mysql_cache["ok"])
+
     uri = get_sync_mysql_uri()
     if not uri:
+        _mysql_cache.update(ok=False, checked_at=now)
         return False
+
+    connect_timeout = int(
+        timeout
+        if timeout is not None
+        else current_app.config.get("SYNC_MYSQL_CONNECT_TIMEOUT", _MYSQL_CONNECT_TIMEOUT_SEC)
+    )
+    engine = None
+    ok = False
     try:
-        engine = create_engine(uri, pool_pre_ping=True)
+        engine = create_engine(
+            uri,
+            pool_pre_ping=True,
+            pool_size=1,
+            max_overflow=0,
+            connect_args={"connect_timeout": max(1, connect_timeout)},
+        )
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        return True
+        ok = True
     except Exception as exc:
-        logger.warning("MySQL unavailable: %s", exc)
-        return False
+        # Debug level — probes are frequent; avoid flooding logs when offline
+        logger.debug("MySQL unavailable: %s", exc)
+        ok = False
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
+
+    _mysql_cache.update(ok=ok, checked_at=now)
+    return ok
 
 
 def enqueue_sync(entity_type, entity_id, operation, payload=None):
@@ -167,21 +213,38 @@ def push_sqlite_to_mysql() -> tuple[int, str]:
     if not mysql_uri:
         raise RuntimeError("MySQL sync URI is not configured in .env")
 
-    remote_engine = create_engine(mysql_uri, pool_pre_ping=True)
-    db.metadata.create_all(remote_engine)
+    # Flush + WAL checkpoint so push reads a consistent local snapshot
+    from app.services.backup_service import prepare_sqlite_for_export
 
-    total = 0
-    with remote_engine.connect() as conn:
-        conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
-        for model in SYNC_MODELS:
-            total += _push_model(conn, model)
-        conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
-        conn.commit()
+    prepare_sqlite_for_export()
 
-    return total, get_sync_target_label()
+    connect_timeout = int(
+        current_app.config.get("SYNC_MYSQL_CONNECT_TIMEOUT", _MYSQL_CONNECT_TIMEOUT_SEC)
+    )
+    remote_engine = create_engine(
+        mysql_uri,
+        pool_pre_ping=True,
+        pool_size=1,
+        max_overflow=0,
+        connect_args={"connect_timeout": max(1, connect_timeout)},
+    )
+    try:
+        db.metadata.create_all(remote_engine)
+
+        total = 0
+        with remote_engine.connect() as conn:
+            conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
+            for model in SYNC_MODELS:
+                total += _push_model(conn, model)
+            conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
+            conn.commit()
+
+        return total, get_sync_target_label()
+    finally:
+        remote_engine.dispose()
 
 
-def run_sync(user_id=None) -> SyncLog:
+def _run_sync_body(user_id=None) -> SyncLog:
     log = SyncLog(direction="push", status="running", message="Sync started")
     db.session.add(log)
     db.session.flush()
@@ -193,7 +256,7 @@ def run_sync(user_id=None) -> SyncLog:
         db.session.commit()
         return log
 
-    if not is_mysql_available():
+    if not is_mysql_available(force=True):
         log.status = "failed"
         log.message = (
             f"{get_sync_target_label()} is not reachable. "
@@ -220,3 +283,45 @@ def run_sync(user_id=None) -> SyncLog:
     log.completed_at = utcnow()
     db.session.commit()
     return log
+
+
+def run_sync(user_id=None) -> SyncLog:
+    """
+    Manual sync (request thread). Waits briefly for the lock; if another sync
+    is running, returns a 'busy' log without starting a second push.
+    """
+    acquired = _sync_lock.acquire(blocking=True, timeout=2)
+    if not acquired:
+        log = SyncLog(
+            direction="push",
+            status="failed",
+            message="Sync already running in the background. Try again in a moment.",
+            completed_at=utcnow(),
+        )
+        db.session.add(log)
+        db.session.commit()
+        return log
+    try:
+        return _run_sync_body(user_id=user_id)
+    finally:
+        _sync_lock.release()
+
+
+def try_background_sync(reason: str = "auto") -> SyncLog | None:
+    """
+    Non-blocking sync for the scheduler. Returns None if skipped
+    (already running, offline, or not SQLite) — never blocks the UI.
+    """
+    if not is_local_sqlite():
+        return None
+    if not is_mysql_available(force=False):
+        logger.debug("Background sync skipped (%s): MySQL offline", reason)
+        return None
+    if not _sync_lock.acquire(blocking=False):
+        logger.info("Background sync skipped (%s): already running", reason)
+        return None
+    try:
+        logger.info("Background sync starting (%s)", reason)
+        return _run_sync_body()
+    finally:
+        _sync_lock.release()

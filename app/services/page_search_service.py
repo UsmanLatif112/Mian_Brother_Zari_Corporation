@@ -1,8 +1,11 @@
-"""Scoped search for navbar API (one entity type per page scope)."""
+"""Scoped / global search for navbar API."""
 
 from sqlalchemy import or_
+from urllib.parse import quote
 
 from app.models import (
+    AccountAmountTaken,
+    Category,
     Customer,
     Expense,
     Product,
@@ -14,34 +17,49 @@ from app.models import (
 
 
 def search_scoped(scope: str, q: str, limit: int = 15) -> list[dict]:
-    scope = (scope or "global").strip().lower()
+    """Search by page scope. ``global`` searches across the app (dashboard)."""
+    scope = (scope or "").strip().lower()
     q = (q or "").strip()
-    if len(q) < 2:
+    if len(q) < 2 or not scope or scope == "none":
         return []
 
-    if scope == "sales":
-        return _search_sales(q, limit)
-    if scope == "inventory":
-        return _search_products(q, limit)
-    if scope == "purchases":
-        return _search_purchases(q, limit)
-    if scope == "expenses":
-        return _search_expenses(q, limit)
-    if scope == "customers":
-        return _search_customers(q, limit)
-    if scope == "vendors":
-        return _search_vendors(q, limit)
-    if scope == "users":
-        return _search_users(q, limit)
-    return _search_global(q, limit)
+    if scope == "global":
+        return _search_global(q, limit)
+
+    handlers = {
+        "sales": _search_sales,
+        "inventory": _search_products,
+        "purchases": _search_purchases,
+        "expenses": _search_expenses,
+        "customers": _search_customers,
+        "vendors": _search_vendors,
+        "users": _search_users,
+    }
+    handler = handlers.get(scope)
+    if not handler:
+        return []
+    return handler(q, limit)
 
 
-def _search_global(q: str, limit: int) -> list[dict]:
+def _search_global(q: str, limit: int = 15) -> list[dict]:
+    """Dashboard: mix of entities; each result links to its page/entry."""
+    per = max(2, min(5, limit // 2 or 2))
     out: list[dict] = []
-    out.extend(_search_customers(q, min(5, limit)))
-    out.extend(_search_products(q, min(5, limit)))
-    out.extend(_search_sales(q, min(5, limit)))
+    out.extend(_search_customers(q, per))
+    out.extend(_search_vendors(q, per))
+    out.extend(_search_products(q, per))
+    out.extend(_search_sales(q, per))
+    out.extend(_search_purchases(q, per))
+    out.extend(_search_expenses(q, per))
+    out.extend(_search_categories(q, per))
+    out.extend(_search_amount_taken(q, per))
+    out.extend(_search_users(q, per))
     return out[:limit]
+
+
+def _page_search_url(path: str, q: str) -> str:
+    """List pages apply ``?search=`` into the navbar/DataTable on load."""
+    return f"{path}?search={quote(q)}"
 
 
 def _search_sales(q: str, limit: int) -> list[dict]:
@@ -113,12 +131,13 @@ def _search_purchases(q: str, limit: int) -> list[dict]:
     results = []
     for p in rows:
         vendor = p.vendor.name if p.vendor else "—"
+        term = (p.invoice_no or vendor or q).strip() or q
         results.append(
             {
                 "type": "purchase",
                 "id": p.id,
                 "label": f"{p.invoice_no} · {vendor}",
-                "url": "/purchases/",
+                "url": _page_search_url("/purchases/", term),
             }
         )
     return results
@@ -147,7 +166,7 @@ def _search_expenses(q: str, limit: int) -> list[dict]:
             "type": "expense",
             "id": e.id,
             "label": f"{e.name} ({e.amount})",
-            "url": "/expenses/",
+            "url": _page_search_url("/expenses/", e.name or q),
         }
         for e in rows
     ]
@@ -201,6 +220,61 @@ def _search_vendors(q: str, limit: int) -> list[dict]:
     ]
 
 
+def _search_categories(q: str, limit: int) -> list[dict]:
+    like = f"%{q}%"
+    rows = (
+        Category.query.filter(
+            Category.is_deleted.is_(False),
+            or_(Category.name.ilike(like), Category.description.ilike(like)),
+        )
+        .order_by(Category.name)
+        .limit(limit)
+        .all()
+    )
+    results = []
+    for c in rows:
+        if c.parent_id:
+            url = f"/categories/{c.parent_id}?search={quote(c.name)}"
+            label = f"{c.name} (subcategory)"
+        else:
+            url = f"/categories/{c.id}"
+            label = c.name
+        results.append(
+            {
+                "type": "category",
+                "id": c.id,
+                "label": label,
+                "url": url,
+            }
+        )
+    return results
+
+
+def _search_amount_taken(q: str, limit: int) -> list[dict]:
+    like = f"%{q}%"
+    rows = (
+        AccountAmountTaken.query.filter(
+            AccountAmountTaken.is_deleted.is_(False),
+            or_(
+                AccountAmountTaken.taken_by.ilike(like),
+                AccountAmountTaken.notes.ilike(like),
+            ),
+        )
+        .order_by(AccountAmountTaken.taken_date.desc(), AccountAmountTaken.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "type": "amount taken",
+            "id": r.id,
+            "label": f"{r.taken_by} · {r.amount} ({r.taken_date})",
+            "url": _page_search_url("/account/", r.taken_by or q),
+        }
+        for r in rows
+    ]
+
+
 def _search_users(q: str, limit: int) -> list[dict]:
     like = f"%{q}%"
     rows = (
@@ -220,7 +294,7 @@ def _search_users(q: str, limit: int) -> list[dict]:
             "type": "user",
             "id": u.id,
             "label": u.full_name or u.username,
-            "url": "/auth/users",
+            "url": _page_search_url("/auth/users", u.username or q),
         }
         for u in rows
     ]

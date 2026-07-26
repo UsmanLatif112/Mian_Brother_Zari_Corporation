@@ -1,114 +1,328 @@
 {% extends 'base.html' %}
 {% block title %}Sync & Backup{% endblock %}
 {% block content %}
-<h1 class="h3 mb-2">Sync &amp; Backup</h1>
-<p class="text-muted mb-4">
-  You are working offline on SQLite by default. When internet is available, you can push local data to MySQL
-  and create/download SQLite backups from this page.
-</p>
+<div class="dashboard-page">
+  <h1 class="h3 mb-2">Sync &amp; Backup</h1>
+  <p class="text-muted mb-4">
+    You are working offline on SQLite by default. When internet is available, you can push local data to MySQL
+    and create/download SQLite backups from this page.
+  </p>
 
-<div class="alert alert-light border mb-4">
-  <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
-    <div>
-      <div class="fw-semibold mb-1">MySQL status</div>
+  <div class="alert alert-light border mb-4">
+    <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
       <div>
-        {% if online %}
-          <span class="badge bg-success">Online</span>
-        {% else %}
-          <span class="badge bg-secondary">Offline</span>
-        {% endif %}
-      </div>
-    </div>
-    <div class="small text-muted">
-      Auto sync is controlled by <code>SYNC_AUTO_ENABLED</code>.
-    </div>
-  </div>
-</div>
-
-<div class="row g-4">
-  <div class="col-lg-6">
-    <div class="card border-0 shadow-sm">
-      <div class="card-header bg-white"><strong>Push Local Data</strong></div>
-      <div class="card-body">
-        <form method="post" action="{{ url_for('maintenance.push_sync') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="btn btn-success w-100" type="submit"
-            {% if not online or not can_sync %}disabled{% endif %}>
-            <i class="fa-solid fa-cloud-arrow-up me-1"></i> Push local data to MySQL
-          </button>
-        </form>
-      </div>
-    </div>
-
-    <div class="card border-0 shadow-sm mt-4">
-      <div class="card-header bg-white"><strong>Sync Logs</strong></div>
-      <div class="card-body">
-        <ul class="list-group list-group-flush">
-          {% for l in logs %}
-            <li class="list-group-item small">
-              {{ l.started_at }} — {{ l.status }} — {{ l.message }}
-            </li>
+        <div class="fw-semibold mb-1">MySQL status</div>
+        <div>
+          {% if online %}
+            <span class="badge bg-success">Online</span>
           {% else %}
-            <li class="list-group-item text-muted small">No sync logs yet.</li>
-          {% endfor %}
-        </ul>
+            <span class="badge bg-secondary">Offline</span>
+          {% endif %}
+        </div>
       </div>
-    </div>
-
-    <div class="card border-0 shadow-sm mt-4">
-      <div class="card-header bg-white"><strong>Pending Queue</strong></div>
-      <div class="card-body">
-        <ul class="list-group list-group-flush">
-          {% for q in queue %}
-            <li class="list-group-item small">
-              {{ q.entity_type }} #{{ q.entity_id }} ({{ q.attempts }} attempts)
-            </li>
-          {% else %}
-            <li class="list-group-item text-muted small">Queue empty.</li>
-          {% endfor %}
-        </ul>
+      <div class="small text-muted">
+        Auto sync (cron) and manual push both checkpoint SQLite first, then upload all local tables to MySQL when online.
+        (<code>SYNC_AUTO_ENABLED</code>). Manual push below still works anytime.
       </div>
     </div>
   </div>
 
-  <div class="col-lg-6">
-    <div class="card border-0 shadow-sm">
-      <div class="card-header bg-white"><strong>SQLite Backups</strong></div>
-      <div class="card-body">
-        <form method="post" action="{{ url_for('maintenance.create_backup') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="btn btn-success w-100" type="submit" {% if not can_backup %}disabled{% endif %}>
-            <i class="fa-solid fa-database me-1"></i> Create SQLite Backup
-          </button>
-        </form>
+  <div class="row g-4">
+    <div class="col-lg-6">
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white"><strong>Push Local Data</strong></div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('maintenance.push_sync') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-success w-100" type="submit"
+              {% if not online or not can_sync %}disabled{% endif %}>
+              <i class="fa-solid fa-cloud-arrow-up me-1"></i> Push local data to MySQL
+            </button>
+          </form>
+        </div>
       </div>
-    </div>
 
-    <div class="card border-0 shadow-sm mt-4">
-      <div class="card-header bg-white"><strong>Download Backups</strong></div>
-      <div class="card-body">
-        <table class="table">
-          <thead>
-            <tr><th>File</th><th></th></tr>
-          </thead>
-          <tbody>
-            {% for f in backups %}
-              <tr>
-                <td class="small">{{ f }}</td>
-                <td class="text-end">
-                  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('maintenance.download', filename=f) }}">
-                    Download
-                  </a>
-                </td>
-              </tr>
+      <div class="card border-0 shadow-sm mt-4">
+        <div class="card-header bg-white"><strong>Sync Logs</strong></div>
+        <div class="card-body">
+          <ul class="list-group list-group-flush">
+            {% for l in logs %}
+              <li class="list-group-item small">
+                {{ l.started_at }} — {{ l.status }} — {{ l.message }}
+              </li>
             {% else %}
-              <tr><td class="text-muted small">No backups found.</td><td></td></tr>
+              <li class="list-group-item text-muted small">No sync logs yet.</li>
             {% endfor %}
-          </tbody>
-        </table>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card border-0 shadow-sm mt-4">
+        <div class="card-header bg-white"><strong>Pending Queue</strong></div>
+        <div class="card-body">
+          <ul class="list-group list-group-flush">
+            {% for q in queue %}
+              <li class="list-group-item small">
+                {{ q.entity_type }} #{{ q.entity_id }} ({{ q.attempts }} attempts)
+              </li>
+            {% else %}
+              <li class="list-group-item text-muted small">Queue empty.</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white"><strong>SQLite Backups</strong></div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">
+            <strong>Create Backup</strong> makes a dated folder with
+            <code>.db</code>, <code>.db-wal</code>, and <code>.db-shm</code> (when present),
+            plus a consistent online-backup <code>.db</code>.
+            Use <strong>Save As…</strong> to copy that folder as a ZIP (or .db) anywhere you like.
+            {% if auto_backup_enabled %}
+            Auto-backup does the same every <strong>{{ auto_backup_hours }} hour{{ 's' if auto_backup_hours != 1 else '' }}</strong>.
+            {% endif %}
+          </p>
+          <form id="backup-form" method="post" action="{{ url_for('maintenance.create_backup') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="ajax" value="1">
+            <button class="btn btn-success w-100" type="submit" id="btn-create-backup" {% if not can_backup %}disabled{% endif %}>
+              <i class="fa-solid fa-database me-1"></i>
+              Create Backup
+            </button>
+          </form>
+          <div class="text-danger small mt-2 d-none" id="backup-error"></div>
+          <div class="text-success small mt-2 d-none" id="backup-ok"></div>
+        </div>
+      </div>
+
+      <div class="card border-0 shadow-sm mt-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <strong>Saved Backups</strong>
+          <span class="text-muted small">
+            {% if backup_total > backup_ui_limit %}
+              Showing last {{ backups|length }} of {{ backup_total }} (older stay on disk)
+            {% else %}
+              {{ backup_total }} backup{{ 's' if backup_total != 1 else '' }}
+            {% endif %}
+          </span>
+        </div>
+        <div class="card-body">
+          <table class="table datatable mb-0" id="backups-table">
+            <thead>
+              <tr><th>Backup</th><th class="text-end">Action</th></tr>
+            </thead>
+            <tbody>
+              {% for f in backups %}
+                <tr>
+                  <td class="small">
+                    <i class="fa-solid fa-folder me-1 text-warning"></i>{{ f }}
+                  </td>
+                  <td class="text-end text-nowrap">
+                    <a class="btn btn-sm btn-outline-secondary me-1"
+                       href="{{ url_for('maintenance.download', filename=f) }}"
+                       title="Download ZIP of .db + WAL + SHM">
+                      <i class="fa-solid fa-download me-1"></i>ZIP
+                    </a>
+                    <button type="button" class="btn btn-sm btn-outline-success btn-save-as"
+                            data-filename="{{ f }}"
+                            data-url="{{ url_for('maintenance.download', filename=f) }}"
+                            title="Save backup ZIP via File Explorer">
+                      <i class="fa-solid fa-folder-open me-1"></i>Save As…
+                    </button>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
 </div>
 {% endblock %}
 
+{% block extra_js %}
+<script>
+(function () {
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content || window.CSRF_TOKEN || '';
+
+  function showErr(msg) {
+    const errEl = document.getElementById('backup-error');
+    const okEl = document.getElementById('backup-ok');
+    if (okEl) okEl.classList.add('d-none');
+    if (errEl) {
+      errEl.textContent = msg || 'Something went wrong';
+      errEl.classList.remove('d-none');
+    }
+  }
+
+  function showOk(msg) {
+    const errEl = document.getElementById('backup-error');
+    const okEl = document.getElementById('backup-ok');
+    if (errEl) errEl.classList.add('d-none');
+    if (okEl) {
+      okEl.textContent = msg || 'Saved';
+      okEl.classList.remove('d-none');
+    }
+  }
+
+  async function waitPywebview(timeoutMs) {
+    if (window.pywebview?.api?.choose_backup_path) return true;
+    return await new Promise((resolve) => {
+      let done = false;
+      const finish = (ok) => { if (!done) { done = true; resolve(ok); } };
+      window.addEventListener('pywebviewready', () => finish(Boolean(window.pywebview?.api?.choose_backup_path)), { once: true });
+      setTimeout(() => finish(Boolean(window.pywebview?.api?.choose_backup_path)), timeoutMs || 800);
+    });
+  }
+
+  async function pickPathDesktop(defaultName) {
+    await waitPywebview(800);
+    if (!window.pywebview?.api?.choose_backup_path) return { available: false };
+    try {
+      const path = await window.pywebview.api.choose_backup_path(defaultName);
+      if (!path) return { available: true, cancelled: true };
+      return { available: true, path };
+    } catch (_) {
+      return { available: false };
+    }
+  }
+
+  async function copyToDesktopPath(filename, destPath) {
+    const fd = new FormData();
+    fd.append('csrf_token', csrf);
+    fd.append('dest_path', destPath);
+    fd.append('ajax', '1');
+    const res = await fetch(`/sync-backup/save-as/${encodeURIComponent(filename)}`, {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'fetch', 'X-CSRFToken': csrf },
+      body: fd,
+    });
+    return await res.json().catch(() => ({}));
+  }
+
+  const form = document.getElementById('backup-form');
+  const btn = document.getElementById('btn-create-backup');
+  const btnDefaultHtml = btn
+    ? btn.innerHTML
+    : '<i class="fa-solid fa-database me-1"></i> Create Backup';
+
+  function setBackupBusy(busy) {
+    const loader = document.getElementById('global-loader');
+    if (btn) {
+      btn.disabled = busy;
+      btn.innerHTML = busy
+        ? '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Creating…'
+        : btnDefaultHtml;
+    }
+    if (loader) loader.classList.toggle('d-none', !busy);
+  }
+
+  // Create only — no folder picker
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    document.getElementById('backup-ok')?.classList.add('d-none');
+    document.getElementById('backup-error')?.classList.add('d-none');
+    setBackupBusy(true);
+    try {
+      const fd = new FormData(form);
+      const res = await fetch(form.action, {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'fetch', 'X-CSRFToken': csrf },
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) {
+        showErr(data.error || 'Backup failed');
+        setBackupBusy(false);
+        return;
+      }
+      showOk('Backup folder created (.db + WAL/SHM). Use Save As… or ZIP to keep a copy.');
+      setTimeout(() => window.location.reload(), 700);
+    } catch (_) {
+      showErr('Network error. Try again.');
+      setBackupBusy(false);
+    }
+  });
+
+  // Save As — open File Explorer on click, then copy the file
+  document.addEventListener('click', async (e) => {
+    const saveBtn = e.target.closest('.btn-save-as');
+    if (!saveBtn) return;
+    e.preventDefault();
+
+    const filename = saveBtn.dataset.filename;
+    const url = saveBtn.dataset.url;
+    if (!filename || !url) return;
+
+    saveBtn.disabled = true;
+    document.getElementById('backup-ok')?.classList.add('d-none');
+    document.getElementById('backup-error')?.classList.add('d-none');
+
+    try {
+      // Desktop app: native Save dialog (prefer .zip of full folder)
+      if (window.pywebview?.api?.choose_backup_path) {
+        const suggested = filename.endsWith('.db') ? filename : (filename + '.zip');
+        const desktop = await pickPathDesktop(suggested);
+        if (!desktop.available) {
+          /* fall through to browser picker */
+        } else if (desktop.cancelled) {
+          return;
+        } else {
+          const data = await copyToDesktopPath(filename, desktop.path);
+          if (!data.ok) throw new Error(data.error || 'Could not save');
+          showOk('Saved to: ' + data.saved_to);
+          alert('Saved to:\n' + data.saved_to);
+          return;
+        }
+      }
+
+      // Browser: open Save dialog FIRST (must stay in user-gesture), then write bytes
+      if (typeof window.showSaveFilePicker !== 'function') {
+        throw new Error('Use Microsoft Edge, Chrome, or the desktop app to choose a folder.');
+      }
+      let handle;
+      try {
+        handle = await window.showSaveFilePicker({
+          suggestedName: filename.endsWith('.db') ? filename : (filename + '.zip'),
+          types: [
+            {
+              description: 'Backup ZIP',
+              accept: { 'application/zip': ['.zip'] },
+            },
+            {
+              description: 'SQLite Database',
+              accept: { 'application/octet-stream': ['.db'], 'application/x-sqlite3': ['.db'] },
+            },
+          ],
+        });
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+        throw err;
+      }
+
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Could not read backup file');
+      const blob = await res.blob();
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+
+      const savedName = handle.name || filename;
+      showOk('Saved as: ' + savedName);
+      alert('Backup saved as:\n' + savedName);
+    } catch (err) {
+      const msg = err?.message || 'Could not save backup';
+      showErr(msg);
+      alert(msg);
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+})();
+</script>
+{% endblock %}

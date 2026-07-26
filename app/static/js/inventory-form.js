@@ -12,9 +12,47 @@
 
   function clearExistingProduct() {
     const idEl = document.getElementById('existing_product_id');
+    const hadExisting = Boolean(idEl?.value);
     if (idEl) idEl.value = '';
     const sku = document.getElementById('product-sku');
     if (sku) sku.readOnly = false;
+    if (hadExisting) {
+      fillSuggestedCodes({ force: true });
+    }
+  }
+
+  async function refreshNextBatchPreview() {
+    const batch = document.getElementById('product-batch');
+    if (!batch) return;
+    try {
+      const res = await fetch('/api/products/next-codes');
+      const data = await res.json();
+      if (data.ok && data.next_batch_id != null) {
+        batch.value = `#${data.next_batch_id}`;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  async function fillSuggestedCodes({ force = false } = {}) {
+    const sku = document.getElementById('product-sku');
+    const barcode = document.getElementById('product-barcode');
+    const batch = document.getElementById('product-batch');
+    if (!sku && !barcode && !batch) return;
+    try {
+      const res = await fetch('/api/products/next-codes');
+      const data = await res.json();
+      if (!data.ok) return;
+      if (sku && (force || !sku.value.trim())) sku.value = data.sku || '';
+      if (barcode && (force || !barcode.value.trim())) barcode.value = data.barcode || '';
+      // Preview only — real batch id is created on save
+      if (batch && data.next_batch_id != null) {
+        batch.value = `#${data.next_batch_id}`;
+      }
+    } catch (_) {
+      /* offline / ignore — server will still auto-fill on save */
+    }
   }
 
   function fillProductFromLookup(p) {
@@ -57,6 +95,7 @@
       picker.dataset.current = p.photo_url || '';
       window.PhotoPicker?.setPreview?.(picker, p.photo_url || null);
     }
+    refreshNextBatchPreview();
   }
 
   CategoryLookup.bind({
@@ -226,8 +265,12 @@
   });
 
   document.getElementById('formModal')?.addEventListener('show.bs.modal', () => {
-    clearExistingProduct();
+    const idEl = document.getElementById('existing_product_id');
+    if (idEl) idEl.value = '';
+    const sku = document.getElementById('product-sku');
+    if (sku) sku.readOnly = false;
     nameResults?.classList.add('d-none');
+    fillSuggestedCodes({ force: true });
   });
 
   document.addEventListener('click', (e) => {

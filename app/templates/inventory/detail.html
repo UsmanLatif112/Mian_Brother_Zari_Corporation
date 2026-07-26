@@ -1,6 +1,17 @@
 {% extends 'base.html' %}
-{% from 'partials/macros.html' import photo_field %}
+{% from 'partials/macros.html' import photo_field, header_period_filter %}
 {% block title %}{{ product.name }}{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='product-filter-form',
+  persist_key='inventory-detail',
+  clear_url=url_for('inventory.detail', product_id=product.id, period='all'),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onProductPeriodChange()'
+) }}
+{% endblock %}
 {% block content %}
 <div class="dashboard-page">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
@@ -19,7 +30,7 @@
       </p>
       </div>
     </div>
-    <div class="d-flex gap-2 align-items-center">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
       <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#repriceAllModal">
         <i class="fa-solid fa-tags me-1"></i> Update Price
       </button>
@@ -30,32 +41,32 @@
     <div class="col-md-3">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
-          <p class="text-muted small mb-1">Current Stock</p>
-          <h3 class="mb-0">{{ product.current_stock }}</h3>
+          <p class="text-muted small mb-1">Total Stock</p>
+          <h3 class="mb-0">{{ total_stock }}</h3>
         </div>
       </div>
     </div>
     <div class="col-md-3">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
-          <p class="text-muted small mb-1">Default Sale Price</p>
-          <h3 class="mb-0">{{ '%.2f'|format(product.sale_price|float) }}</h3>
+          <p class="text-muted small mb-1">Total Stock Value</p>
+          <h3 class="mb-0">{{ '%.2f'|format(total_stock_value|float) }}</h3>
         </div>
       </div>
     </div>
     <div class="col-md-3">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
-          <p class="text-muted small mb-1">Default Purchase</p>
-          <h3 class="mb-0">{{ '%.2f'|format(product.purchase_price|float) }}</h3>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">Open Batches</p>
+          <p class="text-muted small mb-1">Open Batch</p>
           <h3 class="mb-0">{{ open_batch_count }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Closed Batch</p>
+          <h3 class="mb-0">{{ closed_batch_count }}</h3>
         </div>
       </div>
     </div>
@@ -64,20 +75,20 @@
   <div class="card dash-panel border-0 shadow-sm mb-3">
     <div class="card-header bg-white">
       <strong>Stock Batches (FIFO)</strong>
-      <span class="text-muted small ms-2">Each purchase is a separate batch with its own prices</span>
+      <span class="text-muted small ms-2">Purchased = bought qty · Available = left · Edit to adjust</span>
     </div>
     <div class="table-responsive">
-      <table class="table mb-0">
+      <table class="table mb-0 table-sm datatable inventory-batches-table" id="inventory-batches-table">
         <thead>
           <tr>
             <th>Batch</th>
             <th>Vendor</th>
             <th>Invoice</th>
-            <th>Batch No.</th>
             <th>Expiry</th>
             <th>Received</th>
-            <th>Source</th>
-            <th class="text-end">Remaining</th>
+            <th class="text-end">Purchased</th>
+            <th class="text-end">Available</th>
+            <th class="text-end">Used</th>
             <th class="text-end">Purchase</th>
             <th class="text-end">Sale Price</th>
             <th class="col-actions">Action</th>
@@ -89,7 +100,6 @@
             <td>#{{ L.id }}</td>
             <td>{{ L.vendor.name if L.vendor else '—' }}</td>
             <td>{{ L.invoice_no or '—' }}</td>
-            <td>{{ L.batch_number or '—' }}</td>
             <td>
               {% if L.expiry_date %}
                 {% if L.expiry_date < today %}
@@ -101,9 +111,10 @@
               —
               {% endif %}
             </td>
-            <td>{{ L.received_at.strftime('%Y-%m-%d %H:%M') if L.received_at else '—' }}</td>
-            <td>{{ L.source_type }}{% if L.source_id %} #{{ L.source_id }}{% endif %}</td>
+            <td>{{ L.received_at.strftime('%Y-%m-%d') if L.received_at else '—' }}</td>
+            <td class="text-end">{{ L.quantity_purchased }}</td>
             <td class="text-end fw-semibold">{{ L.quantity_remaining }}</td>
+            <td class="text-end text-muted">{{ L.quantity_used }}</td>
             <td class="text-end">{{ '%.2f'|format(L.unit_cost|float) }}</td>
             <td class="text-end">{{ '%.2f'|format((L.sale_price or product.sale_price or 0)|float) }}</td>
             <td class="col-actions">
@@ -124,8 +135,9 @@
                         data-purchase="{{ '%.2f'|format(L.unit_cost|float) }}"
                         data-sale="{{ '%.2f'|format((L.sale_price or product.sale_price or 0)|float) }}"
                         data-qty="{{ L.quantity_remaining }}"
+                        data-purchased="{{ L.quantity_purchased }}"
+                        data-used="{{ L.quantity_used }}"
                         data-min="{{ product.minimum_stock or 0 }}"
-                        data-batch="{{ L.batch_number or '' }}"
                         data-expiry="{{ L.expiry_date.strftime('%Y-%m-%d') if L.expiry_date else '' }}"
                         data-desc="{{ product.description or '' }}"
                         data-photo="{{ product.photo_url or '' }}">
@@ -134,8 +146,6 @@
               </div>
             </td>
           </tr>
-          {% else %}
-          <tr><td colspan="11" class="text-muted text-center py-3">No batches yet — add stock via purchase or opening stock</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -144,63 +154,68 @@
 
   <div class="card dash-panel border-0 shadow-sm">
     <div class="card-header bg-white"><strong>Recent Movements</strong></div>
-    <table class="table mb-0">
-      <thead>
-        <tr>
-          <th>When</th>
-          <th>Type</th>
-          <th class="text-end">Qty</th>
-          <th class="text-end">Cost</th>
-          <th class="text-end">Stock after</th>
-          <th>Notes</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for m in movements %}
-        <tr>
-          <td>{{ m.created_at.strftime('%Y-%m-%d %H:%M') if m.created_at else '—' }}</td>
-          <td>{{ m.movement_type }}</td>
-          <td class="text-end">{{ m.quantity }}</td>
-          <td class="text-end">{{ '%.2f'|format((m.unit_cost or 0)|float) }}</td>
-          <td class="text-end">{{ m.balance_after }}</td>
-          <td class="small text-muted">{{ m.notes or '—' }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="6" class="text-muted text-center py-3">No movements</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-responsive">
+      <table class="table mb-0">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Type</th>
+            <th class="text-end">Qty</th>
+            <th class="text-end">Cost</th>
+            <th class="text-end">Stock after</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in movements %}
+          <tr>
+            <td>{{ m.created_at.strftime('%Y-%m-%d %H:%M') if m.created_at else '—' }}</td>
+            <td>{{ m.movement_type }}</td>
+            <td class="text-end">{{ m.quantity }}</td>
+            <td class="text-end">{{ '%.2f'|format((m.unit_cost or 0)|float) }}</td>
+            <td class="text-end">{{ m.balance_after }}</td>
+            <td class="small text-muted">{{ m.notes or '—' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-muted text-center py-3">No movements for this period</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
-{# Edit entry — same fields as Add Product #}
+{# Edit batch — purchased + available qty, batch details #}
 <div class="modal fade erp-form-modal" id="editEntryModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Edit Product</h5>
+        <h5 class="modal-title">Edit Batch <span class="text-muted fw-normal small" id="ee-batch-label"></span></h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <form method="post" id="edit-entry-form" enctype="multipart/form-data">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <div class="row g-2 align-items-end">
+
+          <div class="row g-3 align-items-end mb-1">
             <div class="col-auto">
               {{ photo_field(icon='fa-box', label='Product photo', upload='ajax', folder='products', picker_id='ee-photo-picker') }}
             </div>
-            <div class="col-md-5">
+            <div class="col">
               <label class="form-label">Product Name</label>
               <input name="name" id="ee-name" class="form-control" required>
             </div>
-            <div class="col-md-3">
+          </div>
+
+          <div class="row g-3">
+            <div class="col-md-6">
               <label class="form-label">SKU</label>
               <input name="sku" id="ee-sku" class="form-control" required>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-6">
               <label class="form-label">Barcode</label>
               <input name="barcode" id="ee-barcode" class="form-control">
             </div>
-
             <div class="col-md-4">
               <label class="form-label">Category</label>
               <div class="position-relative">
@@ -221,7 +236,6 @@
               <label class="form-label">Brand</label>
               <input name="brand" id="ee-brand" class="form-control">
             </div>
-
             <div class="col-md-6">
               <label class="form-label">Vendor <span class="text-danger">*</span></label>
               <div class="position-relative">
@@ -239,30 +253,50 @@
               <label class="form-label">Invoice No. <span class="text-muted fw-normal">(optional)</span></label>
               <input name="invoice_no" id="ee-invoice" class="form-control" placeholder="Vendor invoice / bill no">
             </div>
+          </div>
 
-            <div class="col-md-3">
+          <hr class="my-3">
+          <p class="small text-muted mb-2">Stock for this batch · Batch date stays on Received column</p>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">Purchased Qty <span class="text-danger">*</span></label>
+              <input type="number" step="0.001" min="0" name="quantity_received" id="ee-purchased" class="form-control" required>
+              <div class="form-text">Total bought — fixing this also adjusts available</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Available Qty <span class="text-danger">*</span></label>
+              <input type="number" step="0.001" min="0" name="opening_stock" id="ee-qty" class="form-control" required>
+              <div class="form-text">Cannot be more than purchased</div>
+              <div class="text-danger small d-none" id="ee-qty-error">Available qty cannot be more than purchased qty.</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Used / Sold</label>
+              <input type="text" id="ee-used" class="form-control bg-light" readonly tabindex="-1">
+              <div class="form-text">Purchased − Available</div>
+            </div>
+            <div class="col-md-6">
               <label class="form-label">Purchase Price</label>
               <input type="number" step="0.01" name="purchase_price" id="ee-purchase" class="form-control">
             </div>
-            <div class="col-md-3">
+            <div class="col-md-6">
               <label class="form-label">Sale Price</label>
               <input type="number" step="0.01" name="sale_price" id="ee-sale" class="form-control">
             </div>
-            <div class="col-md-3">
-              <label class="form-label">Purchase Qty <span class="text-danger">*</span></label>
-              <input type="number" step="0.001" min="0" name="opening_stock" id="ee-qty" class="form-control" required>
-            </div>
-            <div class="col-md-3">
+            <div class="col-md-4">
               <label class="form-label">Minimum Stock</label>
               <input type="number" step="0.001" name="minimum_stock" id="ee-min" class="form-control">
             </div>
-            <div class="col-md-6">
-              <label class="form-label">Batch No. <span class="text-muted fw-normal">(optional)</span></label>
-              <input name="batch_number" id="ee-batch" class="form-control" placeholder="Optional batch / lot no">
+            <div class="col-md-4">
+              <label class="form-label">Batch</label>
+              <input type="text" id="ee-batch" class="form-control bg-light" readonly tabindex="-1">
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
               <label class="form-label">Expiry Date <span class="text-muted fw-normal">(optional)</span></label>
               <input type="date" name="expiry_date" id="ee-expiry" class="form-control">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notes <span class="text-muted fw-normal">(optional)</span></label>
+              <input type="text" name="adjustment_notes" id="ee-adj-notes" class="form-control" placeholder="Why stock changed">
             </div>
             <div class="col-12">
               <label class="form-label">Description</label>
@@ -364,6 +398,21 @@
 <script src="{{ url_for('static', filename='js/category-lookup.js') }}"></script>
 <script src="{{ url_for('static', filename='js/vendor-lookup.js') }}"></script>
 <script>
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onProductPeriodChange() {
+  const period = document.getElementById('period-filter')?.value;
+  toggleCustomDates();
+  if (period !== 'custom') {
+    document.getElementById('product-filter-form')?.submit();
+  }
+}
+toggleCustomDates();
+
 (function () {
   if (window.CategoryLookup) {
     CategoryLookup.bind({
@@ -417,10 +466,70 @@
     document.getElementById('ee-purchase').value = btn.dataset.purchase || '0';
     document.getElementById('ee-sale').value = btn.dataset.sale || '0';
     document.getElementById('ee-qty').value = btn.dataset.qty || '0';
+    document.getElementById('ee-purchased').value = btn.dataset.purchased || btn.dataset.qty || '0';
+    document.getElementById('ee-used').value = btn.dataset.used || '0';
     document.getElementById('ee-min').value = btn.dataset.min || '0';
-    document.getElementById('ee-batch').value = btn.dataset.batch || '';
+    const batchLabel = document.getElementById('ee-batch-label');
+    if (batchLabel) batchLabel.textContent = btn.dataset.layerId ? `· #${btn.dataset.layerId}` : '';
+    const qtyEl = document.getElementById('ee-qty');
+    const purchasedEl = document.getElementById('ee-purchased');
+    const usedEl = document.getElementById('ee-used');
+    const qtyErr = document.getElementById('ee-qty-error');
+    const showQtyError = (show) => {
+      if (!qtyErr) return;
+      qtyErr.classList.toggle('d-none', !show);
+      qtyEl?.classList.toggle('is-invalid', show);
+    };
+    const syncUsed = () => {
+      const bought = Number(purchasedEl?.value || 0);
+      const avail = Number(qtyEl?.value || 0);
+      if (usedEl) usedEl.value = Math.max(0, +(bought - avail).toFixed(3));
+    };
+    const clampAvailable = () => {
+      const bought = Number(purchasedEl?.value || 0);
+      let avail = Number(qtyEl?.value || 0);
+      if (avail > bought) {
+        qtyEl.value = (+bought.toFixed(3));
+        showQtyError(true);
+        syncUsed();
+        return false;
+      }
+      showQtyError(false);
+      syncUsed();
+      return true;
+    };
+    // When purchased is corrected, move available by the same amount (keeps used/sold stable).
+    const onPurchasedInput = () => {
+      const bought = Number(purchasedEl?.value || 0);
+      const prev = Number(purchasedEl._lastPurchased ?? bought);
+      const delta = +(bought - prev).toFixed(3);
+      if (qtyEl && delta !== 0) {
+        let avail = Number(qtyEl.value || 0) + delta;
+        if (avail < 0) avail = 0;
+        if (avail > bought) avail = bought;
+        qtyEl.value = (+avail.toFixed(3));
+      }
+      purchasedEl._lastPurchased = bought;
+      clampAvailable();
+    };
+    const onQtyInput = () => {
+      clampAvailable();
+    };
+    qtyEl?.removeEventListener('input', qtyEl._onQtyInput);
+    purchasedEl?.removeEventListener('input', purchasedEl._onPurchased);
+    qtyEl._onQtyInput = onQtyInput;
+    purchasedEl._onPurchased = onPurchasedInput;
+    purchasedEl._lastPurchased = Number(purchasedEl.value || 0);
+    qtyEl?.addEventListener('input', onQtyInput);
+    purchasedEl?.addEventListener('input', onPurchasedInput);
+    showQtyError(false);
+    syncUsed();
+    const eeBatch = document.getElementById('ee-batch');
+    if (eeBatch) eeBatch.value = btn.dataset.layerId ? `#${btn.dataset.layerId}` : '';
     document.getElementById('ee-expiry').value = btn.dataset.expiry || '';
     document.getElementById('ee-desc').value = btn.dataset.desc || '';
+    const adjNotes = document.getElementById('ee-adj-notes');
+    if (adjNotes) adjNotes.value = '';
 
     const picker = document.getElementById('ee-photo-picker');
     if (picker) {
@@ -480,6 +589,19 @@
         }
         return;
       }
+    }
+    const purchased = Number(document.getElementById('ee-purchased')?.value || 0);
+    const available = Number(document.getElementById('ee-qty')?.value || 0);
+    if (available > purchased) {
+      const qtyErr = document.getElementById('ee-qty-error');
+      document.getElementById('ee-qty')?.classList.add('is-invalid');
+      if (qtyErr) qtyErr.classList.remove('d-none');
+      if (err) {
+        err.textContent = 'Available qty cannot be more than purchased qty.';
+        err.classList.remove('d-none');
+      }
+      document.getElementById('ee-qty')?.focus();
+      return;
     }
     e.target.submit();
   });

@@ -48,6 +48,13 @@ class Config:
     BACKUP_DIR = os.environ.get("BACKUP_DIR") or os.path.join(basedir, "backups")
     SYNC_AUTO_ENABLED = os.environ.get("SYNC_AUTO_ENABLED", "false").lower() == "true"
     SYNC_INTERVAL_MINUTES = int(os.environ.get("SYNC_INTERVAL_MINUTES", "15"))
+    # Short MySQL probe — keeps Sync page + cron from hanging when offline
+    SYNC_MYSQL_CONNECT_TIMEOUT = int(os.environ.get("SYNC_MYSQL_CONNECT_TIMEOUT", "2"))
+    SYNC_MYSQL_CACHE_SECONDS = int(os.environ.get("SYNC_MYSQL_CACHE_SECONDS", "45"))
+    # Separate cron: SQLite auto-backup (all files kept on disk; UI shows last N)
+    AUTO_BACKUP_ENABLED = os.environ.get("AUTO_BACKUP_ENABLED", "true").lower() == "true"
+    AUTO_BACKUP_INTERVAL_HOURS = int(os.environ.get("AUTO_BACKUP_INTERVAL_HOURS", "1"))
+    BACKUP_UI_LIMIT = int(os.environ.get("BACKUP_UI_LIMIT", "10"))
     UPLOAD_FOLDER = os.path.join(basedir, "app", "static", "uploads")
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024
     DATABASE_MODE = os.environ.get("DATABASE_MODE", "sqlite")
