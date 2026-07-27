@@ -174,6 +174,21 @@
 
   window.showErpToast = showErpToast;
 
+  function showOfflineModal(message) {
+    const modalEl = document.getElementById('offlineModal');
+    if (!modalEl || !window.bootstrap) {
+      const text = message || 'No internet connection. You can keep using the app offline.';
+      if (window.showErpToast) showErpToast('warning', text);
+      else alert(text);
+      return;
+    }
+    const msgEl = document.getElementById('offline-modal-message');
+    if (msgEl && message) msgEl.textContent = message;
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  }
+
+  window.showOfflineModal = showOfflineModal;
+
   const flashEl = document.getElementById('erp-flash-data');
   if (flashEl) {
     try {

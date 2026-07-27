@@ -82,6 +82,7 @@
   <div class="loading-overlay d-none" id="global-loader"><div class="spinner-border text-success"></div></div>
   {% if current_user.is_authenticated %}
   {% include 'partials/confirm_modal.html' %}
+  {% include 'partials/offline_modal.html' %}
   {% endif %}
 
   <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>

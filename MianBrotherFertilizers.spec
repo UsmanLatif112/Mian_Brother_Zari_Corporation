@@ -17,9 +17,28 @@ hiddenimports = [
     "waitress",
     "webview",
     "pkg_resources.py2_warn",
+    "unittest",
+    "googleapiclient",
+    "googleapiclient.discovery",
+    "google_auth_oauthlib",
+    "google.auth",
+    "google.oauth2.credentials",
+    "httplib2",
+    "pyparsing",
 ]
 
-for pkg in ("webview", "flask", "flask_sqlalchemy", "flask_login", "flask_wtf", "wtforms", "sqlalchemy"):
+for pkg in (
+    "webview",
+    "flask",
+    "flask_sqlalchemy",
+    "flask_login",
+    "flask_wtf",
+    "wtforms",
+    "sqlalchemy",
+    "googleapiclient",
+    "google_auth_oauthlib",
+    "google.auth",
+):
     try:
         pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
         datas += pkg_datas
@@ -42,7 +61,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "numpy", "scipy", "test", "unittest"],
+    excludes=["tkinter", "matplotlib", "numpy", "scipy", "test"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

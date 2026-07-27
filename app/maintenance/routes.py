@@ -105,9 +105,55 @@ def google_connect():
     if not drive.is_configured():
         flash("Google Drive is not configured. Add GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_CLIENT_SECRET to .env.", "warning")
         return redirect(url_for("maintenance.index"))
+    from app.services.network_service import is_internet_available
+
+    if not is_internet_available():
+        flash(
+            "No internet connection. Connect to the internet first, then try Connect Google Drive again. "
+            "The app still works offline — backups are saved locally.",
+            "warning",
+        )
+        return redirect(url_for("maintenance.index"))
     try:
         return redirect(drive.start_auth_flow())
     except Exception as exc:
+        flash(str(exc), "danger")
+        return redirect(url_for("maintenance.index"))
+
+
+@maintenance_bp.route("/google/connect-url", methods=["GET"])
+@login_required
+@permission_required("backup.view")
+def google_connect_url():
+    """Return OAuth URL as JSON so the UI can block offline users without leaving the app."""
+    wants_json = request.headers.get("X-Requested-With") == "fetch"
+    if not drive.is_configured():
+        msg = "Google Drive is not configured. Add GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_CLIENT_SECRET to .env."
+        if wants_json:
+            return jsonify({"ok": False, "error": msg}), 400
+        flash(msg, "warning")
+        return redirect(url_for("maintenance.index"))
+
+    from app.services.network_service import is_internet_available
+
+    if not is_internet_available():
+        msg = (
+            "No internet connection. Connect to Wi‑Fi or mobile data first. "
+            "You can keep using the app offline — local backups still work."
+        )
+        if wants_json:
+            return jsonify({"ok": False, "offline": True, "error": msg}), 503
+        flash(msg, "warning")
+        return redirect(url_for("maintenance.index"))
+
+    try:
+        auth_url = drive.start_auth_flow()
+        if wants_json:
+            return jsonify({"ok": True, "auth_url": auth_url})
+        return redirect(auth_url)
+    except Exception as exc:
+        if wants_json:
+            return jsonify({"ok": False, "error": str(exc)}), 400
         flash(str(exc), "danger")
         return redirect(url_for("maintenance.index"))
 

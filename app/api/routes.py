@@ -10,6 +10,15 @@ from app.models import Category, Customer, ExpenseCategory, Product, Sale, Vendo
 api_bp = Blueprint("api", __name__)
 
 
+@api_bp.route("/internet")
+@login_required
+def internet_status():
+    from app.services.network_service import is_internet_available
+
+    online = is_internet_available()
+    return jsonify({"online": online})
+
+
 @api_bp.route("/toasts")
 @login_required
 def poll_toasts():

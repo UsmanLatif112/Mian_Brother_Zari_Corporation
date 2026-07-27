@@ -60,9 +60,11 @@
                 {% if drive_auto_upload %}after each backup{% else %}when you click Upload{% endif %}.
                 Only the last <strong>{{ drive_retention }}</strong> files are kept on Drive.
               </p>
-              <a class="btn btn-primary" href="{{ url_for('maintenance.google_connect') }}" {% if not can_backup %}aria-disabled="true" tabindex="-1"{% endif %}>
+              <button type="button" class="btn btn-primary" id="btn-google-connect"
+                data-connect-url="{{ url_for('maintenance.google_connect_url') }}"
+                {% if not can_backup %}disabled{% endif %}>
                 <i class="fa-brands fa-google me-1"></i> Connect Google Drive
-              </a>
+              </button>
             {% endif %}
           {% endif %}
         </div>
@@ -402,6 +404,47 @@
       alert(msg);
     } finally {
       saveBtn.disabled = false;
+    }
+  });
+
+  const connectBtn = document.getElementById('btn-google-connect');
+  connectBtn?.addEventListener('click', async () => {
+    const connectUrl = connectBtn.dataset.connectUrl;
+    if (!connectUrl || connectBtn.disabled) return;
+
+    if (!navigator.onLine) {
+      window.showOfflineModal?.();
+      return;
+    }
+
+    const prevHtml = connectBtn.innerHTML;
+    connectBtn.disabled = true;
+    connectBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Checking…';
+
+    try {
+      const res = await fetch(connectUrl, {
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'fetch' },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) {
+        if (data.offline) {
+          window.showOfflineModal?.(data.error);
+        } else if (window.showErpToast) {
+          window.showErpToast('warning', data.error || 'Could not start Google sign-in');
+        } else {
+          showErr(data.error || 'Could not start Google sign-in');
+        }
+        return;
+      }
+      if (data.auth_url) {
+        window.location.href = data.auth_url;
+      }
+    } catch (_) {
+      window.showOfflineModal?.();
+    } finally {
+      connectBtn.disabled = false;
+      connectBtn.innerHTML = prevHtml;
     }
   });
 })();

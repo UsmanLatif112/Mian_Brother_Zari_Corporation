@@ -13,11 +13,6 @@ from datetime import datetime
 from typing import Any
 
 from flask import current_app, url_for
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +24,28 @@ STAMP_RE = re.compile(r"sqlite_backup_(\d{8}_\d{6})")
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 _queue_lock = threading.Lock()
+_google_cache: dict[str, Any] | None = None
+
+
+def _google():
+    """Lazy-load Google libraries so the desktop app starts offline without them."""
+    global _google_cache
+    if _google_cache is None:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import Flow
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+
+        _google_cache = {
+            "Request": Request,
+            "Credentials": Credentials,
+            "Flow": Flow,
+            "build": build,
+            "MediaFileUpload": MediaFileUpload,
+            "MediaIoBaseDownload": MediaIoBaseDownload,
+        }
+    return _google_cache
 
 
 def _token_path() -> str:
@@ -96,7 +113,10 @@ def _save_meta(data: dict[str, Any]) -> None:
         json.dump(data, fh, indent=2)
 
 
-def _load_credentials() -> Credentials | None:
+def _load_credentials():
+    g = _google()
+    Credentials = g["Credentials"]
+    Request = g["Request"]
     path = _token_path()
     if not os.path.isfile(path):
         return None
@@ -114,7 +134,7 @@ def _load_credentials() -> Credentials | None:
     return creds if creds and creds.valid else None
 
 
-def _save_credentials(creds: Credentials) -> None:
+def _save_credentials(creds) -> None:
     path = _token_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
@@ -122,6 +142,11 @@ def _save_credentials(creds: Credentials) -> None:
 
 
 def is_connected() -> bool:
+    try:
+        if not os.path.isfile(_token_path()):
+            return False
+    except Exception:
+        return False
     return _load_credentials() is not None
 
 
@@ -185,8 +210,15 @@ def _clear_oauth_pending() -> None:
 
 
 def start_auth_flow() -> str:
+    g = _google()
+    Flow = g["Flow"]
     uri = redirect_uri()
-    flow = Flow.from_client_config(_client_config(), scopes=SCOPES, redirect_uri=uri)
+    flow = Flow.from_client_config(
+        _client_config(),
+        scopes=SCOPES,
+        redirect_uri=uri,
+        autogenerate_code_verifier=True,
+    )
     auth_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
@@ -205,6 +237,9 @@ def start_auth_flow() -> str:
 
 
 def finish_auth_flow(code: str, state: str | None = None) -> dict[str, Any]:
+    g = _google()
+    Flow = g["Flow"]
+    build = g["build"]
     pending = _load_oauth_pending()
     code_verifier = pending.get("code_verifier")
     if not code_verifier:
@@ -215,7 +250,12 @@ def finish_auth_flow(code: str, state: str | None = None) -> dict[str, Any]:
         raise ValueError("OAuth state mismatch. Click Connect Google Drive again.")
 
     uri = pending.get("redirect_uri") or redirect_uri()
-    flow = Flow.from_client_config(_client_config(), scopes=SCOPES, redirect_uri=uri)
+    flow = Flow.from_client_config(
+        _client_config(),
+        scopes=SCOPES,
+        redirect_uri=uri,
+        autogenerate_code_verifier=True,
+    )
     flow.code_verifier = code_verifier
     flow.fetch_token(code=code)
     _clear_oauth_pending()
@@ -235,6 +275,7 @@ def finish_auth_flow(code: str, state: str | None = None) -> dict[str, Any]:
 
 
 def _drive_service():
+    build = _google()["build"]
     creds = _load_credentials()
     if not creds:
         raise ValueError("Google Drive is not connected. Connect your account first.")
@@ -612,6 +653,7 @@ def process_upload_queue(*, manual: bool = False) -> dict[str, Any]:
 
 
 def upload_backup_zip(zip_path: str, stamp: str | None = None) -> str:
+    MediaFileUpload = _google()["MediaFileUpload"]
     service = _drive_service()
     folder_id = _folder_id(service)
     stamp = stamp or _stamp_from_name(os.path.basename(zip_path)) or datetime.now().strftime(
@@ -668,6 +710,7 @@ def prune_old_backups(keep: int = 10) -> int:
 
 
 def download_backup_file(file_id: str, dest_path: str) -> str:
+    MediaIoBaseDownload = _google()["MediaIoBaseDownload"]
     service = _drive_service()
     os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
     request = service.files().get_media(fileId=file_id)
