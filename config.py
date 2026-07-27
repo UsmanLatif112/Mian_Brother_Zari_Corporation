@@ -55,6 +55,13 @@ class Config:
     AUTO_BACKUP_ENABLED = os.environ.get("AUTO_BACKUP_ENABLED", "true").lower() == "true"
     AUTO_BACKUP_INTERVAL_HOURS = int(os.environ.get("AUTO_BACKUP_INTERVAL_HOURS", "1"))
     BACKUP_UI_LIMIT = int(os.environ.get("BACKUP_UI_LIMIT", "10"))
+    # Google Drive cloud backup (replaces MySQL sync for desktop/offline-first)
+    GOOGLE_DRIVE_CLIENT_ID = os.environ.get("GOOGLE_DRIVE_CLIENT_ID", "")
+    GOOGLE_DRIVE_CLIENT_SECRET = os.environ.get("GOOGLE_DRIVE_CLIENT_SECRET", "")
+    GOOGLE_DRIVE_REDIRECT_URI = os.environ.get("GOOGLE_DRIVE_REDIRECT_URI", "")
+    GOOGLE_DRIVE_AUTO_UPLOAD = os.environ.get("GOOGLE_DRIVE_AUTO_UPLOAD", "true").lower() == "true"
+    GOOGLE_DRIVE_RETENTION = int(os.environ.get("GOOGLE_DRIVE_RETENTION", "10"))
+    GOOGLE_DRIVE_QUEUE_INTERVAL_MINUTES = int(os.environ.get("GOOGLE_DRIVE_QUEUE_INTERVAL_MINUTES", "5"))
     UPLOAD_FOLDER = os.path.join(basedir, "app", "static", "uploads")
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024
     DATABASE_MODE = os.environ.get("DATABASE_MODE", "sqlite")

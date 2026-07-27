@@ -143,22 +143,92 @@
     });
   }
 
+  function escapeHtml(text) {
+    const el = document.createElement('div');
+    el.textContent = text == null ? '' : String(text);
+    return el.innerHTML;
+  }
+
+  function showErpToast(category, message, delayMs) {
+    const container = document.getElementById('toast-container');
+    if (!container || !message) return;
+    const bg = {
+      success: 'text-bg-success',
+      danger: 'text-bg-danger',
+      warning: 'text-bg-warning',
+      info: 'text-bg-primary',
+    }[category] || 'text-bg-secondary';
+    const toast = document.createElement('div');
+    toast.className = `toast align-items-center ${bg} border-0`;
+    toast.setAttribute('role', 'alert');
+    toast.setAttribute('aria-live', 'assertive');
+    toast.setAttribute('aria-atomic', 'true');
+    toast.innerHTML =
+      `<div class="d-flex"><div class="toast-body">${escapeHtml(message)}</div>` +
+      '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>';
+    container.appendChild(toast);
+    const bsToast = new bootstrap.Toast(toast, { autohide: true, delay: delayMs || 5000 });
+    toast.addEventListener('hidden.bs.toast', () => toast.remove());
+    bsToast.show();
+  }
+
+  window.showErpToast = showErpToast;
+
   const flashEl = document.getElementById('erp-flash-data');
   if (flashEl) {
     try {
       const messages = JSON.parse(flashEl.textContent);
-      const container = document.getElementById('toast-container');
       messages.forEach(([category, message], i) => {
-        const bg = { success: 'text-bg-success', danger: 'text-bg-danger', warning: 'text-bg-warning', info: 'text-bg-primary' }[category] || 'text-bg-secondary';
-        const toast = document.createElement('div');
-        toast.className = `toast align-items-center ${bg} border-0`;
-        toast.setAttribute('role', 'alert');
-        toast.innerHTML = `<div class="d-flex"><div class="toast-body">${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
-        container?.appendChild(toast);
-        const bsToast = new bootstrap.Toast(toast, { delay: 4500 });
-        setTimeout(() => bsToast.show(), i * 150);
+        setTimeout(() => showErpToast(category, message, 5000), i * 150);
       });
     } catch (_) { /* ignore */ }
+  }
+
+  if (document.querySelector('.erp-wrapper')) {
+    let toastCursor = parseInt(sessionStorage.getItem('erp-toast-cursor') || '0', 10) || 0;
+    let toastReady = sessionStorage.getItem('erp-toast-ready') === '1';
+
+    async function bootstrapToastCursor() {
+      if (toastReady) return;
+      try {
+        const res = await fetch('/api/toasts?after=0', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const items = data.toasts || [];
+        if (items.length) {
+          const maxId = items.reduce((m, t) => Math.max(m, parseInt(t.id, 10) || 0), 0);
+          if (!sessionStorage.getItem('erp-toast-cursor')) {
+            toastCursor = maxId;
+            sessionStorage.setItem('erp-toast-cursor', String(toastCursor));
+          }
+        }
+      } catch (_) { /* ignore */ }
+      sessionStorage.setItem('erp-toast-ready', '1');
+      toastReady = true;
+    }
+
+    async function pollAppToasts() {
+      if (!toastReady) await bootstrapToastCursor();
+      try {
+        const res = await fetch(`/api/toasts?after=${toastCursor}`, { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const items = data.toasts || [];
+        items.forEach((t, i) => {
+          const id = parseInt(t.id, 10) || 0;
+          if (id > toastCursor) toastCursor = id;
+          setTimeout(() => showErpToast(t.category || 'info', t.message, 5000), i * 200);
+        });
+        if (items.length) {
+          sessionStorage.setItem('erp-toast-cursor', String(toastCursor));
+        }
+      } catch (_) { /* offline */ }
+    }
+
+    bootstrapToastCursor().then(() => {
+      pollAppToasts();
+      setInterval(pollAppToasts, 3000);
+    });
   }
 
   if (window.OPEN_FORM_MODAL) {

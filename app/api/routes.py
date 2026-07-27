@@ -10,6 +10,18 @@ from app.models import Category, Customer, ExpenseCategory, Product, Sale, Vendo
 api_bp = Blueprint("api", __name__)
 
 
+@api_bp.route("/toasts")
+@login_required
+def poll_toasts():
+    from app.services.toast_service import fetch_toasts
+
+    try:
+        after_id = int(request.args.get("after", 0) or 0)
+    except (TypeError, ValueError):
+        after_id = 0
+    return jsonify({"toasts": fetch_toasts(after_id=after_id)})
+
+
 @api_bp.route("/search")
 @login_required
 def global_search():

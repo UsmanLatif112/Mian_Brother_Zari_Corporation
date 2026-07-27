@@ -221,8 +221,14 @@ def main() -> int:
         _show_error("Could not start application", traceback.format_exc())
         return 1
 
-    port = _free_port()
+    port = int(os.environ.get("DESKTOP_PORT", "5000"))
     host = "127.0.0.1"
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((host, port))
+    except OSError:
+        port = _free_port()
+    os.environ["APP_BASE_URL"] = f"http://{host}:{port}"
     url = f"http://{host}:{port}/"
 
     def run_server() -> None:

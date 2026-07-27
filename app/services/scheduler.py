@@ -30,6 +30,7 @@ def init_scheduler(app):
 
     sync_on = bool(app.config.get("SYNC_AUTO_ENABLED"))
     backup_on = bool(app.config.get("AUTO_BACKUP_ENABLED", True))
+    drive_queue_on = bool(app.config.get("GOOGLE_DRIVE_AUTO_UPLOAD", True))
 
     if sync_on and not scheduler.get_job("auto_sync"):
         minutes = max(1, int(app.config.get("SYNC_INTERVAL_MINUTES", 15) or 15))
@@ -78,6 +79,21 @@ def init_scheduler(app):
                         return
                     path = backup_sqlite()
                     logger.info("Auto backup created: %s", path)
+                    if os.path.isdir(path):
+                        try:
+                            from app.services.toast_service import notify_backup_created
+
+                            notify_backup_created(os.path.basename(path), auto=True)
+                        except Exception:
+                            pass
+                    if os.path.isdir(path) and app.config.get("GOOGLE_DRIVE_AUTO_UPLOAD", True):
+                        try:
+                            from app.services import google_drive_service as drive
+
+                            status = drive.upload_or_queue_folder(path)
+                            logger.info("Auto backup Drive status: %s (%s)", status, path)
+                        except Exception:
+                            logger.exception("Google Drive upload/queue after auto backup failed")
             except Exception:
                 logger.exception("Auto backup job crashed")
             finally:
@@ -95,5 +111,33 @@ def init_scheduler(app):
         )
         logger.info("Background SQLite backup every %s hour(s)", hours)
 
-    if (sync_on or backup_on) and not scheduler.running:
+    if drive_queue_on and not scheduler.get_job("drive_upload_queue"):
+        minutes = max(1, int(app.config.get("GOOGLE_DRIVE_QUEUE_INTERVAL_MINUTES", 5) or 5))
+
+        def drive_upload_queue():
+            with app.app_context():
+                try:
+                    from app.services import google_drive_service as drive
+
+                    if not drive.is_connected() or not drive.list_upload_queue():
+                        return
+                    result = drive.process_upload_queue(manual=False)
+                    if result.get("uploaded"):
+                        logger.info("Drive queue upload: %s", result.get("message"))
+                except Exception:
+                    logger.exception("Drive upload queue job crashed")
+
+        scheduler.add_job(
+            drive_upload_queue,
+            "interval",
+            minutes=minutes,
+            id="drive_upload_queue",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+            misfire_grace_time=120,
+        )
+        logger.info("Google Drive upload queue check every %s minute(s)", minutes)
+
+    if (sync_on or backup_on or drive_queue_on) and not scheduler.running:
         scheduler.start()

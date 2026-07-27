@@ -17,7 +17,7 @@
     <a href="{{ url_for('account.index') }}" class="nav-link"><i class="fa-solid fa-wallet"></i> Account</a>
     <a href="{{ url_for('customers.index') }}" class="nav-link"><i class="fa-solid fa-users"></i> Customers</a>
     <a href="{{ url_for('vendors.index') }}" class="nav-link"><i class="fa-solid fa-building"></i> Vendors</a>
-    <a href="{{ url_for('maintenance.index') }}" class="nav-link"><i class="fa-solid fa-cloud-arrow-up"></i> Sync &amp; Backup</a>
+    <a href="{{ url_for('maintenance.index') }}" class="nav-link"><i class="fa-solid fa-cloud"></i> Backup &amp; Cloud</a>
     {% if current_user.role.value == 'admin' %}
     <a href="{{ url_for('auth.users') }}" class="nav-link"><i class="fa-solid fa-user-shield"></i> Users</a>
     {% endif %}
