@@ -12,6 +12,7 @@ from app.services.audit_service import log_audit
 from app.services.vendor_payment_service import PAYMENT_TYPES, record_vendor_payment
 from app.utils.decorators import permission_required
 from app.utils.uploads import delete_image, save_image
+from app.utils.working_date import get_working_date
 
 vendors_bp = Blueprint("vendors", __name__)
 
@@ -89,7 +90,7 @@ def _vendor_page(form=None, open_modal=False):
         vendors=vendors,
         form=form or VendorForm(),
         open_modal=open_modal or request.args.get("open_modal") == "1",
-        today=date_cls.today().isoformat(),
+        today=get_working_date().isoformat(),
         payment_types=PAYMENT_TYPES,
         total_payable=total_payable,
         total_prepaid=total_prepaid,
@@ -179,7 +180,7 @@ def payment():
     vendor_id = request.form.get("vendor_id")
     payment_type = request.form.get("payment_type")
     amount = request.form.get("amount")
-    payment_date = request.form.get("payment_date") or date_cls.today().isoformat()
+    payment_date = request.form.get("payment_date") or get_working_date().isoformat()
     remarks = request.form.get("remarks")
 
     try:
@@ -264,7 +265,7 @@ def detail(vendor_id):
         vendor=vendor,
         ledger=ledger,
         payments=payments,
-        today=date_cls.today().isoformat(),
+        today=get_working_date().isoformat(),
         payment_types=PAYMENT_TYPES,
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",

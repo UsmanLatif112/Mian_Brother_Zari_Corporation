@@ -285,7 +285,7 @@ toggleCustomDates();
   }
   document.getElementById('take-amount')?.addEventListener('input', syncAfter);
   document.getElementById('takeModal')?.addEventListener('show.bs.modal', () => {
-    document.getElementById('take-date').value = '{{ today }}';
+    document.getElementById('take-date').value = window.getErpWorkingDate?.() || '{{ working_date }}';
     document.getElementById('take-by').value = '';
     document.getElementById('take-amount').value = '';
     document.getElementById('take-notes').value = '';

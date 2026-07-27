@@ -145,6 +145,7 @@ def create_app(config_class=None):
     register_blueprints(app)
     register_error_handlers(app)
     register_context_processors(app)
+    register_registration_guard(app)
 
     with app.app_context():
         try:
@@ -153,6 +154,12 @@ def create_app(config_class=None):
             ensure_customer_type_column()
         except Exception:
             logging.getLogger(__name__).warning("Could not ensure customer_type column")
+        try:
+            from app.services.user_registry_service import ensure_user_registration_columns
+
+            ensure_user_registration_columns()
+        except Exception:
+            logging.getLogger(__name__).warning("Could not ensure user registration columns")
         try:
             from app.models.account import AccountAmountTaken, AccountCashSetup
 
@@ -221,7 +228,7 @@ def register_blueprints(app):
     from app.journal.routes import journal_bp
     from app.api.routes import api_bp
 
-    app.register_blueprint(auth_bp)
+    app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(inventory_bp, url_prefix="/inventory")
     app.register_blueprint(sales_bp, url_prefix="/sales")
@@ -250,19 +257,67 @@ def register_error_handlers(app):
         return render_template("errors/500.html"), 500
 
 
+def register_registration_guard(app):
+    from flask import flash, jsonify, redirect, request, url_for
+    from flask_login import current_user
+
+    from app.utils.decorators import REGISTRATION_EXEMPT_ENDPOINTS
+
+    @app.before_request
+    def enforce_user_registration():
+        if not current_user.is_authenticated:
+            return None
+        if current_user.is_registration_complete():
+            return None
+        ep = request.endpoint
+        if not ep or ep in REGISTRATION_EXEMPT_ENDPOINTS:
+            return None
+        if ep == "static" or (request.path or "").startswith("/static"):
+            return None
+        if request.path.startswith("/api/") and ep in ("api.internet", "api.poll_toasts"):
+            return None
+        wants_json = (
+            request.is_json
+            or request.accept_mimetypes.best == "application/json"
+            or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        )
+        if wants_json or (ep and ep.startswith("api.")):
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Register this computer with your activation key first.",
+                    "needs_registration": True,
+                }
+            ), 403
+        flash("Register this computer with your activation key to access this section.", "warning")
+        return redirect(url_for("dashboard.index", registration_required=1))
+
+
 def register_context_processors(app):
     from app.services.settings_service import get_business_info
 
     @app.context_processor
     def inject_globals():
+        from datetime import date
+
         from flask import request
+        from flask_login import current_user
 
         from app.services.sync_service import get_sync_target_label, is_local_sqlite
+        from app.services.update_service import current_version_info, is_desktop_app, updates_enabled
         from app.utils.search_context import resolve_search_context
+        from app.utils.working_date import (
+            can_manage_working_date,
+            get_working_date,
+            is_custom_working_date,
+        )
 
         search_ctx = resolve_search_context(request.path)
+        working = get_working_date()
+        custom_wd = is_custom_working_date()
+        ver = current_version_info()
 
-        return {
+        ctx = {
             "business": get_business_info(),
             "app_name": "MBF ERP",
             "brand_short": "MBF",
@@ -272,4 +327,17 @@ def register_context_processors(app):
             "search_table_selector": search_ctx.table_selector,
             "search_placeholder": search_ctx.placeholder,
             "search_mode": search_ctx.mode,
+            "working_date": working.isoformat(),
+            "working_date_display": working.strftime("%d %b %Y"),
+            "calendar_today": date.today().isoformat(),
+            "is_custom_working_date": custom_wd,
+            "is_desktop_app": is_desktop_app(),
+            "app_version": ver["version"],
+            "app_build": ver["build"],
+            "updates_enabled": updates_enabled(),
         }
+        if current_user.is_authenticated:
+            ctx["can_manage_working_date"] = can_manage_working_date(current_user)
+        else:
+            ctx["can_manage_working_date"] = False
+        return ctx

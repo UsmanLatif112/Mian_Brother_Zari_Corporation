@@ -255,7 +255,9 @@
     const saveBtn = document.getElementById('btn-save-sale');
     if (saveBtn) saveBtn.textContent = 'Save Sale';
     document.getElementById('sale-date').value =
-      document.getElementById('sale-date').dataset.today || new Date().toISOString().slice(0, 10);
+      window.getErpWorkingDate?.() ||
+      document.getElementById('sale-date').dataset.today ||
+      new Date().toISOString().slice(0, 10);
     document.getElementById('customer-id').value = '';
     document.getElementById('customer-search').value = '';
     document.getElementById('customer-selected').textContent = 'Walk-in';

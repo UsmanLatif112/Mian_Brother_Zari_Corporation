@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 from app.extensions import db
 from app.models import Purchase, PurchaseItem
 from app.utils.decorators import permission_required
+from app.utils.working_date import get_working_date
 
 purchases_bp = Blueprint("purchases", __name__)
 
@@ -61,7 +62,7 @@ def index():
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
         end_date=period_end.isoformat() if period_end else "",
-        today=date.today().isoformat(),
+        today=get_working_date().isoformat(),
     )
 
 

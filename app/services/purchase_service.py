@@ -7,6 +7,7 @@ from app.extensions import db
 from app.models import LedgerEntry, Purchase, PurchaseItem, Vendor
 from app.services.fifo_service import fifo_receive
 from app.services.ledger_service import post_ledger_entry, rebuild_party_balances
+from app.utils.working_date import get_working_date
 
 
 def _fmt_qty(value) -> str:
@@ -56,7 +57,7 @@ def record_purchase(
     if not items:
         raise ValueError("Add at least one product line.")
 
-    purchase_date = purchase_date or date.today()
+    purchase_date = purchase_date or get_working_date()
     discount = Decimal(str(discount or 0))
     tax_amount = Decimal(str(tax_amount or 0))
     transport_charges = Decimal(str(transport_charges or 0))

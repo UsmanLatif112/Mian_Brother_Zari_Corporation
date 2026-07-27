@@ -7,8 +7,9 @@
           data-bs-toggle="dropdown"
           data-bs-auto-close="outside"
           aria-expanded="false"
-          title="Filter">
-    <i class="fa-solid fa-filter"></i>
+          title="Date range filter"
+          aria-label="Date range filter">
+    <i class="fa-solid fa-calendar-days"></i>
     {% if start or end %}<span class="header-filter-dot" aria-hidden="true"></span>{% endif %}
   </button>
   <div class="dropdown-menu dropdown-menu-end header-filter-menu p-0">

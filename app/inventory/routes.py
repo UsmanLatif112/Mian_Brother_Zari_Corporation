@@ -15,6 +15,7 @@ from app.services.fifo_service import (
     reprice_batch,
 )
 from app.services.purchase_service import amend_purchase_for_layer, record_purchase
+from app.utils.working_date import get_working_date
 from app.utils.decorators import permission_required
 from app.utils.uploads import accept_uploaded_path, delete_image, save_image
 
@@ -208,7 +209,7 @@ def create_product():
                 ],
                 user_id=current_user.id,
                 invoice_no=form.invoice_no.data,
-                purchase_date=date.today(),
+                purchase_date=get_working_date(),
                 notes=f"Inventory add: {product.name}",
             )
             log_audit(action, "product", product.id, product.name)

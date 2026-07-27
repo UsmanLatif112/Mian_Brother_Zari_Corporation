@@ -17,6 +17,7 @@ from app.services.account_service import (
 )
 from app.services.audit_service import log_audit
 from app.utils.decorators import permission_required
+from app.utils.working_date import get_working_date
 
 account_bp = Blueprint("account", __name__)
 
@@ -80,7 +81,7 @@ def index():
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
         end_date=period_end.isoformat() if period_end else "",
-        today=date.today().isoformat(),
+        today=get_working_date().isoformat(),
         open_take_modal=request.args.get("open_take") == "1",
         open_setup_modal=request.args.get("open_setup") == "1",
     )
@@ -90,7 +91,7 @@ def index():
 @login_required
 @permission_required("cashbook.*")
 def setup():
-    balance_date = _parse_date(request.form.get("balance_date"), date.today())
+    balance_date = _parse_date(request.form.get("balance_date"), get_working_date())
     try:
         amount = _parse_amount(request.form.get("previous_balance"))
         if amount < 0:
@@ -115,7 +116,7 @@ def setup():
 @permission_required("cashbook.*")
 def take():
     try:
-        taken_date = _parse_date(request.form.get("taken_date"), date.today())
+        taken_date = _parse_date(request.form.get("taken_date"), get_working_date())
         row = create_amount_taken(
             taken_date=taken_date,
             taken_by=request.form.get("taken_by"),
@@ -138,7 +139,7 @@ def take():
 @permission_required("cashbook.*")
 def edit(row_id):
     try:
-        taken_date = _parse_date(request.form.get("taken_date"), date.today())
+        taken_date = _parse_date(request.form.get("taken_date"), get_working_date())
         row = update_amount_taken(
             row_id,
             taken_date=taken_date,

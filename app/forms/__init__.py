@@ -11,7 +11,16 @@ from wtforms import (
     SubmitField,
     TextAreaField,
 )
-from wtforms.validators import DataRequired, Email, Length, Optional
+from wtforms.validators import DataRequired, Email, EqualTo, Length, Optional
+
+from app.forms.validators import StrongPassword
+
+USER_ROLE_CHOICES = [
+    ("sales", "Sales"),
+    ("manager", "Manager"),
+    ("accountant", "Accountant"),
+    ("admin", "Admin"),
+]
 
 
 class LoginForm(FlaskForm):
@@ -27,16 +36,46 @@ class UserForm(FlaskForm):
     full_name = StringField("Full Name", validators=[DataRequired(), Length(max=120)])
     role = SelectField(
         "Role",
-        choices=[
-            ("admin", "Admin"),
-            ("manager", "Manager"),
-            ("sales", "Sales"),
-            ("accountant", "Accountant"),
-        ],
+        choices=USER_ROLE_CHOICES,
+        default="sales",
     )
-    password = PasswordField("Password", validators=[Optional(), Length(min=6)])
+    password = PasswordField("Password", validators=[StrongPassword(required=True)])
     is_active_user = BooleanField("Active", default=True)
     submit = SubmitField("Save")
+
+
+class UserEditForm(FlaskForm):
+    email = StringField("Email", validators=[DataRequired(), Email()])
+    full_name = StringField("Full Name", validators=[DataRequired(), Length(max=120)])
+    role = SelectField(
+        "Role",
+        choices=USER_ROLE_CHOICES,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    password = PasswordField(
+        "New Password",
+        validators=[StrongPassword(required=False)],
+        description="Leave blank to keep current password.",
+    )
+    is_active_user = BooleanField("Active", default=True)
+    submit = SubmitField("Update User")
+
+
+class ChangePasswordForm(FlaskForm):
+    current_password = PasswordField("Current Password", validators=[DataRequired()])
+    new_password = PasswordField(
+        "New Password",
+        validators=[DataRequired(), StrongPassword(required=True)],
+    )
+    confirm_password = PasswordField(
+        "Confirm New Password",
+        validators=[
+            DataRequired(),
+            EqualTo("new_password", message="Passwords do not match."),
+        ],
+    )
+    submit = SubmitField("Update Password")
 
 
 class ProductForm(FlaskForm):

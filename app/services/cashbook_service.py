@@ -110,7 +110,7 @@ def record_cash_movement(
     created_by_id=None,
     entry_date=None,
 ):
-    from datetime import date
+    from app.utils.working_date import get_working_date
 
     cash = _get_or_create_balance("cash")
     amount = Decimal(str(amount))
@@ -120,7 +120,7 @@ def record_cash_movement(
         cash.balance -= amount
     cash.updated_at = utcnow()
     entry = CashBookEntry(
-        entry_date=entry_date or date.today(),
+        entry_date=entry_date or get_working_date(),
         entry_type=entry_type,
         category=category,
         reference_type=reference_type,

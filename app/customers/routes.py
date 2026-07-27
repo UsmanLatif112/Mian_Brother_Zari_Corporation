@@ -17,6 +17,7 @@ from app.services.customer_payment_service import (
 from app.services.ledger_service import delete_ledger_entry, post_ledger_entry, update_ledger_entry
 from app.utils.decorators import permission_required
 from app.utils.uploads import delete_image, save_image
+from app.utils.working_date import get_working_date
 
 customers_bp = Blueprint("customers", __name__)
 
@@ -50,7 +51,7 @@ def _customer_page(form=None, open_modal=False):
 
     form = form or CustomerForm()
     if not form.joined_date.data:
-        form.joined_date.data = date_cls.today()
+        form.joined_date.data = get_working_date()
 
     period = request.args.get("period", "all")
     period_start = _parse_date(request.args.get("start_date"))
@@ -98,7 +99,7 @@ def _customer_page(form=None, open_modal=False):
         total_credit=total_credit,
         total_advance=total_advance,
         open_modal=open_modal,
-        today=date_cls.today().isoformat(),
+        today=get_working_date().isoformat(),
         payment_types=PAYMENT_TYPES,
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
@@ -126,7 +127,7 @@ def create():
     if form.validate_on_submit():
         opening_raw = form.opening_balance.data
         opening = Decimal("0") if opening_raw in (None, "") else Decimal(str(opening_raw))
-        joined = form.joined_date.data or date_cls.today()
+        joined = form.joined_date.data or get_working_date()
         try:
             customer = Customer(
                 name=form.name.data,
@@ -176,7 +177,7 @@ def payment():
     customer_id = request.form.get("customer_id")
     payment_type = request.form.get("payment_type")
     amount = request.form.get("amount")
-    payment_date = request.form.get("payment_date") or date_cls.today().isoformat()
+    payment_date = request.form.get("payment_date") or get_working_date().isoformat()
     remarks = request.form.get("remarks")
 
     try:
@@ -240,7 +241,7 @@ def detail(customer_id):
         customer=customer,
         ledger=ledger,
         receivings=receivings,
-        today=date_cls.today().isoformat(),
+        today=get_working_date().isoformat(),
         payment_types=PAYMENT_TYPES,
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",

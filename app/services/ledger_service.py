@@ -25,7 +25,7 @@ def post_ledger_entry(
     reference_id=None,
     notes=None,
 ):
-    from datetime import date
+    from app.utils.working_date import get_working_date
 
     debit = Decimal(str(debit))
     credit = Decimal(str(credit))
@@ -33,7 +33,7 @@ def post_ledger_entry(
     entry = LedgerEntry(
         party_type=party_type,
         party_id=party_id,
-        entry_date=entry_date or date.today(),
+        entry_date=entry_date or get_working_date(),
         entry_type=entry_type,
         reference_type=reference_type,
         reference_id=reference_id,

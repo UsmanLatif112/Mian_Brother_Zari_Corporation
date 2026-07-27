@@ -174,7 +174,35 @@
 
   window.showErpToast = showErpToast;
 
+  function showGlobalLoader() {
+    document.getElementById('global-loader')?.classList.remove('d-none');
+  }
+
+  function hideGlobalLoader() {
+    document.getElementById('global-loader')?.classList.add('d-none');
+  }
+
+  function setRegistrationLoading(loading) {
+    const btn = document.getElementById('registration-submit-btn');
+    const label = btn?.querySelector('.reg-btn-label');
+    const spinner = btn?.querySelector('.reg-btn-spinner');
+    if (btn) btn.disabled = loading;
+    label?.classList.toggle('d-none', loading);
+    spinner?.classList.toggle('d-none', !loading);
+    if (loading) showGlobalLoader();
+    else hideGlobalLoader();
+  }
+
+  function hideRegistrationModal() {
+    const regEl = document.getElementById('registrationModal');
+    if (!regEl || !window.bootstrap) return;
+    const instance = bootstrap.Modal.getInstance(regEl);
+    if (instance) instance.hide();
+  }
+
   function showOfflineModal(message) {
+    // Prefer a single modal: close registration before showing offline notice.
+    hideRegistrationModal();
     const modalEl = document.getElementById('offlineModal');
     if (!modalEl || !window.bootstrap) {
       const text = message || 'No internet connection. You can keep using the app offline.';
@@ -244,6 +272,92 @@
       pollAppToasts();
       setInterval(pollAppToasts, 3000);
     });
+
+    initRegistrationGuard();
+  }
+
+  function showRegistrationModal() {
+    const modalEl = document.getElementById('registrationModal');
+    if (!modalEl || !window.bootstrap) return;
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  }
+  window.showRegistrationModal = showRegistrationModal;
+
+  function initRegistrationGuard() {
+    const registered = document.body.dataset.userRegistered === '1';
+    if (registered) return;
+
+    document.querySelectorAll('[data-requires-registration]').forEach((link) => {
+      link.classList.add('nav-locked');
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        showRegistrationModal();
+      });
+    });
+
+    document.getElementById('open-registration-modal-btn')?.addEventListener('click', () => {
+      showRegistrationModal();
+    });
+
+    if (new URLSearchParams(window.location.search).get('registration_required') === '1') {
+      showRegistrationModal();
+    }
+
+    document.getElementById('registration-submit-btn')?.addEventListener('click', submitRegistration);
+    document.getElementById('registration-key-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitRegistration();
+      }
+    });
+  }
+
+  async function submitRegistration() {
+    const input = document.getElementById('registration-key-input');
+    const errEl = document.getElementById('registration-error');
+    const key = (input?.value || '').trim();
+    if (!key) {
+      if (errEl) {
+        errEl.textContent = 'Please enter your registration key.';
+        errEl.classList.remove('d-none');
+      }
+      return;
+    }
+    if (errEl) errEl.classList.add('d-none');
+    setRegistrationLoading(true);
+    try {
+      const res = await fetch('/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': window.CSRF_TOKEN || '',
+        },
+        body: JSON.stringify({ key }),
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        if (data.offline) {
+          showOfflineModal(data.error || 'Internet connection required.');
+        } else if (errEl) {
+          errEl.textContent = data.error || 'Registration failed.';
+          errEl.classList.remove('d-none');
+        } else {
+          showErpToast('danger', data.error || 'Registration failed.');
+        }
+        return;
+      }
+      showErpToast('success', data.message || 'Registered successfully.');
+      const modalEl = document.getElementById('registrationModal');
+      if (modalEl && window.bootstrap) {
+        bootstrap.Modal.getInstance(modalEl)?.hide();
+      }
+      setTimeout(() => window.location.reload(), 600);
+    } catch (_) {
+      showErpToast('danger', 'Could not register. Try again.');
+    } finally {
+      setRegistrationLoading(false);
+    }
   }
 
   if (window.OPEN_FORM_MODAL) {

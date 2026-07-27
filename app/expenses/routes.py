@@ -11,6 +11,7 @@ from app.models import Expense, ExpenseCategory
 from app.services.audit_service import log_audit
 from app.services.expense_service import delete_expense, record_expense_cash_out, settle_expense, update_expense
 from app.utils.decorators import permission_required
+from app.utils.working_date import get_working_date
 
 expenses_bp = Blueprint("expenses", __name__)
 
@@ -22,7 +23,7 @@ def _expense_form():
         for c in ExpenseCategory.query.filter_by(is_deleted=False).order_by(ExpenseCategory.name)
     ]
     if not form.expense_date.data:
-        form.expense_date.data = date.today()
+        form.expense_date.data = get_working_date()
     return form
 
 
@@ -91,7 +92,7 @@ def _expense_page(form=None, open_modal=False):
         total_count=len(expenses),
         form=form or _expense_form(),
         categories=categories,
-        today=date.today().isoformat(),
+        today=get_working_date().isoformat(),
         open_modal=open_modal or request.args.get("open_modal") == "1",
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
@@ -114,7 +115,7 @@ def create():
     if request.method == "GET":
         return redirect(url_for("expenses.index", open_modal=1))
 
-    expense_date_raw = request.form.get("expense_date") or date.today().isoformat()
+    expense_date_raw = request.form.get("expense_date") or get_working_date().isoformat()
     try:
         expense_date = date.fromisoformat(expense_date_raw)
     except ValueError:

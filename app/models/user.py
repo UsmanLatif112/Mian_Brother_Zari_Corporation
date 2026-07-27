@@ -10,13 +10,17 @@ from app.models.mixins import SoftDeleteMixin, TimestampMixin, utcnow
 
 
 class UserRole(str, enum.Enum):
+    SUPER_ADMIN = "super_admin"
     ADMIN = "admin"
     MANAGER = "manager"
     SALES = "sales"
     ACCOUNTANT = "accountant"
 
 
+PRIVILEGED_ROLES = frozenset({UserRole.SUPER_ADMIN})
+
 ROLE_PERMISSIONS = {
+    UserRole.SUPER_ADMIN: {"*"},
     UserRole.ADMIN: {"*"},
     UserRole.MANAGER: {
         "dashboard.view",
@@ -63,10 +67,18 @@ class User(UserMixin, TimestampMixin, SoftDeleteMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
     full_name = db.Column(db.String(120), nullable=False)
-    role = db.Column(db.Enum(UserRole), default=UserRole.SALES, nullable=False)
+    role = db.Column(
+        db.Enum(UserRole, values_callable=lambda x: [e.value for e in x]),
+        default=UserRole.SALES,
+        nullable=False,
+    )
     is_active_user = db.Column(db.Boolean, default=True, nullable=False)
     last_login_at = db.Column(db.DateTime, nullable=True)
     remote_id = db.Column(db.Integer, nullable=True, index=True)
+    is_registered = db.Column(db.Boolean, default=False, nullable=False)
+    registration_key = db.Column(db.String(32), nullable=True)
+    registered_at = db.Column(db.DateTime, nullable=True)
+    device_id = db.Column(db.String(64), nullable=True)
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -83,9 +95,31 @@ class User(UserMixin, TimestampMixin, SoftDeleteMixin, db.Model):
         prefix = permission.split(".")[0]
         return f"{prefix}.*" in perms
 
+    def is_super_admin(self) -> bool:
+        return self.role == UserRole.SUPER_ADMIN
+
+    @property
+    def role_label(self) -> str:
+        if self.role == UserRole.SUPER_ADMIN:
+            return "Super Admin"
+        return self.role.value.replace("_", " ").title()
+
     @property
     def is_active(self):
         return self.is_active_user and not self.is_deleted
+
+    def is_registration_complete(self) -> bool:
+        if self.role in PRIVILEGED_ROLES:
+            return True
+        return bool(self.is_registered)
+
+    @property
+    def registration_status_label(self) -> str:
+        if self.role in PRIVILEGED_ROLES:
+            return "Registered"
+        if self.is_registered:
+            return "Registered"
+        return "Not Registered"
 
 
 class AuditLog(db.Model):

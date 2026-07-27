@@ -5,6 +5,7 @@ from app.extensions import db
 from app.models import Expense, ExpenseSettlement
 from app.services.audit_service import log_audit
 from app.services.cashbook_service import record_cash_movement, reverse_cash_by_reference
+from app.utils.working_date import get_working_date
 
 
 def record_expense_cash_out(expense, user_id=None):
@@ -30,7 +31,7 @@ def settle_expense(expense_id, user_id, notes=None, amount=None, payment_date=No
     if pay_amount <= 0:
         raise ValueError("Payment amount must be greater than zero.")
 
-    entry_date = payment_date or date.today()
+    entry_date = payment_date or get_working_date()
     if isinstance(entry_date, str):
         entry_date = date.fromisoformat(entry_date)
 

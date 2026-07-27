@@ -25,9 +25,26 @@ $EnvSrc = Join-Path $Root ".env"
 $EnvDst = Join-Path $DataDir ".env"
 if (Test-Path $EnvSrc) {
     Copy-Item -Force $EnvSrc $EnvDst
-    Write-Host "==> Included data/.env (MySQL sync connection)" -ForegroundColor Cyan
+    $manifestLine = "UPDATE_MANIFEST_URL=http://mbfupdates.usmanlateef.com/version.json"
+    $envText = Get-Content -Raw $EnvDst
+    if ($envText -notmatch "UPDATE_MANIFEST_URL=") {
+        Add-Content -Path $EnvDst -Value "`n$manifestLine"
+    }
+    Write-Host "==> Included data/.env (MySQL sync + update URL)" -ForegroundColor Cyan
 } else {
     Write-Host "==> WARNING: .env not found - Sync will show MySQL Offline" -ForegroundColor Yellow
+}
+
+# Never ship a live SQLite DB or per-user packages inside the app release zip
+$InstanceDir = Join-Path $DataDir "instance"
+$UserPkgsDir = Join-Path $DataDir "user_packages"
+if (Test-Path $InstanceDir) {
+    Remove-Item -Recurse -Force $InstanceDir
+    Write-Host "==> Removed data/instance (release stays DB-free)" -ForegroundColor Cyan
+}
+if (Test-Path $UserPkgsDir) {
+    Remove-Item -Recurse -Force $UserPkgsDir
+    Write-Host "==> Removed data/user_packages from release" -ForegroundColor Cyan
 }
 
 $Starter = Join-Path $Dist "START_HERE.bat"
@@ -77,10 +94,26 @@ and send the zip - they unzip and run START_HERE.bat.
 "@
 Set-Content -Path $Readme -Value $readmeText -Encoding UTF8
 
+# Release zip + version.json for update hosting
+$VersionPy = Get-Content (Join-Path $Root "app\version.py") -Raw
+$Version = if ($VersionPy -match 'APP_VERSION\s*=\s*"([^"]+)"') { $Matches[1] } else { "1.0.0" }
+$ReleaseDir = Join-Path $Root "releases"
+New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
+$ZipName = "MianBrotherFertilizers-$Version.zip"
+$ZipPath = Join-Path $ReleaseDir $ZipName
+if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
+Write-Host "==> Creating release zip: $ZipName" -ForegroundColor Cyan
+Compress-Archive -Path $Dist -DestinationPath $ZipPath -Force
+python scripts\make_release_manifest.py $ZipPath --base-url "http://mbfupdates.usmanlateef.com" -o (Join-Path $ReleaseDir "version.json")
+
 Write-Host ""
 Write-Host "Build complete." -ForegroundColor Green
 Write-Host "Send this folder to users:" -ForegroundColor Green
 Write-Host "  $Dist"
+Write-Host ""
+Write-Host "Upload to http://mbfupdates.usmanlateef.com/ (cPanel File Manager):" -ForegroundColor Green
+Write-Host "  $ReleaseDir\version.json"
+Write-Host "  $ZipPath"
 Write-Host ""
 Write-Host "Tip: zip dist\MianBrotherFertilizers and share the zip." -ForegroundColor Yellow
 Write-Host "Users should run START_HERE.bat after unzipping." -ForegroundColor Yellow

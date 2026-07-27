@@ -25,3 +25,31 @@ def permission_required(permission: str):
 
 def admin_required(f):
     return permission_required("*")(f)
+
+
+def super_admin_required(f):
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        from app.models.user import UserRole
+
+        if not current_user.is_authenticated:
+            return redirect(url_for("auth.login", next=request.url))
+        if current_user.role != UserRole.SUPER_ADMIN:
+            flash("Only Super Admin can access this area.", "danger")
+            abort(403)
+        return f(*args, **kwargs)
+
+    return wrapped
+
+
+REGISTRATION_EXEMPT_ENDPOINTS = frozenset(
+    {
+        "auth.logout",
+        "auth.register",
+        "auth.change_password",
+        "dashboard.index",
+        "api.internet",
+        "api.poll_toasts",
+        "static",
+    }
+)

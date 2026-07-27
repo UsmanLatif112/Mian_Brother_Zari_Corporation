@@ -13,10 +13,84 @@ api_bp = Blueprint("api", __name__)
 @api_bp.route("/internet")
 @login_required
 def internet_status():
-    from app.services.network_service import is_internet_available
+    from app.services.network_service import is_cloud_registry_reachable, is_internet_available
 
-    online = is_internet_available()
+    purpose = (request.args.get("for") or "").strip().lower()
+    if purpose in ("registration", "registry", "mysql"):
+        online = is_cloud_registry_reachable()
+    else:
+        online = is_internet_available()
     return jsonify({"online": online})
+
+
+@api_bp.route("/working-date", methods=["GET"])
+@login_required
+def working_date_status():
+    from app.utils.working_date import working_date_payload
+
+    return jsonify({"ok": True, **working_date_payload()})
+
+
+@api_bp.route("/working-date", methods=["POST"])
+@login_required
+def working_date_set():
+    from flask_login import current_user
+
+    from app.utils.working_date import can_manage_working_date, set_working_date, working_date_payload
+
+    if not can_manage_working_date(current_user):
+        return jsonify({"ok": False, "error": "Only Admin can change the working date."}), 403
+
+    data = request.get_json(silent=True) or {}
+    if data.get("clear"):
+        set_working_date(None)
+        return jsonify({"ok": True, "message": "Working date reset to today.", **working_date_payload()})
+
+    raw = data.get("date") or data.get("working_date")
+    if not raw:
+        return jsonify({"ok": False, "error": "Date is required."}), 400
+    try:
+        set_working_date(raw)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "message": "Working date updated.", **working_date_payload()})
+
+
+@api_bp.route("/updates/check")
+@login_required
+def updates_check():
+    from app.services.update_service import check_for_update
+
+    respect_skip = request.args.get("respect_skip", "1") != "0"
+    return jsonify(check_for_update(respect_skip=respect_skip))
+
+
+@api_bp.route("/updates/skip", methods=["POST"])
+@login_required
+def updates_skip():
+    from app.services.update_service import set_skipped_build
+
+    data = request.get_json(silent=True) or {}
+    try:
+        build = int(data.get("build") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid build number."}), 400
+    if build <= 0:
+        return jsonify({"ok": False, "error": "Build number is required."}), 400
+    set_skipped_build(build)
+    return jsonify({"ok": True, "message": "This version will not be prompted again."})
+
+
+@api_bp.route("/updates/apply", methods=["POST"])
+@login_required
+def updates_apply():
+    from app.services.update_service import prepare_update_apply
+
+    result = prepare_update_apply()
+    code = 200 if result.get("ok") else 400
+    if result.get("offline"):
+        code = 503
+    return jsonify(result), code
 
 
 @api_bp.route("/toasts")
@@ -293,16 +367,18 @@ def quick_customer():
     from app.services.ledger_service import post_ledger_entry
     from app.utils.uploads import accept_uploaded_path
 
+    from app.utils.working_date import get_working_date
+
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
         return jsonify({"ok": False, "error": "Customer name is required."}), 400
 
-    joined = data.get("joined_date") or date.today().isoformat()
+    joined = data.get("joined_date") or get_working_date().isoformat()
     try:
         joined_date = date.fromisoformat(joined)
     except ValueError:
-        joined_date = date.today()
+        joined_date = get_working_date()
 
     opening = Decimal(str(data.get("opening_balance") or data.get("old_account_balance") or 0))
     photo = accept_uploaded_path(data.get("photo"), "customers")

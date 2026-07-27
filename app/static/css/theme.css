@@ -157,72 +157,182 @@ p { margin-bottom: 0.45rem; }
   to { transform: rotate(360deg); }
 }
 
-/* Page filters beside refresh: inline on desktop, dropdown on mobile */
+/* Page filters + working date in topbar */
+.topbar-right {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
 .topbar-page-filters {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.topbar-page-filters:empty {
+  display: none;
 }
 .topbar-page-filters:not(:has(.header-page-filter)) {
   display: none !important;
 }
+
+/* Working date — compact dropdown */
+.working-date-dropdown {
+  position: relative;
+  flex-shrink: 0;
+}
+.working-date-toggle {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.4rem;
+  height: 2rem;
+  padding: 0 0.55rem !important;
+  border-radius: 0.5rem !important;
+  border: 1px solid var(--erp-border) !important;
+  background: var(--erp-card) !important;
+  color: var(--erp-text, #1f2937) !important;
+  font-size: 0.8rem !important;
+  font-weight: 600;
+  position: relative;
+  max-width: 10.5rem;
+}
+.working-date-toggle:hover,
+.working-date-toggle:focus,
+.working-date-toggle.show {
+  border-color: var(--erp-green, #198754) !important;
+  color: var(--erp-green-dark, #146c43) !important;
+  background: rgba(25, 135, 84, 0.06) !important;
+}
+.working-date-toggle.is-custom {
+  border-color: rgba(255, 193, 7, 0.55) !important;
+  background: var(--bs-warning-bg-subtle, #fff8e1) !important;
+}
+.working-date-toggle-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.working-date-dot {
+  position: absolute;
+  top: 0.18rem;
+  right: 0.18rem;
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+.working-date-menu {
+  min-width: 15.5rem;
+  padding: 0.85rem !important;
+  border: 1px solid var(--erp-border) !important;
+  border-radius: 0.65rem !important;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12) !important;
+  z-index: 1060;
+  pointer-events: auto;
+}
+.working-date-panel-head {
+  margin-bottom: 0.65rem;
+}
+.working-date-panel-head strong {
+  font-size: 0.88rem;
+}
+.working-date-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+.working-date-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--bs-warning-bg-subtle, #fff3cd);
+  border: 1px solid var(--bs-warning-border-subtle, #ffe69c);
+  color: #7a5d00;
+}
+.topbar-right .working-date-dropdown + .topbar-page-filters,
+.topbar-right .working-date-badge + .topbar-page-filters {
+  margin-left: 0.15rem;
+  padding-left: 0.65rem;
+  border-left: 1px solid var(--erp-border);
+}
+
 .header-page-filter {
   position: relative;
   display: flex;
   align-items: center;
 }
+.header-filter-menu,
+.header-filter-menu.dropdown-menu {
+  position: absolute !important;
+  inset: auto 0 auto auto !important;
+  top: calc(100% + 0.35rem) !important;
+  transform: none !important;
+  display: none !important;
+  float: none !important;
+  min-width: min(92vw, 18rem) !important;
+  margin: 0 !important;
+  padding: 0.75rem !important;
+  border: 1px solid var(--erp-border) !important;
+  border-radius: 0.65rem !important;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12) !important;
+  background: var(--erp-card) !important;
+  background-color: var(--erp-card) !important;
+  --bs-dropdown-bg: var(--erp-card);
+  --bs-dropdown-border-color: var(--erp-border);
+  z-index: 1050;
+}
+.header-filter-menu.show {
+  display: block !important;
+}
 .header-filter-toggle {
   width: 2rem;
   height: 2rem;
   padding: 0 !important;
-  display: none;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
   border-radius: 0.5rem !important;
   position: relative;
 }
-.header-filter-dot {
-  position: absolute;
-  top: 0.2rem;
-  right: 0.2rem;
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 50%;
-  background: var(--erp-success, #198754);
-}
-.header-filter-menu,
-.header-filter-menu.dropdown-menu {
-  /* Desktop: sit inline in the topbar — no card / no shadow */
-  position: static !important;
-  transform: none !important;
-  display: block !important;
-  inset: auto !important;
-  float: none !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  background-color: transparent !important;
-  --bs-dropdown-bg: transparent;
-  --bs-dropdown-border-color: transparent;
-  --bs-dropdown-box-shadow: none;
-}
 .header-filter-form,
 .header-filter-form.dash-filter,
 .header-filter-form.dash-filter-inline {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.45rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
   margin: 0 !important;
   padding: 0 !important;
   background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: none !important;
+}
+.header-filter-form .form-control,
+.header-filter-form .form-select {
+  width: 100%;
+  min-width: 0;
+  height: 2rem;
+  font-size: 0.82rem;
+  background-color: var(--erp-card);
+  border: 1px solid var(--erp-border);
+  box-shadow: none !important;
+}
+.header-filter-form .header-filter-apply {
+  width: 100%;
+}
+.header-filter-menu .custom-date-field {
+  width: 100%;
+}
+.header-filter-menu .header-filter-form + .header-filter-form {
+  margin-top: 0.65rem !important;
+  padding-top: 0.65rem !important;
+  border-top: 1px solid var(--erp-border) !important;
 }
 .header-filter-form .dash-filter-label {
   font-size: 0.7rem;
@@ -232,19 +342,18 @@ p { margin-bottom: 0.45rem; }
   color: var(--erp-muted);
   margin: 0;
 }
-.header-filter-form .form-control,
-.header-filter-form .form-select {
-  width: auto;
-  min-width: 8.5rem;
-  height: 2rem;
-  font-size: 0.82rem;
-  background-color: var(--erp-card);
-  border: 1px solid var(--erp-border);
-  box-shadow: none !important;
-}
 .header-filter-form .btn {
   height: 2rem;
   padding: 0 0.55rem !important;
+}
+.header-filter-dot {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.2rem;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--erp-success, #198754);
 }
 .header-filter-clear {
   width: 2rem !important;
@@ -269,60 +378,72 @@ p { margin-bottom: 0.45rem; }
   font-size: 0.95rem;
 }
 
+@media (max-width: 575.98px) {
+  .working-date-toggle-label {
+    display: none;
+  }
+  .working-date-toggle {
+    max-width: 2rem;
+    padding: 0 !important;
+    justify-content: center;
+  }
+  .topbar-right {
+    gap: 0.35rem !important;
+  }
+}
+
 @media (max-width: 991.98px) {
   .erp-topbar {
     height: auto;
     min-height: 56px;
     flex-wrap: nowrap;
   }
-  .header-filter-toggle {
-    display: inline-flex !important;
-  }
-  .header-filter-menu,
-  .header-filter-menu.dropdown-menu {
-    position: absolute !important;
-    inset: auto 0 auto auto !important;
-    top: calc(100% + 0.35rem) !important;
-    display: none !important;
-    min-width: min(92vw, 18rem) !important;
-    margin: 0 !important;
-    padding: 0.75rem !important;
-    border: 1px solid var(--erp-border) !important;
-    border-radius: 0.65rem !important;
-    box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12) !important;
-    background: var(--erp-card) !important;
-    background-color: var(--erp-card) !important;
-    z-index: 1050;
-  }
-  .header-filter-menu.show {
-    display: block !important;
-  }
-  .header-filter-form,
-  .header-filter-form.dash-filter-inline {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.45rem;
-    border: 0 !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    background: transparent !important;
-  }
-  .header-filter-form .form-control,
-  .header-filter-form .form-select {
-    width: 100%;
-    min-width: 0;
-  }
-  .header-filter-form .header-filter-apply {
-    width: 100%;
-  }
   .header-filter-form .header-filter-clear {
     width: 100% !important;
     height: 2.1rem !important;
   }
-  /* On mobile, keep custom date fields usable inside the dropdown */
+}
+
+@media (min-width: 1400px) {
+  .header-filter-toggle {
+    display: none !important;
+  }
+  .header-filter-menu,
+  .header-filter-menu.dropdown-menu {
+    position: static !important;
+    inset: auto !important;
+    top: auto !important;
+    display: block !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    --bs-dropdown-bg: transparent;
+    --bs-dropdown-border-color: transparent;
+    --bs-dropdown-box-shadow: none;
+  }
+  .header-filter-form,
+  .header-filter-form.dash-filter,
+  .header-filter-form.dash-filter-inline {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.45rem;
+  }
+  .header-filter-form .form-control,
+  .header-filter-form .form-select {
+    width: auto;
+    min-width: 8.5rem;
+  }
+  .header-filter-form .header-filter-apply {
+    width: auto;
+  }
   .header-filter-menu .custom-date-field {
-    width: 100%;
+    width: auto;
   }
 }
 
@@ -1550,6 +1671,22 @@ p { margin-bottom: 0.45rem; }
   width: 1.7rem;
   height: 1.7rem;
   font-size: 0.7rem;
+}
+
+.sidebar-nav .nav-link.nav-locked {
+  opacity: 0.55;
+  position: relative;
+}
+.sidebar-nav .nav-link.nav-locked::after {
+  content: "\f023";
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  font-size: 0.65rem;
+  margin-left: auto;
+  opacity: 0.7;
+}
+.registration-banner {
+  background: linear-gradient(135deg, rgba(255, 193, 7, 0.08), rgba(255, 255, 255, 0));
 }
 
 @media (max-width: 991px) {

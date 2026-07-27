@@ -53,6 +53,13 @@ def backups_dir() -> str:
     return path
 
 
+def user_packages_dir() -> str:
+    """Per-user install packages (empty SQLite zips with only that user's credentials)."""
+    path = os.path.join(user_data_dir(), "user_packages")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 def templates_dir() -> str:
     return os.path.join(bundle_dir(), "app", "templates")
 

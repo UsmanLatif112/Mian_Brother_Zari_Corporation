@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from app.extensions import db
 from app.models import (
     Category,
@@ -34,17 +32,7 @@ UNIT_PRESETS = {
 }
 
 
-def seed_database():
-    if not User.query.filter_by(username="admin").first():
-        admin = User(
-            username="admin",
-            email="admin@mbzc.local",
-            full_name="System Administrator",
-            role=UserRole.ADMIN,
-        )
-        admin.set_password("admin123")
-        db.session.add(admin)
-
+def _seed_reference_data() -> None:
     for name in DEFAULT_CATEGORIES:
         if not Category.query.filter_by(name=name).first():
             db.session.add(Category(name=name))
@@ -71,4 +59,39 @@ def seed_database():
     set_setting("date_format", "%d-%m-%Y")
     set_setting("tax_rate", "17")
 
+
+def seed_database():
+    """
+    Seed defaults for a brand-new Super Admin install.
+
+    Staff data packages contain only that user's credentials (no admin).
+    For those DBs we must not inject admin or any default reference data.
+    """
+    user_count = User.query.count()
+    admin = User.query.filter_by(username="admin").first()
+
+    if user_count == 0:
+        admin = User(
+            username="admin",
+            email="admin@mbzc.local",
+            full_name="System Administrator",
+            role=UserRole.SUPER_ADMIN,
+            is_registered=True,
+        )
+        admin.set_password("admin123")
+        db.session.add(admin)
+        _seed_reference_data()
+        db.session.commit()
+        return
+
+    # Staff package: users exist but no admin — leave DB as-is (credentials only).
+    if not admin:
+        return
+
+    if admin.role != UserRole.SUPER_ADMIN:
+        admin.role = UserRole.SUPER_ADMIN
+    if not admin.is_registered:
+        admin.is_registered = True
+
+    _seed_reference_data()
     db.session.commit()

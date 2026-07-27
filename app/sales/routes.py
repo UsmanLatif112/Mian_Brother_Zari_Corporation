@@ -12,6 +12,7 @@ from app.models.sales import PaymentStatus, SaleItem
 from app.services.audit_service import log_audit
 from app.services.sale_service import create_sale, replace_sale, void_sale
 from app.utils.decorators import permission_required
+from app.utils.working_date import get_working_date
 
 sales_bp = Blueprint("sales", __name__)
 
@@ -49,7 +50,7 @@ def _parse_sale_request(data):
             }
         )
 
-    sale_date = _parse_date(data.get("sale_date")) or date.today()
+    sale_date = _parse_date(data.get("sale_date")) or get_working_date()
     payment_status = (data.get("payment_status") or "paid").lower()
     discount = Decimal(str(data.get("discount") or 0))
     if discount < 0:
@@ -229,7 +230,7 @@ def index():
         ],
         categories=categories,
         subcategories=subcategories,
-        today=date.today().isoformat(),
+        today=get_working_date().isoformat(),
         open_modal=open_modal,
     )
 

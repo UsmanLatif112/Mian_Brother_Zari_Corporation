@@ -23,6 +23,36 @@
   </div>
 </div>
 
+{% if not current_user.is_registration_complete() %}
+<div class="card border-warning border-2 shadow-sm mb-4 registration-banner">
+  <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-3">
+    <div>
+      <h2 class="h6 mb-1 text-warning-emphasis">
+        <i class="fa-solid fa-circle-exclamation me-1"></i> Computer Not Registered
+      </h2>
+      <p class="text-muted small mb-0">
+        Your account is active but this PC is not registered yet. Enter your activation key from the administrator to unlock Sales, Inventory, and other modules.
+      </p>
+    </div>
+    <button type="button" class="btn btn-warning" id="open-registration-modal-btn">
+      <i class="fa-solid fa-key me-1"></i> Register Now
+    </button>
+  </div>
+</div>
+{% endif %}
+
+{% if is_custom_working_date %}
+<div class="alert alert-info py-2 small mb-4 d-flex flex-wrap align-items-center justify-content-between gap-2">
+  <span>
+    <i class="fa-solid fa-calendar-day me-1"></i>
+    Working date is set to <strong>{{ working_date }}</strong>. New sales, payments, and expenses will use this date.
+  </span>
+  {% if can_manage_working_date %}
+  <span class="text-muted">Change it from the top bar.</span>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="row g-3 mb-4">
   {% set kpis = [
     ('Total Sale', metrics.total_sale, 'fa-sack-dollar', 'success'),

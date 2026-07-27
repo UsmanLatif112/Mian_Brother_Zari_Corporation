@@ -68,6 +68,7 @@ class Config:
     MYSQL_HOST = os.environ.get("MYSQL_HOST", "127.0.0.1")
     OFFLINE_FIRST = os.environ.get("OFFLINE_FIRST", "true").lower() == "true"
     SYNC_MYSQL_TARGET = os.environ.get("SYNC_MYSQL_TARGET", "production")
+    UPDATE_MANIFEST_URL = os.environ.get("UPDATE_MANIFEST_URL", "")
 
 
 class DevelopmentConfig(Config):

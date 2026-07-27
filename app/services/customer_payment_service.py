@@ -10,6 +10,7 @@ from app.models.sales import PaymentMethod
 from app.services.cashbook_service import record_cash_movement, reverse_cash_by_reference
 from app.services.ledger_service import delete_ledger_by_reference, post_ledger_entry, rebuild_party_balances
 from app.services.sync_service import enqueue_sync
+from app.utils.working_date import get_working_date
 
 PAYMENT_TYPES = {
     "advance": "Advance",
@@ -44,7 +45,7 @@ def record_customer_payment(
     if amount <= 0:
         raise ValueError("Amount must be greater than zero.")
 
-    entry_date = payment_date or date.today()
+    entry_date = payment_date or get_working_date()
     if isinstance(entry_date, str):
         entry_date = date.fromisoformat(entry_date)
 

@@ -18,7 +18,7 @@
   <link href="{{ url_for('static', filename='css/theme.css') }}" rel="stylesheet">
   {% block extra_css %}{% endblock %}
 </head>
-<body class="erp-body"{% if current_user.is_authenticated %} data-search-scope="{{ search_scope }}" data-search-mode="{{ search_mode }}" data-search-table="{{ search_table_selector }}"{% endif %}>
+<body class="erp-body"{% if current_user.is_authenticated %} data-search-scope="{{ search_scope }}" data-search-mode="{{ search_mode }}" data-search-table="{{ search_table_selector }}" data-user-registered="{{ '1' if current_user.is_registration_complete() else '0' }}" data-working-date="{{ working_date }}" data-calendar-today="{{ calendar_today }}" data-desktop-app="{{ '1' if is_desktop_app else '0' }}" data-updates-enabled="{{ '1' if updates_enabled else '0' }}" data-app-version="{{ app_version }}"{% endif %}>
   {% if current_user.is_authenticated %}
   <div class="erp-wrapper">
   {% include 'partials/sidebar.html' %}
@@ -35,7 +35,8 @@
         </form>
       </div>
       <div class="d-flex align-items-center gap-2 topbar-right flex-shrink-0">
-        <div class="topbar-page-filters d-flex align-items-center">
+        {% include 'partials/working_date_control.html' %}
+        <div class="topbar-page-filters">
           {% block page_filters %}{% endblock %}
         </div>
         <button type="button" class="btn btn-sm btn-outline-secondary page-refresh-btn" id="page-refresh-btn" title="Refresh page stats">
@@ -62,7 +63,18 @@
                 </span>
               </span>
             </li>
+            <li><span class="dropdown-item-text text-muted small">v{{ app_version }} (build {{ app_build }})</span></li>
+            {% if is_desktop_app and updates_enabled %}
+            <li>
+              <button class="dropdown-item" type="button" id="check-updates-btn">
+                <i class="fa-solid fa-cloud-arrow-down me-2"></i>Check for updates
+              </button>
+            </li>
+            {% endif %}
             <li><hr class="dropdown-divider"></li>
+            {% if current_user.is_super_admin() %}
+            <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}"><i class="fa-solid fa-key me-2"></i>Change Password</a></li>
+            {% endif %}
             <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Logout</a></li>
           </ul>
         </div>
@@ -83,6 +95,10 @@
   {% if current_user.is_authenticated %}
   {% include 'partials/confirm_modal.html' %}
   {% include 'partials/offline_modal.html' %}
+  {% include 'partials/update_modal.html' %}
+  {% if not current_user.is_registration_complete() %}
+  {% include 'partials/registration_modal.html' %}
+  {% endif %}
   {% endif %}
 
   <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
@@ -94,6 +110,12 @@
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
   <script>
     window.CSRF_TOKEN = document.querySelector('meta[name=csrf-token]')?.content;
+  </script>
+  <script src="{{ url_for('static', filename='js/working-date.js') }}?v=2"></script>
+  {% if current_user.is_authenticated and is_desktop_app and updates_enabled %}
+  <script src="{{ url_for('static', filename='js/updates.js') }}?v=1"></script>
+  {% endif %}
+  <script>
     window.BUSINESS_INFO = {
       company_name: {{ (business.company_name or app_name or '')|tojson }},
       company_address: {{ (business.company_address or '')|tojson }},

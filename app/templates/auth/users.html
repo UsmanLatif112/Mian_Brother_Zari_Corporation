@@ -6,27 +6,93 @@
   <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 dash-hero">
     <div>
       <h1 class="h3 mb-1">Users</h1>
-      <p class="text-muted mb-0">System users and roles</p>
+      <p class="text-muted mb-0">Super Admin — manage users, roles, and registration keys</p>
     </div>
     <button type="button" class="btn btn-success px-3" data-bs-toggle="modal" data-bs-target="#formModal">
       <i class="fa-solid fa-plus me-1"></i> Add User
     </button>
   </div>
 
+  {% if not mysql_configured %}
+  <div class="alert alert-warning">
+    <i class="fa-solid fa-triangle-exclamation me-1"></i>
+    MySQL is not configured. New users cannot be saved to the cloud registry until
+    <code>MYSQL_DATABASE_URI</code> is set in <code>.env</code>.
+  </div>
+  {% endif %}
+
   <div class="card dash-panel border-0 shadow-sm">
     <div class="card-header bg-white"><strong>User List</strong></div>
     <div class="table-responsive">
       <table class="table datatable mb-0 w-100" id="users-table">
         <thead>
-          <tr><th>Username</th><th>Name</th><th>Role</th><th>Email</th></tr>
+          <tr>
+            <th>Username</th>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Registration Key</th>
+            <th>Email</th>
+            <th class="text-end">Actions</th>
+          </tr>
         </thead>
         <tbody>
           {% for u in users %}
           <tr>
             <td>{{ u.username }}</td>
             <td>{{ u.full_name }}</td>
-            <td>{{ u.role.value }}</td>
+            <td>{{ u.role_label }}</td>
+            <td>
+              {% if u.registration_status_label == 'Registered' %}
+              <span class="badge bg-success-subtle text-success border border-success-subtle">Registered</span>
+              {% else %}
+              <span class="badge bg-warning-subtle text-warning border border-warning-subtle">Not Registered</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if u.registration_key %}
+              <span class="font-monospace small user-reg-key">{{ u.registration_key }}</span>
+              <button type="button" class="btn btn-sm btn-link p-0 ms-1 copy-reg-key-btn" title="Copy key"
+                      data-key="{{ u.registration_key }}">
+                <i class="fa-regular fa-copy"></i>
+              </button>
+              {% elif u.role.value in ['super_admin'] %}
+              <span class="text-muted small">—</span>
+              {% else %}
+              <span class="text-muted small">Not used</span>
+              {% endif %}
+            </td>
             <td>{{ u.email }}</td>
+            <td class="text-end text-nowrap">
+              {% if not u.is_super_admin() %}
+              <a href="{{ url_for('auth.download_user_package', user_id=u.id) }}"
+                 class="btn btn-sm btn-outline-success"
+                 title="{% if package_flags.get(u.id) %}Download data package{% else %}Build &amp; download data package{% endif %}">
+                <i class="fa-solid fa-file-zipper"></i>
+              </a>
+              <button type="button"
+                      class="btn btn-sm btn-outline-secondary btn-rebuild-package"
+                      title="Rebuild data package"
+                      data-user-id="{{ u.id }}"
+                      data-username="{{ u.username }}">
+                <i class="fa-solid fa-rotate"></i>
+              </button>
+              {% endif %}
+              {% if not u.is_super_admin() or u.id == current_user.id %}
+              <a href="{{ url_for('auth.edit_user', user_id=u.id) }}" class="btn btn-sm btn-outline-primary" title="Edit user">
+                <i class="fa-solid fa-pen"></i>
+              </a>
+              {% endif %}
+              {% if not u.is_super_admin() and u.id != current_user.id %}
+              <form method="post" action="{{ url_for('auth.delete_user', user_id=u.id) }}" class="d-inline"
+                    onsubmit="return confirm('Delete user {{ u.username }}?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete user">
+                  <i class="fa-solid fa-trash"></i>
+                </button>
+              </form>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -36,19 +102,53 @@
 </div>
 
 {% call form_modal('Create User', 'Save User') %}
-<form method="post" action="{{ url_for('auth.create_user') }}" id="entity-form">
+<form method="post" action="{{ url_for('auth.create_user') }}" id="entity-form"
+      data-password-form="1" data-password-required="1" data-ajax-user-create="1">
   {{ form.hidden_tag() }}
   <div class="row g-2">
-    <div class="col-md-6">{{ form.username.label(class='form-label') }}{{ form.username(class='form-control') }}</div>
-    <div class="col-md-6">{{ form.email.label(class='form-label') }}{{ form.email(class='form-control') }}</div>
+    <div class="col-md-6 field-check-wrap">
+      {{ form.username.label(class='form-label') }}
+      {{ form.username(class='form-control', autocomplete='off', id='create-user-username') }}
+      <div class="field-check-feedback small d-none"></div>
+      <div class="field-check-hint small text-warning d-none"></div>
+    </div>
+    <div class="col-md-6 field-check-wrap">
+      {{ form.email.label(class='form-label') }}
+      {{ form.email(class='form-control', autocomplete='off', id='create-user-email') }}
+      <div class="field-check-feedback small d-none"></div>
+      <div class="field-check-hint small text-warning d-none"></div>
+    </div>
     <div class="col-md-6">{{ form.full_name.label(class='form-label') }}{{ form.full_name(class='form-control') }}</div>
     <div class="col-md-6">{{ form.role.label(class='form-label') }}{{ form.role(class='form-select') }}</div>
-    <div class="col-md-6">{{ form.password.label(class='form-label') }}{{ form.password(class='form-control', placeholder='Min 6 characters') }}</div>
+    <div class="col-md-6">
+      <div class="password-field-wrap">
+        {{ form.password.label(class='form-label') }}
+        <div class="input-group">
+          {{ form.password(class='form-control password-strength-input', placeholder='Min 8 chars, upper, number, symbol', **{'data-password-main': '1'}) }}
+          <button type="button" class="btn btn-outline-secondary password-toggle-btn" tabindex="-1" aria-label="Show password">
+            <i class="fa-regular fa-eye"></i>
+          </button>
+        </div>
+        <ul class="password-policy-checklist list-unstyled mt-1 mb-0"></ul>
+        <div class="invalid-feedback d-none"></div>
+      </div>
+    </div>
     <div class="col-md-6 d-flex align-items-end">
       <div class="form-check mb-2">
         {{ form.is_active_user(class='form-check-input') }}
         {{ form.is_active_user.label(class='form-check-label') }}
       </div>
+    </div>
+    <div class="col-12">
+      <p class="text-muted small mb-0">
+        User is saved in <strong>SQLite</strong> (offline ERP). Registration key is stored in
+        <strong>MySQL</strong> for PC activation. A <strong>data package zip</strong>
+        (<code>username_MBF_data.zip</code>) is built automatically — empty DB with
+        <strong>only that user’s login</strong> (no admin, no business data). Default role
+        <strong>Sales</strong> starts <strong>Not Registered</strong> — including Admin,
+        Manager, and Accountant roles. Only <strong>Super Admin</strong> is registered
+        automatically.
+      </p>
     </div>
   </div>
 </form>
@@ -56,4 +156,55 @@
 {% endblock %}
 {% block extra_js %}
 <script>window.OPEN_FORM_MODAL = {{ 'true' if open_modal else 'false' }};</script>
+<script src="{{ url_for('static', filename='js/password-validation.js') }}"></script>
+<script src="{{ url_for('static', filename='js/user-create.js') }}"></script>
+<script>
+document.querySelectorAll('.copy-reg-key-btn').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const key = btn.getAttribute('data-key') || '';
+    if (!key) return;
+    try {
+      await navigator.clipboard.writeText(key);
+      window.showErpToast?.('success', 'Registration key copied.');
+    } catch (_) {
+      window.prompt('Copy registration key:', key);
+    }
+  });
+});
+
+document.querySelectorAll('.btn-rebuild-package').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const userId = btn.dataset.userId;
+    const username = btn.dataset.username || 'user';
+    if (!userId) return;
+    if (!window.confirm(`Rebuild data package for ${username}?`)) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/auth/users/${userId}/package/rebuild`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': window.CSRF_TOKEN || '',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        credentials: 'same-origin',
+        body: '{}',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        window.showErpToast?.('danger', data.error || 'Could not rebuild package.');
+        return;
+      }
+      window.showErpToast?.('success', data.message || 'Package rebuilt.');
+      if (data.package_url) {
+        window.location.href = data.package_url;
+      }
+    } catch (_) {
+      window.showErpToast?.('danger', 'Could not rebuild package.');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
+</script>
 {% endblock %}

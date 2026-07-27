@@ -135,6 +135,7 @@ def _free_port() -> int:
 def _init_database(app) -> None:
     from app.extensions import db
     from app.services.dashboard_service import ensure_customer_type_column
+    from app.services.user_registry_service import ensure_user_registration_columns
     from app.utils.seed import seed_database
 
     with app.app_context():
@@ -143,6 +144,10 @@ def _init_database(app) -> None:
             ensure_customer_type_column()
         except Exception:
             logging.getLogger(__name__).warning("Schema ensure skipped", exc_info=True)
+        try:
+            ensure_user_registration_columns()
+        except Exception:
+            logging.getLogger(__name__).warning("User registration columns skipped", exc_info=True)
         seed_database()
 
 
@@ -164,6 +169,14 @@ def _run_in_browser(url: str, server_thread: threading.Thread) -> int:
 
 class DesktopApi:
     """JS bridge for native Windows Save / folder dialogs."""
+
+    def quit_for_update(self):
+        """Close the desktop window so the update script can replace app files."""
+        import webview
+
+        if webview.windows:
+            webview.windows[0].destroy()
+        return True
 
     def choose_backup_path(self, default_filename: str = "sqlite_backup.zip"):
         import webview
@@ -261,6 +274,12 @@ def main() -> int:
         )
         # On Windows, Edge WebView2 is the renderer; window shell still uses WinForms.
         webview.start(gui="edgechromium")
+        try:
+            from app.services.update_service import launch_pending_update
+
+            launch_pending_update()
+        except Exception:
+            logging.getLogger(__name__).exception("Pending update launch failed")
         return 0
     except Exception:
         logging.getLogger(__name__).exception("Native window failed; falling back to browser")

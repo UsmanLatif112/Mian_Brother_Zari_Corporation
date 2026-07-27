@@ -1,4 +1,29 @@
-{# Period filter for topbar: inline on desktop, dropdown on mobile (incl. custom dates). #}
+{# Topbar filters: each filter type uses a distinct icon so side-by-side toggles stay clear. #}
+
+{% macro header_filters_start(active=false, title='Filter', icon='fa-filter') %}
+<div class="header-page-filter dropdown" data-header-filter>
+  <button type="button"
+          class="btn btn-sm btn-outline-secondary header-filter-toggle"
+          data-bs-toggle="dropdown"
+          data-bs-auto-close="outside"
+          aria-expanded="false"
+          title="{{ title }}"
+          aria-label="{{ title }}">
+    <i class="fa-solid {{ icon }}"></i>
+    {% if active %}
+    <span class="header-filter-dot" aria-hidden="true"></span>
+    {% endif %}
+  </button>
+  <div class="dropdown-menu dropdown-menu-end header-filter-menu p-0">
+{% endmacro %}
+
+
+{% macro header_filters_end() %}
+  </div>
+</div>
+{% endmacro %}
+
+
 {% macro header_period_filter(
   form_id,
   persist_key,
@@ -33,19 +58,8 @@
     ('custom', 'Custom'),
   ] %}
 {% endif %}
-<div class="header-page-filter dropdown" data-header-filter>
-  <button type="button"
-          class="btn btn-sm btn-outline-secondary header-filter-toggle"
-          data-bs-toggle="dropdown"
-          data-bs-auto-close="outside"
-          aria-expanded="false"
-          title="Filter">
-    <i class="fa-solid fa-filter"></i>
-    {% if selected_period and selected_period != 'all' %}
-    <span class="header-filter-dot" aria-hidden="true"></span>
-    {% endif %}
-  </button>
-  <div class="dropdown-menu dropdown-menu-end header-filter-menu p-0">
+{% set active = selected_period and selected_period != 'all' %}
+{{ header_filters_start(active=active, title='Period filter', icon='fa-calendar-days') }}
     <form method="get"
           class="header-filter-form"
           id="{{ form_id }}"
@@ -68,31 +82,19 @@
       <span class="custom-date-field dash-filter-label">To</span>
       <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm custom-date-field">
       <button type="submit" class="btn btn-sm btn-outline-secondary custom-date-field header-filter-apply">Apply</button>
-      {% if selected_period and selected_period != 'all' %}
+      {% if active %}
       <a href="{{ clear_url }}" class="header-filter-clear" data-clear-page-filters="{{ persist_key }}" title="Clear filter" aria-label="Clear filter">
         <i class="fa-solid fa-xmark"></i>
       </a>
       {% endif %}
     </form>
-  </div>
-</div>
+{{ header_filters_end() }}
 {% endmacro %}
 
 
 {% macro header_category_filter(categories, selected_category, clear_url, persist_key='inventory', preserve=None) %}
-<div class="header-page-filter dropdown" data-header-filter>
-  <button type="button"
-          class="btn btn-sm btn-outline-secondary header-filter-toggle"
-          data-bs-toggle="dropdown"
-          data-bs-auto-close="outside"
-          aria-expanded="false"
-          title="Filter">
-    <i class="fa-solid fa-filter"></i>
-    {% if selected_category %}
-    <span class="header-filter-dot" aria-hidden="true"></span>
-    {% endif %}
-  </button>
-  <div class="dropdown-menu dropdown-menu-end header-filter-menu p-0">
+{% set active = selected_category %}
+{{ header_filters_start(active=active, title='Category filter', icon='fa-tags') }}
     <form method="get" class="header-filter-form" data-persist-filters="{{ persist_key }}">
       {% if preserve %}
         {% for key, val in preserve.items() %}
@@ -114,8 +116,7 @@
       </a>
       {% endif %}
     </form>
-  </div>
-</div>
+{{ header_filters_end() }}
 {% endmacro %}
 
 
@@ -127,22 +128,12 @@
   label='Filter',
   options=None,
   field_name='status',
-  preserve=None
+  preserve=None,
+  icon='fa-sliders'
 ) %}
 {% set options = options or [('all', 'All'), ('with_products', 'With products'), ('empty', 'No products')] %}
-<div class="header-page-filter dropdown" data-header-filter>
-  <button type="button"
-          class="btn btn-sm btn-outline-secondary header-filter-toggle"
-          data-bs-toggle="dropdown"
-          data-bs-auto-close="outside"
-          aria-expanded="false"
-          title="Filter">
-    <i class="fa-solid fa-filter"></i>
-    {% if selected and selected != 'all' %}
-    <span class="header-filter-dot" aria-hidden="true"></span>
-    {% endif %}
-  </button>
-  <div class="dropdown-menu dropdown-menu-end header-filter-menu p-0">
+{% set active = selected and selected != 'all' %}
+{{ header_filters_start(active=active, title=label ~ ' filter', icon=icon) }}
     <form method="get"
           class="header-filter-form"
           id="{{ form_id }}"
@@ -160,14 +151,13 @@
         <option value="{{ value }}" {% if selected == value %}selected{% endif %}>{{ text }}</option>
         {% endfor %}
       </select>
-      {% if selected and selected != 'all' %}
+      {% if active %}
       <a href="{{ clear_url }}" class="header-filter-clear" data-clear-page-filters="{{ persist_key }}" title="Clear filter" aria-label="Clear filter">
         <i class="fa-solid fa-xmark"></i>
       </a>
       {% endif %}
     </form>
-  </div>
-</div>
+{{ header_filters_end() }}
 {% endmacro %}
 
 
