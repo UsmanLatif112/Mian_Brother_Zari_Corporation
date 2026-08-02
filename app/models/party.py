@@ -1,8 +1,8 @@
-from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
 from app.models.mixins import SoftDeleteMixin, TimestampMixin
+from app.utils.working_date import default_entry_date
 
 # good | bad | 1_year | 6_month | late_pay
 CUSTOMER_TYPE_CHOICES = [
@@ -24,7 +24,7 @@ class Customer(SoftDeleteMixin, TimestampMixin, db.Model):
     address = db.Column(db.Text, nullable=True)
     customer_type = db.Column(db.String(30), default="good", nullable=False, index=True)
     old_book_no = db.Column(db.String(50), nullable=True, index=True)
-    joined_date = db.Column(db.Date, default=date.today, nullable=True, index=True)
+    joined_date = db.Column(db.Date, default=default_entry_date, nullable=True, index=True)
     opening_balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     credit_limit = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     notes = db.Column(db.Text, nullable=True)
@@ -69,7 +69,7 @@ class LedgerEntry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     party_type = db.Column(db.String(20), nullable=False, index=True)  # customer / vendor
     party_id = db.Column(db.Integer, nullable=False, index=True)
-    entry_date = db.Column(db.Date, default=date.today, nullable=False, index=True)
+    entry_date = db.Column(db.Date, default=default_entry_date, nullable=False, index=True)
     entry_type = db.Column(db.String(30), nullable=False)
     reference_type = db.Column(db.String(30), nullable=True)
     reference_id = db.Column(db.Integer, nullable=True)

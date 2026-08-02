@@ -4,7 +4,14 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.forms import ChangePasswordForm, LoginForm, USER_ROLE_CHOICES, UserEditForm, UserForm
+from app.forms import (
+    ChangePasswordForm,
+    CompanyBrandingForm,
+    LoginForm,
+    USER_ROLE_CHOICES,
+    UserEditForm,
+    UserForm,
+)
 from app.models import User
 from app.models.mixins import utcnow
 from app.models.user import PRIVILEGED_ROLES, UserRole
@@ -22,11 +29,56 @@ from app.services.user_registry_service import (
     generate_registration_key,
     import_user_from_mysql_registry,
     mysql_configured,
+    push_local_license_to_mysql,
+    regenerate_registration_key_for_user,
     save_user_to_mysql,
+    sync_registration_bidirectional,
 )
 from app.utils.decorators import super_admin_required
+from app.utils.uploads import accept_uploaded_path, delete_image
 
 auth_bp = Blueprint("auth", __name__)
+
+
+def _apply_user_branding(user: User, form, *, require_company: bool = False) -> str | None:
+    """Set company_name / company_logo (+ DB blob) from form. Returns error message or None."""
+    from app.utils.company_branding import clear_user_logo, set_user_logo_path
+
+    if user.is_super_admin():
+        clear_user_logo(user)
+        user.company_name = None
+        return None
+
+    name = ""
+    if getattr(form, "company_name", None) is not None:
+        name = (form.company_name.data or "").strip()
+    if require_company and not name:
+        return "Company name is required for staff users."
+    if name:
+        user.company_name = name
+
+    clear_logo = (request.form.get("clear_company_logo") or "").strip() in {"1", "true", "on"}
+    raw_logo = (request.form.get("photo_path") or "").strip()
+    if not raw_logo and getattr(form, "company_logo", None) is not None:
+        raw_logo = (form.company_logo.data or "").strip()
+    logo_path = accept_uploaded_path(raw_logo, "logos") if raw_logo else None
+
+    if clear_logo:
+        clear_user_logo(user)
+    elif logo_path:
+        set_user_logo_path(user, logo_path)
+    return None
+
+
+def _rebuild_staff_package(user: User) -> None:
+    """Refresh staff data zip so company logo in package DB matches main DB."""
+    if not user or user.is_super_admin():
+        return
+    try:
+        build_user_data_package(user)
+    except Exception:
+        # Package rebuild is best-effort; user row already saved
+        pass
 
 
 def _flash_first_form_error(form) -> None:
@@ -41,6 +93,86 @@ def _wants_json() -> bool:
     return request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
 
+def _purge_soft_deleted_users(username: str = "", email: str = "") -> None:
+    """Permanently remove any soft-deleted rows matching username/email."""
+    username = (username or "").strip()
+    email = (email or "").strip()
+    q = User.query.filter(User.is_deleted.is_(True))
+    matches = []
+    if username:
+        matches.extend(
+            q.filter(func.lower(User.username) == username.lower()).all()
+        )
+    if email:
+        for row in q.filter(func.lower(User.email) == email.lower()).all():
+            if row not in matches:
+                matches.append(row)
+    for row in matches:
+        _hard_delete_user_row(row)
+
+
+def _hard_delete_user_row(user: User) -> None:
+    """Permanently remove a user row and detach FK references."""
+    from sqlalchemy import inspect, text
+
+    uid = user.id
+    username = user.username
+    if user.company_logo:
+        delete_image(user.company_logo)
+
+    try:
+        from app.services.user_package_service import package_path_for
+
+        pkg = package_path_for(username)
+        if pkg.is_file():
+            pkg.unlink()
+    except OSError:
+        pass
+
+    # Detach / reassign references so delete does not fail if FKs are enforced
+    reassign_to = current_user.id if current_user.is_authenticated else None
+    insp = inspect(db.engine)
+    table_names = set(insp.get_table_names())
+
+    def _has_col(table: str, col: str) -> bool:
+        if table not in table_names:
+            return False
+        return any(c["name"] == col for c in insp.get_columns(table))
+
+    if _has_col("audit_logs", "user_id"):
+        db.session.execute(text("UPDATE audit_logs SET user_id = NULL WHERE user_id = :uid"), {"uid": uid})
+    if _has_col("notifications", "user_id"):
+        db.session.execute(text("UPDATE notifications SET user_id = NULL WHERE user_id = :uid"), {"uid": uid})
+
+    for table, col in (
+        ("account_amount_taken", "created_by_id"),
+        ("account_cash_setups", "created_by_id"),
+        ("cash_book_entries", "created_by_id"),
+        ("sales", "created_by_id"),
+        ("sale_payments", "created_by_id"),
+        ("purchases", "created_by_id"),
+        ("purchase_payments", "created_by_id"),
+        ("stock_movements", "created_by_id"),
+        ("stock_adjustments", "created_by_id"),
+        ("expenses", "created_by_id"),
+        ("expense_settlements", "settled_by_id"),
+    ):
+        if not _has_col(table, col):
+            continue
+        if reassign_to:
+            db.session.execute(
+                text(f"UPDATE {table} SET {col} = :new_id WHERE {col} = :uid"),
+                {"new_id": reassign_to, "uid": uid},
+            )
+        else:
+            db.session.execute(
+                text(f"UPDATE {table} SET {col} = NULL WHERE {col} = :uid"),
+                {"uid": uid},
+            )
+
+    db.session.delete(user)
+
+
 def _availability_payload(username: str = "", email: str = "") -> dict:
     username = (username or "").strip()
     email = (email or "").strip()
@@ -51,20 +183,10 @@ def _availability_payload(username: str = "", email: str = "") -> dict:
             func.lower(User.username) == username.lower(),
             User.is_deleted.is_(False),
         ).first()
-        deleted = User.query.filter(
-            func.lower(User.username) == username.lower(),
-            User.is_deleted.is_(True),
-        ).first()
         if active:
             payload["username"] = {
                 "available": False,
                 "message": f"Username '{username}' already exists.",
-            }
-        elif deleted:
-            payload["username"] = {
-                "available": True,
-                "restore": True,
-                "message": "Deleted account found — saving will restore this user.",
             }
         else:
             payload["username"] = {"available": True, "message": None}
@@ -74,20 +196,10 @@ def _availability_payload(username: str = "", email: str = "") -> dict:
             func.lower(User.email) == email.lower(),
             User.is_deleted.is_(False),
         ).first()
-        deleted = User.query.filter(
-            func.lower(User.email) == email.lower(),
-            User.is_deleted.is_(True),
-        ).first()
         if active:
             payload["email"] = {
                 "available": False,
                 "message": f"Email '{email}' is already in use.",
-            }
-        elif deleted:
-            payload["email"] = {
-                "available": True,
-                "restore": True,
-                "message": "Deleted account found for this email — saving will restore it.",
             }
         else:
             payload["email"] = {"available": True, "message": None}
@@ -144,19 +256,7 @@ def _user_identity_conflict(
 
 
 def _find_deleted_user_to_restore(username: str, email: str) -> User | None:
-    username = (username or "").strip()
-    email = (email or "").strip()
-    by_username = User.query.filter(
-        func.lower(User.username) == username.lower(),
-        User.is_deleted.is_(True),
-    ).first()
-    if by_username:
-        return by_username
-    if email:
-        return User.query.filter(
-            func.lower(User.email) == email.lower(),
-            User.is_deleted.is_(True),
-        ).first()
+    """Deprecated: soft-deleted users are purged; kept for compatibility."""
     return None
 
 
@@ -174,19 +274,29 @@ def _role_needs_registration_key(role: UserRole) -> bool:
     return role not in PRIVILEGED_ROLES
 
 
-def _apply_user_registration(user: User, role: UserRole, password: str) -> tuple[bool, str | None]:
+def _apply_user_registration(
+    user: User,
+    role: UserRole,
+    password: str,
+    *,
+    trial_amount: int | None = None,
+    trial_unit: str | None = None,
+) -> tuple[bool, str | None]:
     """Set password and registration fields. Returns (needs_key, registration_key)."""
     user.role = role
     user.set_password(password)
     if _role_needs_registration_key(role):
         key = user.registration_key or generate_registration_key()
         user.registration_key = key
-        user.is_registered = False
-        user.registered_at = None
-        user.device_id = None
+        user.start_trial(
+            amount=trial_amount if trial_amount is not None else 7,
+            unit=trial_unit or "days",
+        )
         return True, key
     user.registration_key = None
     user.is_registered = True
+    user.license_type = "lifetime"
+    user.license_expires_at = None
     if not user.registered_at:
         user.registered_at = utcnow()
     user.device_id = None
@@ -197,12 +307,13 @@ def _apply_registration_for_role(user: User, role: UserRole) -> None:
     if role in PRIVILEGED_ROLES:
         user.is_registered = True
         user.registration_key = None
+        user.license_type = "lifetime"
+        user.license_expires_at = None
         if not user.registered_at:
             user.registered_at = utcnow()
     elif not user.registration_key:
         user.registration_key = generate_registration_key()
-        user.is_registered = False
-        user.registered_at = None
+        user.start_trial()
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -294,6 +405,30 @@ def change_password():
     return render_template("auth/change_password.html", form=form)
 
 
+@auth_bp.route("/company-branding", methods=["GET", "POST"])
+@login_required
+def company_branding():
+    """Staff users can add/update/remove their company name and logo."""
+    if current_user.is_super_admin():
+        flash("Super Admin uses Agri Books branding. Edit staff users from Users.", "info")
+        return redirect(url_for("auth.users"))
+
+    form = CompanyBrandingForm(obj=current_user)
+    if form.validate_on_submit():
+        brand_err = _apply_user_branding(current_user, form, require_company=True)
+        if brand_err:
+            flash(brand_err, "danger")
+            return render_template("auth/company_branding.html", form=form)
+        log_audit("update_branding", "user", current_user.id, current_user.username)
+        db.session.commit()
+        _rebuild_staff_package(current_user)
+        flash("Company branding saved. Sidebar and invoices will use your name and logo.", "success")
+        return redirect(url_for("auth.company_branding"))
+
+    _flash_first_form_error(form)
+    return render_template("auth/company_branding.html", form=form)
+
+
 @auth_bp.route("/validate-password", methods=["POST"])
 @login_required
 def validate_password():
@@ -319,8 +454,8 @@ def validate_password():
 @auth_bp.route("/register", methods=["POST"])
 @login_required
 def register():
-    """Verify key against MySQL, then mark registered in MySQL + local SQLite."""
-    if current_user.is_registration_complete():
+    """Verify key against MySQL, then mark lifetime registered in MySQL + local SQLite."""
+    if current_user.is_super_admin() or current_user.is_registered:
         return jsonify({"ok": True, "message": "Already registered."})
 
     if not mysql_configured():
@@ -359,36 +494,61 @@ def register():
         return jsonify({"ok": False, "error": result.get("error", "Registration failed.")}), 400
 
     now = utcnow()
-    current_user.is_registered = True
+    current_user.activate_lifetime()
     current_user.registered_at = now
     current_user.device_id = machine_id
     current_user.registration_key = result.get("registration_key") or key
     if result.get("cloud_id"):
         current_user.remote_id = result["cloud_id"]
-    log_audit("register", "user", current_user.id, f"device={machine_id}")
+    log_audit("register", "user", current_user.id, f"device={machine_id};license=lifetime")
     db.session.commit()
     return jsonify(
         {
             "ok": True,
-            "message": "This computer is registered. You can use the app offline from now on.",
+            "message": "This computer is registered for lifetime. You can use the app offline from now on.",
         }
     )
 
 
 def _users_page(form=None, open_modal=False):
     users_list = User.query.filter_by(is_deleted=False).order_by(User.username).all()
+    # Persist logo bytes into main DB for Super Admin visibility / packages
+    try:
+        from app.utils.company_branding import sync_logo_blob_from_disk
+
+        dirty = False
+        for u in users_list:
+            if u.company_logo and not u.company_logo_data:
+                sync_logo_blob_from_disk(u)
+                if u.company_logo_data:
+                    dirty = True
+        if dirty:
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
     package_flags = {
         u.id: package_exists(u.username)
         for u in users_list
         if not u.is_super_admin()
     }
+    cloud_ok = False
+    if mysql_configured():
+        try:
+            cloud_ok = is_cloud_registry_reachable()
+        except Exception:
+            cloud_ok = False
+    expired_trials = [u for u in users_list if u.is_trial_expired()]
+    active_trials = [u for u in users_list if u.is_on_trial()]
     return render_template(
         "auth/users.html",
         users=users_list,
         form=form or UserForm(),
         open_modal=open_modal or request.args.get("open_modal") == "1",
         mysql_configured=mysql_configured(),
+        cloud_registry_online=cloud_ok,
         package_flags=package_flags,
+        expired_trials=expired_trials,
+        active_trials=active_trials,
     )
 
 
@@ -397,6 +557,60 @@ def _users_page(form=None, open_modal=False):
 @super_admin_required
 def users():
     return _users_page()
+
+
+@auth_bp.route("/users/sync-registration", methods=["POST"])
+@login_required
+@super_admin_required
+def sync_registration():
+    """Pull registration status from MySQL into local admin SQLite."""
+    if not mysql_configured():
+        msg = "MySQL is not configured. Set MYSQL_DATABASE_URI in .env."
+        if _wants_json():
+            return jsonify({"ok": False, "error": msg}), 400
+        flash(msg, "danger")
+        return redirect(url_for("auth.users"))
+    if not is_cloud_registry_reachable():
+        msg = "Cloud registry is offline. Connect to the internet and try again."
+        if _wants_json():
+            return jsonify({"ok": False, "error": msg}), 503
+        flash(msg, "warning")
+        return redirect(url_for("auth.users"))
+    try:
+        result = sync_registration_bidirectional()
+        db.session.commit()
+        log_audit(
+            "sync",
+            "user_registry",
+            None,
+            f"updated={result.get('updated')} pushed={result.get('pushed')}",
+        )
+        message = (
+            f"Registration & trial synced. "
+            f"Updated {result.get('updated', 0)} local; "
+            f"pushed {result.get('pushed', 0)} to cloud."
+        )
+        if result.get("missing_on_cloud"):
+            message += f" {result['missing_on_cloud']} local user(s) not found on cloud."
+        if result.get("push_errors"):
+            message += f" Push warnings: {len(result['push_errors'])}."
+        if _wants_json():
+            return jsonify({"ok": True, "message": message, **result})
+        flash(message, "success")
+        return redirect(url_for("auth.users"))
+    except ValueError as exc:
+        db.session.rollback()
+        if _wants_json():
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        flash(str(exc), "danger")
+        return redirect(url_for("auth.users"))
+    except Exception as exc:
+        db.session.rollback()
+        logger_msg = str(exc) or "Could not sync registration status."
+        if _wants_json():
+            return jsonify({"ok": False, "error": logger_msg}), 500
+        flash(logger_msg, "danger")
+        return redirect(url_for("auth.users"))
 
 
 @auth_bp.route("/users/check")
@@ -431,28 +645,31 @@ def create_user():
         role = UserRole(form.role.data)
         needs_key = _role_needs_registration_key(role)
 
-        restored = _find_deleted_user_to_restore(username, email)
-        if restored:
-            user = restored
-            user.is_deleted = False
-            user.deleted_at = None
-            user.username = username
-            user.email = email
-            user.full_name = form.full_name.data
-            user.is_active_user = form.is_active_user.data
-            restored_msg = True
-        else:
-            user = User(
-                username=username,
-                email=email,
-                full_name=form.full_name.data,
-                is_active_user=form.is_active_user.data,
-            )
-            restored_msg = False
-            db.session.add(user)
+        # Remove any leftover soft-deleted row so username/email can be reused cleanly
+        _purge_soft_deleted_users(username, email)
+
+        user = User(
+            username=username,
+            email=email,
+            full_name=form.full_name.data,
+            is_active_user=form.is_active_user.data,
+        )
+        restored_msg = False
+        db.session.add(user)
+
+        brand_err = _apply_user_branding(user, form, require_company=False)
+        if brand_err:
+            resp = _json_or_flash(ok=False, message=brand_err, category="danger", field="company_name", status=400)
+            if resp:
+                return resp
+            return _users_page(form=form, open_modal=True)
 
         needs_key, registration_key = _apply_user_registration(
-            user, role, form.password.data or ""
+            user,
+            role,
+            form.password.data or "",
+            trial_amount=form.trial_amount.data,
+            trial_unit=form.trial_unit.data,
         )
 
         db.session.flush()
@@ -581,6 +798,55 @@ def rebuild_user_package(user_id):
     )
 
 
+@auth_bp.route("/users/<int:user_id>/regenerate-key", methods=["POST"])
+@login_required
+@super_admin_required
+def regenerate_user_key(user_id):
+    """New registration key + clear device binding (SQLite + MySQL when online)."""
+    user = User.query.filter_by(id=user_id, is_deleted=False).first_or_404()
+    if user.is_super_admin():
+        return jsonify({"ok": False, "error": "Super Admin does not use a registration key."}), 400
+
+    key = regenerate_registration_key_for_user(user)
+    mysql_warning = None
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    if mysql_configured() and is_cloud_registry_reachable():
+        try:
+            cloud_id = push_local_license_to_mysql(user)
+            if cloud_id:
+                user.remote_id = cloud_id
+                db.session.commit()
+        except Exception as exc:
+            mysql_warning = f"Key saved locally but MySQL update failed: {exc}"
+    elif mysql_configured():
+        mysql_warning = "Key saved locally. Connect online and Sync to push to MySQL."
+
+    log_audit("regenerate_key", "user", user.id, key)
+    db.session.commit()
+
+    message = f"New key for {user.username}: {key}. Device binding cleared — they must register again."
+    if mysql_warning:
+        message = f"{message} {mysql_warning}"
+    if _wants_json():
+        return jsonify(
+            {
+                "ok": True,
+                "message": message,
+                "registration_key": key,
+                "username": user.username,
+                "status": user.registration_status_label,
+                "warning": bool(mysql_warning),
+            }
+        )
+    flash(message, "warning" if mysql_warning else "success")
+    return redirect(url_for("auth.users"))
+
+
 @auth_bp.route("/users/<int:user_id>/edit", methods=["GET", "POST"])
 @login_required
 @super_admin_required
@@ -604,6 +870,11 @@ def edit_user(user_id):
         user.role = role
         user.is_active_user = form.is_active_user.data
 
+        brand_err = _apply_user_branding(user, form, require_company=not user.is_super_admin())
+        if brand_err:
+            flash(brand_err, "danger")
+            return render_template("auth/edit_user.html", edit_user=user, edit_form=form)
+
         conflict = _user_identity_conflict(
             user.username,
             form.email.data or "",
@@ -618,6 +889,13 @@ def edit_user(user_id):
 
         if not user.is_super_admin():
             _apply_registration_for_role(user, role)
+            if form.reset_trial.data and not user.is_registered:
+                user.start_trial(
+                    amount=form.trial_amount.data or 7,
+                    unit=form.trial_unit.data or "days",
+                )
+                if not user.registration_key:
+                    user.registration_key = generate_registration_key()
 
         log_audit("update", "user", user.id, user.username)
         try:
@@ -626,6 +904,13 @@ def edit_user(user_id):
             db.session.rollback()
             flash("Email is already in use by another account.", "danger")
             return render_template("auth/edit_user.html", edit_user=user, edit_form=form)
+        if not user.is_super_admin():
+            _rebuild_staff_package(user)
+            if mysql_configured() and is_cloud_registry_reachable():
+                try:
+                    save_user_to_mysql(user, registration_key=user.registration_key or "")
+                except Exception:
+                    pass
         flash("User updated.", "success")
         return redirect(url_for("auth.users"))
 
@@ -645,26 +930,35 @@ def delete_user(user_id):
         flash("Super Admin account cannot be deleted.", "danger")
         return redirect(url_for("auth.users"))
 
-    user.soft_delete()
-    user.is_active_user = False
-    user.remote_id = None
-
+    username = user.username
+    # Prefer removing from MySQL first when configured, so orphan cloud keys are not left behind
     cloud_deleted = True
+    cloud_attempted = False
     if mysql_configured():
+        cloud_attempted = True
+        if not is_cloud_registry_reachable():
+            flash(
+                "Cloud registry is offline. Connect to the internet to delete this user from MySQL as well, then try again.",
+                "warning",
+            )
+            return redirect(url_for("auth.users"))
         try:
-            cloud_deleted = delete_user_from_mysql(user.username)
+            cloud_deleted = delete_user_from_mysql(username)
         except Exception:
             cloud_deleted = False
+        if not cloud_deleted:
+            flash(
+                f"Could not delete “{username}” from MySQL. Local account was not removed. Check connection and retry.",
+                "danger",
+            )
+            return redirect(url_for("auth.users"))
 
-    log_audit("delete", "user", user.id, user.username)
+    log_audit("delete", "user", user.id, username)
+    _hard_delete_user_row(user)
     db.session.commit()
-    if cloud_deleted:
-        flash("User deleted from app and cloud registry.", "success")
-    elif mysql_configured():
-        flash(
-            "User deleted locally, but could not remove from MySQL. Check internet and try again.",
-            "warning",
-        )
+
+    if cloud_attempted and cloud_deleted:
+        flash(f"User “{username}” permanently deleted from this PC and MySQL cloud registry.", "success")
     else:
-        flash("User deleted.", "success")
+        flash(f"User “{username}” permanently deleted.", "success")
     return redirect(url_for("auth.users"))

@@ -72,8 +72,9 @@
                 </button>
                 <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
                         data-action="{{ url_for('categories.delete', category_id=c.id) }}"
-                        data-title="Delete category?"
-                        data-message="Delete {{ c.name }}? Subcategories without products will also be removed. History is kept.">
+                        data-title="Delete category “{{ c.name }}”?"
+                        data-message="Category will be removed if unused. Choose Yes only if you are sure."
+                        data-effects="Delete this category|Remove empty subcategories under it|Blocked if products still use it">
                   <i class="fa-solid fa-trash"></i>
                 </button>
                 <a href="{{ url_for('categories.detail', category_id=c.id) }}" class="action-icon-btn" title="Subcategories">

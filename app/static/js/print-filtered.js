@@ -27,11 +27,14 @@
 
   function business() {
     return global.BUSINESS_INFO || {
-      company_name: 'Mian Brother Fertilizers',
+      company_name: '',
       company_address: '',
       company_phone: '',
       company_email: '',
-      logo_url: '/static/img/logo.png',
+      logo_url: '',
+      suite_name: 'Agri Books',
+      developer_name: 'U. Technologies',
+      developer_url: 'https://udottechnologies.com/',
     };
   }
 
@@ -220,17 +223,30 @@
           .join('')}</div>`
       : '';
 
-    const partyBlock =
+    const partyBalance =
+      options.partyBalance != null && options.partyBalance !== ''
+        ? `<div class="party-balance">
+            <div class="party-label">${escapeHtml(options.partyBalanceLabel || 'Current Balance')}</div>
+            <div class="party-balance-value">${escapeHtml(options.partyBalance)}</div>
+          </div>`
+        : '';
+
+    const partyMain =
       options.partyName
-        ? `<div class="party">
+        ? `<div class="party-main">
             <div class="party-label">${escapeHtml(options.partyLabel || 'Party')}</div>
             <div class="party-name">${escapeHtml(options.partyName)}</div>
             ${options.partyMeta ? `<div class="meta">${escapeHtml(options.partyMeta)}</div>` : ''}
             ${fieldsHtml}
           </div>`
         : fieldsHtml
-          ? `<div class="party">${fieldsHtml}</div>`
+          ? `<div class="party-main">${fieldsHtml}</div>`
           : '';
+
+    const partyBlock =
+      partyMain || partyBalance
+        ? `<div class="party">${partyMain}${partyBalance}</div>`
+        : '';
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -247,9 +263,15 @@
     .brand { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
     .meta { color: #555; font-size: 11px; line-height: 1.45; }
     .doc-title { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
-    .party { background: #f7f7e8; border: 1px solid #e5e5c8; padding: 10px 12px; margin-bottom: 14px; }
+    .party {
+      background: #f7f7e8; border: 1px solid #e5e5c8; padding: 10px 12px; margin-bottom: 14px;
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+    }
+    .party-main { min-width: 0; flex: 1 1 auto; }
     .party-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #666; margin-bottom: 2px; }
     .party-name { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+    .party-balance { text-align: right; flex: 0 0 auto; min-width: 120px; }
+    .party-balance-value { font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; }
     .fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 14px; margin-top: 8px; }
     .field-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: #666; }
     .field-value { font-weight: 600; font-size: 12px; word-break: break-word; }
@@ -261,7 +283,12 @@
     tfoot td { border-bottom: none; padding-top: 8px; }
     tr.totals td { font-weight: 700; border-top: 1px solid #222; }
     tr.totals td.label { text-align: right; }
-    .footer { margin-top: 18px; color: #666; font-size: 10px; display: flex; justify-content: space-between; }
+    .footer { margin-top: 18px; color: #666; font-size: 10px; display: flex; justify-content: space-between; gap: 12px; }
+    .credit {
+      margin-top: 16px; padding-top: 10px; border-top: 1px dashed #ccc;
+      text-align: center; color: #555; font-size: 10px; line-height: 1.45;
+    }
+    .credit a { color: #1f7a4d; text-decoration: none; }
     .no-print { text-align: center; margin-bottom: 12px; }
     @media print {
       .no-print { display: none !important; }
@@ -285,7 +312,7 @@
         </div>
       </div>
       <div style="text-align:right">
-        <div class="doc-title">${title}</div>
+        ${options.hideDocTitle ? '' : `<div class="doc-title">${title}</div>`}
         ${subtitle ? `<div class="meta">${subtitle}</div>` : ''}
       </div>
     </div>
@@ -296,6 +323,10 @@
     <div class="footer">
       <span>${escapeHtml(biz.company_name || '')}</span>
       <span>End of report</span>
+    </div>
+    <div class="credit">
+      ${escapeHtml(biz.suite_name || 'Agri Books')} developed by <strong>U.</strong> ${escapeHtml((biz.developer_name || 'U. Technologies').replace(/^U\.\s*/, ''))}
+      · <a href="${escapeHtml(biz.developer_url || 'https://udottechnologies.com/')}" target="_blank" rel="noopener noreferrer">udottechnologies.com</a>
     </div>
   </div>
   <script>

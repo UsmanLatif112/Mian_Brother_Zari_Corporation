@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from urllib.parse import urlparse
 
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
@@ -23,8 +24,100 @@ def _parse_date(value):
     return date.fromisoformat(value)
 
 
+def _safe_internal_path(raw: str | None) -> str | None:
+    """Allow only same-app relative paths (block open redirects)."""
+    if not raw:
+        return None
+    raw = str(raw).strip()
+    if not raw:
+        return None
+    # Absolute URL → keep path+query if host matches this request
+    if raw.startswith("http://") or raw.startswith("https://"):
+        parsed = urlparse(raw)
+        if parsed.netloc and parsed.netloc != request.host:
+            return None
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+        raw = path
+    if not raw.startswith("/") or raw.startswith("//"):
+        return None
+    # Never bounce back to the invoice itself
+    if "/invoice" in raw.split("?")[0]:
+        return None
+    return raw
+
+
+def _back_label_for_path(path: str) -> str:
+    base = (path or "/").split("?")[0].rstrip("/") or "/"
+    rules = (
+        ("/sales", "Back to Sales"),
+        ("/vendors", "Back to Vendors"),
+        ("/customers", "Back to Customers"),
+        ("/journal", "Back to Journal"),
+        ("/account", "Back to Account"),
+        ("/inventory", "Back to Inventory"),
+        ("/purchases", "Back to Purchases"),
+        ("/expenses", "Back to Expenses"),
+        ("/reports", "Back to Reports"),
+        ("/sync-backup", "Back to Sync & Backup"),
+        ("/auth", "Back"),
+        ("/", "Back to Dashboard"),
+    )
+    for prefix, label in rules:
+        if prefix == "/":
+            if base == "/" or base == "":
+                return label
+            continue
+        if base == prefix or base.startswith(prefix + "/"):
+            return label
+    return "Back"
+
+
+def _invoice_back_target() -> tuple[str, str]:
+    """Where the invoice Back button should go, and its label."""
+    default_url = url_for("sales.index")
+    default_label = "Back to Sales"
+
+    # Explicit ?next=/path preferred when links pass it
+    candidate = _safe_internal_path(request.args.get("next"))
+    if not candidate:
+        candidate = _safe_internal_path(request.referrer)
+    if not candidate:
+        return default_url, default_label
+    return candidate, _back_label_for_path(candidate)
+
+
+def _infer_item_sale_mode(it) -> str | None:
+    """full | open for weighted products; None for piece-only products."""
+    product = it.product
+    if not product or not product.unit_weight:
+        return None
+    uw = Decimal(str(product.unit_weight))
+    if uw <= 0:
+        return None
+    qty = Decimal(str(it.quantity or 0))
+    sw = it.sale_weight
+    if sw is None:
+        return "full"
+    sw = Decimal(str(sw))
+    whole = qty == qty.to_integral_value()
+    matches_full = abs(sw - qty * uw) <= Decimal("0.001")
+    if whole and matches_full:
+        return "full"
+    return "open"
+
+
 def _parse_sale_request(data):
     """Parse JSON sale payload into (payload, items) or (None, error_response)."""
+    from app.utils.weight_utils import (
+        normalize_weight_unit,
+        parse_unit_weight,
+        product_has_weight,
+        proportional_sale_amount,
+        weight_to_stock_qty,
+    )
+
     items_raw = data.get("items") or []
     if not items_raw:
         return None, (jsonify({"ok": False, "error": "Add at least one item."}), 400)
@@ -34,18 +127,95 @@ def _parse_sale_request(data):
         product = db.session.get(Product, int(line.get("product_id") or 0))
         if not product:
             return None, (jsonify({"ok": False, "error": "Invalid product selected."}), 400)
-        qty = Decimal(str(line.get("quantity") or 0))
-        if qty <= 0:
-            return None, (
-                jsonify({"ok": False, "error": f"Invalid quantity for {product.name}."}),
-                400,
-            )
+
+        list_price = Decimal(
+            str(line.get("list_unit_price") if line.get("list_unit_price") is not None else product.sale_price or 0)
+        )
+        line_discount = Decimal(str(line.get("discount") or 0))
+        sale_weight = None
+        weight_unit = None
+
+        if product_has_weight(product):
+            uw = Decimal(str(product.unit_weight))
+            weight_unit = product.weight_unit or normalize_weight_unit(line.get("weight_unit")) or "kg"
+            mode = (line.get("sale_mode") or "full").strip().lower()
+            if mode not in ("full", "open"):
+                # Legacy payloads: weight provided without mode → open; else full
+                raw_w = line.get("sale_weight")
+                mode = "open" if raw_w not in (None, "") else "full"
+
+            if mode == "open":
+                raw_w = line.get("sale_weight")
+                if raw_w in (None, ""):
+                    sale_weight = uw
+                else:
+                    sale_weight = parse_unit_weight(raw_w) or Decimal("0")
+                if sale_weight <= 0:
+                    return None, (
+                        jsonify({"ok": False, "error": f"Invalid sale weight for {product.name}."}),
+                        400,
+                    )
+                qty = weight_to_stock_qty(sale_weight, uw)
+                suggested = proportional_sale_amount(list_price, uw, sale_weight)
+                if line.get("line_total") is not None and str(line.get("line_total")) != "":
+                    line_total = Decimal(str(line.get("line_total")))
+                elif line.get("unit_price") is not None and str(line.get("unit_price")) != "":
+                    # unit_price from UI for open rows = charged sale amount
+                    line_total = Decimal(str(line.get("unit_price")))
+                else:
+                    line_total = suggested
+                if line_total < 0:
+                    return None, (
+                        jsonify({"ok": False, "error": f"Invalid sale price for {product.name}."}),
+                        400,
+                    )
+                line_total = line_total - line_discount
+                if line_total < 0:
+                    line_total = Decimal("0")
+                unit_price = (line_total / qty) if qty else list_price
+            else:
+                # Full bags / units
+                qty = Decimal(str(line.get("quantity") or 0))
+                if qty <= 0:
+                    return None, (
+                        jsonify({"ok": False, "error": f"Invalid quantity for {product.name}."}),
+                        400,
+                    )
+                sale_weight = qty * uw
+                unit_price = Decimal(
+                    str(line.get("unit_price") if line.get("unit_price") is not None else list_price)
+                )
+                if line.get("line_total") is not None and str(line.get("line_total")) != "":
+                    line_total = Decimal(str(line.get("line_total"))) - line_discount
+                else:
+                    line_total = qty * unit_price - line_discount
+                if line_total < 0:
+                    line_total = Decimal("0")
+        else:
+            qty = Decimal(str(line.get("quantity") or 0))
+            if qty <= 0:
+                return None, (
+                    jsonify({"ok": False, "error": f"Invalid quantity for {product.name}."}),
+                    400,
+                )
+            unit_price = Decimal(str(line.get("unit_price") if line.get("unit_price") is not None else list_price))
+            if line.get("line_total") is not None and str(line.get("line_total")) != "":
+                line_total = Decimal(str(line.get("line_total"))) - line_discount
+            else:
+                line_total = qty * unit_price - line_discount
+            if line_total < 0:
+                line_total = Decimal("0")
+
         items.append(
             {
                 "product": product,
                 "quantity": qty,
-                "unit_price": line.get("unit_price", product.sale_price),
-                "discount": line.get("discount", 0),
+                "unit_price": unit_price,
+                "list_unit_price": list_price,
+                "line_total": line_total,
+                "sale_weight": sale_weight,
+                "weight_unit": weight_unit,
+                "discount": line_discount,
                 "tax_rate": line.get("tax_rate", product.tax_rate or 0),
             }
         )
@@ -55,9 +225,7 @@ def _parse_sale_request(data):
     discount = Decimal(str(data.get("discount") or 0))
     if discount < 0:
         discount = Decimal("0")
-    subtotal_estimate = sum(
-        Decimal(str(i["quantity"])) * Decimal(str(i["unit_price"])) for i in items
-    )
+    subtotal_estimate = sum(Decimal(str(i["line_total"])) for i in items)
     if discount > subtotal_estimate:
         discount = subtotal_estimate
     grand_estimate = subtotal_estimate - discount
@@ -169,6 +337,11 @@ def index():
         query = query.filter(Sale.sale_date <= range_end)
 
     sales = query.order_by(Sale.sale_date.desc(), Sale.id.desc()).limit(200).all()
+
+    from app.services.journal_service import items_particulars
+
+    for s in sales:
+        s.particulars = items_particulars(s.items, fallback="—", kind="sale")
 
     total_sale_q = db.session.query(func.coalesce(func.sum(Sale.grand_total), 0))
     from sqlalchemy import case
@@ -311,6 +484,19 @@ def get_sale(sale_id):
                         "name": it.product.name if it.product else "Item",
                         "quantity": float(it.quantity or 0),
                         "unit_price": float(it.unit_price or 0),
+                        "list_unit_price": float(
+                            it.list_unit_price
+                            if it.list_unit_price is not None
+                            else (it.product.sale_price if it.product else 0) or 0
+                        ),
+                        "line_total": float(it.line_total or 0),
+                        "sale_weight": float(it.sale_weight) if it.sale_weight is not None else None,
+                        "weight_unit": it.weight_unit
+                        or (it.product.weight_unit if it.product else None),
+                        "unit_weight": float(it.product.unit_weight)
+                        if it.product and it.product.unit_weight is not None
+                        else None,
+                        "sale_mode": _infer_item_sale_mode(it),
                         "photo_url": it.product.photo_url if it.product else None,
                     }
                     for it in sale.items
@@ -353,10 +539,19 @@ def invoice(sale_id):
     if not sale:
         flash("Sale not found.", "danger")
         return redirect(url_for("sales.index"))
+    back_url, back_label = _invoice_back_target()
+    business = get_business_info()
+    # Staff invoices show their company — never fall back to product branding
+    if current_user.is_authenticated and not current_user.is_super_admin():
+        company = (getattr(current_user, "company_name", None) or "").strip()
+        if company:
+            business = {**business, "company_name": company}
     return render_template(
         "sales/invoice.html",
         sale=sale,
-        business=get_business_info(),
+        business=business,
+        back_url=back_url,
+        back_label=back_label,
     )
 
 

@@ -1,10 +1,10 @@
 """Account page models — amount taken / previous balance tracking."""
 
-from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
 from app.models.mixins import SoftDeleteMixin, TimestampMixin, utcnow
+from app.utils.working_date import default_entry_date
 
 
 class AccountCashSetup(db.Model):
@@ -28,7 +28,7 @@ class AccountAmountTaken(SoftDeleteMixin, TimestampMixin, db.Model):
     __tablename__ = "account_amount_taken"
 
     id = db.Column(db.Integer, primary_key=True)
-    taken_date = db.Column(db.Date, nullable=False, index=True, default=date.today)
+    taken_date = db.Column(db.Date, nullable=False, index=True, default=default_entry_date)
     taken_by = db.Column(db.String(120), nullable=False)
     amount = db.Column(db.Numeric(14, 2), nullable=False)
     previous_balance = db.Column(db.Numeric(14, 2), nullable=False, default=Decimal("0"))

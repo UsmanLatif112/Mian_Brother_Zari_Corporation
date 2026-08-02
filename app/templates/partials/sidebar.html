@@ -1,9 +1,17 @@
 <aside class="erp-sidebar" id="erp-sidebar">
   <div class="sidebar-brand">
-    <img class="sidebar-brand-logo" src="{{ url_for('static', filename='img/logo.png') }}" alt="Mian Brother Fertilizers">
+    {% if brand_logo %}
+    <img class="sidebar-brand-logo" src="{{ brand_logo }}" alt="{{ brand_name }}{% if brand_sub %} {{ brand_sub }}{% endif %}">
+    {% else %}
+    <div class="sidebar-brand-logo sidebar-brand-logo--placeholder" aria-hidden="true">
+      <i class="fa-solid fa-building"></i>
+    </div>
+    {% endif %}
     <div class="sidebar-brand-text">
-      <span class="sidebar-brand-name">Mian Brother</span>
-      <span class="sidebar-brand-sub">Fertilizers</span>
+      <span class="sidebar-brand-name">{{ brand_name }}</span>
+      {% if brand_sub %}
+      <span class="sidebar-brand-sub">{{ brand_sub }}</span>
+      {% endif %}
     </div>
   </div>
   <nav class="sidebar-nav">
@@ -20,6 +28,18 @@
     <a href="{{ url_for('maintenance.index') }}" class="nav-link"{% if current_user.is_authenticated and not current_user.is_registration_complete() %} data-requires-registration="1"{% endif %}><i class="fa-solid fa-cloud"></i> Backup &amp; Cloud</a>
     {% if current_user.is_super_admin() %}
     <a href="{{ url_for('auth.users') }}" class="nav-link"><i class="fa-solid fa-user-shield"></i> Users</a>
+    {% else %}
+    <a href="{{ url_for('auth.company_branding') }}" class="nav-link"><i class="fa-solid fa-image"></i> Company Branding</a>
     {% endif %}
   </nav>
+  <div class="sidebar-credit">
+    <div class="sidebar-credit-line">
+      <span class="sidebar-credit-product">{{ suite_name }}</span>
+      <span class="sidebar-credit-by">developed by <span class="sidebar-credit-dev"><span class="sidebar-credit-u">U.</span> Technologies</span></span>
+    </div>
+    <a class="sidebar-credit-link" href="{{ developer_url }}" target="_blank" rel="noopener noreferrer" title="{{ developer_url }}">
+      <i class="fa-solid fa-globe"></i>
+      <span>udottechnologies.com</span>
+    </a>
+  </div>
 </aside>

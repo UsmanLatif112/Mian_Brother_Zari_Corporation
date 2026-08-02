@@ -148,7 +148,7 @@ def _init_database(app) -> None:
             ensure_user_registration_columns()
         except Exception:
             logging.getLogger(__name__).warning("User registration columns skipped", exc_info=True)
-        seed_database()
+        seed_database(create_default_admin=False)
 
 
 def _run_in_browser(url: str, server_thread: threading.Thread) -> int:

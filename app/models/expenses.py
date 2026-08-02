@@ -1,8 +1,8 @@
-from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
 from app.models.mixins import SoftDeleteMixin, TimestampMixin, utcnow
+from app.utils.working_date import default_entry_date
 
 
 class ExpenseCategory(SoftDeleteMixin, db.Model):
@@ -20,7 +20,7 @@ class Expense(SoftDeleteMixin, TimestampMixin, db.Model):
     description = db.Column(db.Text, nullable=True)
     amount = db.Column(db.Numeric(14, 2), nullable=False)
     category_id = db.Column(db.Integer, db.ForeignKey("expense_categories.id"))
-    expense_date = db.Column(db.Date, default=date.today, nullable=False, index=True)
+    expense_date = db.Column(db.Date, default=default_entry_date, nullable=False, index=True)
     is_settled = db.Column(db.Boolean, default=False, nullable=False)
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     remote_id = db.Column(db.Integer, nullable=True, index=True)

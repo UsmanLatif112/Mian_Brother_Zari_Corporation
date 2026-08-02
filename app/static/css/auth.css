@@ -11,18 +11,18 @@
   width: 96px;
   height: 96px;
   margin: 0 auto 0.85rem;
-  border-radius: 50%;
+  border-radius: 0;
   background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  box-shadow: 0 8px 22px rgba(31, 107, 58, 0.18);
+  overflow: visible;
+  box-shadow: none;
 }
 .auth-logo img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .auth-title {
@@ -77,6 +77,40 @@
 .auth-form .form-control:focus {
   border-color: #1f7a4d;
   box-shadow: 0 0 0 0.15rem rgba(31, 122, 77, 0.15);
+}
+.auth-credit {
+  max-width: 380px;
+  width: 100%;
+}
+.auth-credit-line {
+  font-size: 0.78rem;
+  color: var(--erp-muted);
+  margin-bottom: 0.25rem;
+}
+.auth-credit-line strong {
+  color: var(--erp-text);
+  font-weight: 650;
+}
+.auth-credit-dev {
+  color: var(--erp-text);
+  font-weight: 700;
+}
+.auth-credit-u {
+  font-weight: 800;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+}
+.auth-credit-link {
+  font-size: 0.78rem;
+  color: #1f7a4d;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.auth-credit-link:hover {
+  color: #16653d;
+  text-decoration: underline;
 }
 .auth-form .is-invalid { animation: authShake 0.4s ease; }
 .auth-submit {

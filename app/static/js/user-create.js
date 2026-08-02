@@ -76,6 +76,13 @@
     });
     const checklist = form.querySelector('.password-policy-checklist');
     if (checklist) checklist.innerHTML = '';
+    form.querySelectorAll('.photo-path').forEach((el) => { el.value = ''; });
+    form.querySelectorAll('.photo-clear-flag').forEach((el) => { el.value = ''; });
+    form.querySelectorAll('.photo-preview').forEach((el) => {
+      el.innerHTML = '<i class="fa-solid fa-camera"></i>';
+      el.style.backgroundImage = '';
+    });
+    form.querySelectorAll('.photo-picker').forEach((el) => el.classList.remove('has-photo'));
   }
 
   function initCreateUserForm() {

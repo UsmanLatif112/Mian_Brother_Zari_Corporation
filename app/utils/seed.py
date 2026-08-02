@@ -60,28 +60,30 @@ def _seed_reference_data() -> None:
     set_setting("tax_rate", "17")
 
 
-def seed_database():
+def seed_database(*, create_default_admin: bool = False) -> None:
     """
-    Seed defaults for a brand-new Super Admin install.
+    Seed reference data and optionally the default Super Admin account.
 
-    Staff data packages contain only that user's credentials (no admin).
-    For those DBs we must not inject admin or any default reference data.
+    Desktop startup must pass create_default_admin=False so an empty database
+    (e.g. customers-only import or staff data package) never gets admin/admin123.
+    Use `flask init-db` or `flask reset-db` to create the default admin on purpose.
     """
     user_count = User.query.count()
     admin = User.query.filter_by(username="admin").first()
 
     if user_count == 0:
-        admin = User(
-            username="admin",
-            email="admin@mbzc.local",
-            full_name="System Administrator",
-            role=UserRole.SUPER_ADMIN,
-            is_registered=True,
-        )
-        admin.set_password("admin123")
-        db.session.add(admin)
-        _seed_reference_data()
-        db.session.commit()
+        if create_default_admin:
+            admin = User(
+                username="admin",
+                email="admin@mbzc.local",
+                full_name="System Administrator",
+                role=UserRole.SUPER_ADMIN,
+                is_registered=True,
+            )
+            admin.set_password("admin123")
+            db.session.add(admin)
+            _seed_reference_data()
+            db.session.commit()
         return
 
     # Staff package: users exist but no admin — leave DB as-is (credentials only).

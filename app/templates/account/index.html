@@ -109,7 +109,8 @@
                 <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
                         data-action="{{ url_for('account.delete', row_id=r.id) }}"
                         data-title="Delete amount taken?"
-                        data-message="Delete #{{ r.id }} ({{ r.taken_by }} — {{ '%.2f'|format(r.amount|float) }})? Cash will be restored.">
+                        data-message="Delete entry for {{ r.taken_by }} ({{ '%.2f'|format(r.amount|float) }}). Choose Yes only if you are sure."
+                        data-effects="Restore cash moved out for this take|Recalculate account balance chain|Update cash-in-hand / account stats">
                   <i class="fa-solid fa-trash"></i>
                 </button>
               </div>
@@ -152,12 +153,14 @@
                      value="{{ '%.2f'|format(previous_balance|float) }}">
             </div>
             <div class="col-md-6">
-              <label class="form-label">Cash In Hand <span class="text-muted fw-normal">(Sale + Prev − Expense)</span></label>
+              <label class="form-label mb-0" for="take-cash">Cash In Hand</label>
+              <div class="form-text mt-0 mb-1">Sale + Prev − Expense</div>
               <input type="text" id="take-cash" class="form-control bg-light" readonly tabindex="-1"
                      value="{{ '%.2f'|format(cash_in_hand|float) }}">
             </div>
             <div class="col-md-6">
-              <label class="form-label">After Take (Previous − Amount)</label>
+              <label class="form-label mb-0" for="take-after">After Take</label>
+              <div class="form-text mt-0 mb-1">Cash In Hand − Amount</div>
               <input type="text" id="take-after" class="form-control bg-light fw-semibold" readonly tabindex="-1" value="">
             </div>
             <div class="col-12">
@@ -279,7 +282,7 @@ toggleCustomDates();
 
   function syncAfter() {
     const amt = Number(document.getElementById('take-amount')?.value || 0);
-    const after = PREV - amt;
+    const after = CASH - amt;
     const el = document.getElementById('take-after');
     if (el) el.value = after.toFixed(2);
   }

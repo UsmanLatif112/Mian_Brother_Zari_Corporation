@@ -89,6 +89,7 @@
           <th class="text-end">Debit</th>
           <th class="text-end">Credit</th>
           <th class="text-end">Balance</th>
+          <th class="col-actions">Action</th>
         </tr>
       </thead>
       <tbody>
@@ -100,6 +101,17 @@
           <td class="text-end">{{ '%.2f'|format(l.debit|float) }}</td>
           <td class="text-end">{{ '%.2f'|format(l.credit|float) }}</td>
           <td class="text-end">{{ '%.2f'|format(l.balance_after|float) }}</td>
+          <td class="col-actions">
+            <div class="table-actions">
+            <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
+                    data-action="{{ url_for('vendors.delete_ledger', entry_id=l.id) }}"
+                    data-title="Delete this ledger entry?"
+                    data-message="Linked purchase or payment may also be reversed. Choose Yes only if you are sure."
+                    data-effects="Reverse linked purchase or payment if present|Update unsold stock when reversing a purchase|Recalculate vendor payable balance|Recalculate purchasing totals and stock value">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+            </div>
+          </td>
         </tr>
         {% endfor %}
       </tbody>

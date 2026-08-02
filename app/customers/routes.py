@@ -14,7 +14,11 @@ from app.services.customer_payment_service import (
     delete_customer_payment,
     record_customer_payment,
 )
-from app.services.ledger_service import delete_ledger_entry, post_ledger_entry, update_ledger_entry
+from app.services.ledger_service import (
+    delete_ledger_entry_cascading,
+    post_ledger_entry,
+    update_ledger_entry,
+)
 from app.utils.decorators import permission_required
 from app.utils.uploads import delete_image, save_image
 from app.utils.working_date import get_working_date
@@ -331,12 +335,23 @@ def edit_ledger(entry_id):
 @permission_required("customers.*")
 def delete_ledger(entry_id):
     try:
-        party_type, party_id = delete_ledger_entry(entry_id)
-        log_audit("delete", "ledger_entry", entry_id)
+        party_type, party_id, source = delete_ledger_entry_cascading(
+            entry_id, current_user.id
+        )
+        log_audit("delete", "ledger_entry", entry_id, source)
         db.session.commit()
-        flash("Ledger entry deleted. Balance recalculated.", "success")
+        messages = {
+            "sale": "Sale deleted. Stock, cash, and customer ledger reversed.",
+            "customer_receiving": "Payment deleted. Cash and customer balance reversed.",
+            "purchase": "Purchase reversed. Stock and vendor balance updated.",
+            "vendor_payment": "Vendor payment deleted and reversed.",
+            "ledger": "Ledger entry deleted. Balance recalculated.",
+        }
+        flash(messages.get(source, "Entry deleted and balances recalculated."), "success")
         if party_type == "customer":
             return redirect(url_for("customers.detail", customer_id=party_id))
+        if party_type == "vendor":
+            return redirect(url_for("vendors.detail", vendor_id=party_id))
         return redirect(url_for("customers.index"))
     except ValueError as exc:
         db.session.rollback()

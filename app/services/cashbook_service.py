@@ -82,11 +82,11 @@ def get_cash_in_hand() -> Decimal:
 
 def get_cash_dashboard_metrics(total_sale=None, previous_amount=None, total_expense=None) -> dict:
     """
-    Dashboard cash cards:
-    - Cash (w/o Prev. Bal. & Expense) = Total Sale only
+    Dashboard cash cards (collections-based, not credit sales):
+    - Cash (w/o Prev. Bal. & Expense) = cash actually received
     - Previous Balance = Account previous amount
-    - Cash (w/o Expense) = Total Sale + Previous Amount
-    - Cash In Hand = Total Sale + Previous Amount - Expense
+    - Cash (w/o Expense) = collections + Previous Amount
+    - Cash In Hand = collections + Previous Amount - Expense
     """
     sale = Decimal(str(total_sale if total_sale is not None else 0))
     prev = Decimal(str(previous_amount if previous_amount is not None else 0))
@@ -98,6 +98,57 @@ def get_cash_dashboard_metrics(total_sale=None, previous_amount=None, total_expe
         "cash_without_expense": without_expense,
         "cash_in_hand": without_expense - expense,
     }
+
+
+def period_cash_collections(start=None, end=None) -> Decimal:
+    """
+    Cash actually received in the period:
+    - Sale amount paid (cash at sale time)
+    - Customer advance / account settle collections
+    - Vendor loan cash in
+    Minus customer loans (cash out to customer).
+    Credit/unpaid sale totals are excluded.
+    """
+    from app.models import CustomerReceiving, Sale, VendorPayment
+
+    cash = Decimal("0")
+
+    sale_q = db.session.query(func.coalesce(func.sum(Sale.amount_paid), 0))
+    if start and end:
+        sale_q = sale_q.filter(Sale.sale_date >= start, Sale.sale_date <= end)
+    cash += Decimal(str(sale_q.scalar() or 0))
+
+    cust_in_q = db.session.query(func.coalesce(func.sum(CustomerReceiving.amount), 0)).filter(
+        CustomerReceiving.payment_type.in_(("advance", "account_settle"))
+    )
+    if start and end:
+        cust_in_q = cust_in_q.filter(
+            CustomerReceiving.receiving_date >= start,
+            CustomerReceiving.receiving_date <= end,
+        )
+    cash += Decimal(str(cust_in_q.scalar() or 0))
+
+    cust_loan_q = db.session.query(func.coalesce(func.sum(CustomerReceiving.amount), 0)).filter(
+        CustomerReceiving.payment_type == "loan"
+    )
+    if start and end:
+        cust_loan_q = cust_loan_q.filter(
+            CustomerReceiving.receiving_date >= start,
+            CustomerReceiving.receiving_date <= end,
+        )
+    cash -= Decimal(str(cust_loan_q.scalar() or 0))
+
+    vendor_loan_q = db.session.query(func.coalesce(func.sum(VendorPayment.amount), 0)).filter(
+        VendorPayment.payment_type == "loan"
+    )
+    if start and end:
+        vendor_loan_q = vendor_loan_q.filter(
+            VendorPayment.payment_date >= start,
+            VendorPayment.payment_date <= end,
+        )
+    cash += Decimal(str(vendor_loan_q.scalar() or 0))
+
+    return cash
 
 
 def record_cash_movement(

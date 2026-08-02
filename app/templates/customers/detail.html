@@ -120,8 +120,9 @@
             </button>
             <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
                     data-action="{{ url_for('customers.delete_ledger', entry_id=l.id) }}"
-                    data-title="Delete ledger entry?"
-                    data-message="This will recalculate the customer balance from remaining entries.">
+                    data-title="Delete this ledger entry?"
+                    data-message="Linked documents may also be reversed. Choose Yes only if you are sure."
+                    data-effects="Reverse linked sale or payment if this row came from one|Restore stock / cash when required|Recalculate customer balance|Update related totals everywhere">
               <i class="fa-solid fa-trash"></i>
             </button>
             </div>
@@ -313,20 +314,20 @@ document.addEventListener('click', (e) => {
 });
 
 document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
+  const phone = {{ (customer.phone or '')|tojson }};
+  const address = {{ (customer.address or '')|tojson }};
+  const partyFields = [];
+  if (phone && String(phone).trim()) partyFields.push({ label: 'Phone', value: phone });
+  if (address && String(address).trim()) partyFields.push({ label: 'Address', value: address });
   window.PrintFiltered?.print({
     table: '#customer-ledger-table',
-    title: 'Customer Ledger',
+    title: {{ customer.name|tojson }},
+    hideDocTitle: true,
     partyLabel: 'Customer',
     partyName: {{ customer.name|tojson }},
-    partyFields: [
-      { label: 'Phone', value: {{ (customer.phone or '—')|tojson }} },
-      { label: 'Address', value: {{ (customer.address or '—')|tojson }} },
-      { label: 'Old Book No', value: {{ (customer.old_book_no or '—')|tojson }} },
-      { label: 'Type', value: {{ customer.customer_type_label|tojson }} },
-      { label: 'Opening Balance', value: {{ '%.2f'|format((customer.opening_balance or 0)|float)|tojson }} },
-      { label: 'Current Balance', value: {{ '%.2f'|format(customer.balance|float)|tojson }} },
-      { label: 'Date Added', value: {{ (customer.joined_date or (customer.created_at.date() if customer.created_at else '—'))|string|tojson }} },
-    ],
+    partyFields,
+    partyBalance: {{ '%.2f'|format(customer.balance|float)|tojson }},
+    partyBalanceLabel: 'Current Balance',
     sumColumns: [4, 5],
   });
 });

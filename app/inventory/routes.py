@@ -5,6 +5,7 @@ from datetime import date, datetime
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
 
+from sqlalchemy import func
 from app.extensions import db
 from app.forms import ProductForm
 from app.models import Category, Product, StockLayer, StockMovement, Vendor
@@ -14,12 +15,27 @@ from app.services.fifo_service import (
     reprice_all_remaining,
     reprice_batch,
 )
-from app.services.purchase_service import amend_purchase_for_layer, record_purchase
+from app.services.purchase_service import (
+    amend_purchase_for_layer,
+    record_purchase,
+    reverse_purchase_for_layer,
+)
 from app.utils.working_date import get_working_date
 from app.utils.decorators import permission_required
 from app.utils.uploads import accept_uploaded_path, delete_image, save_image
+from app.utils.weight_utils import normalize_weight_unit, parse_unit_weight
 
 inventory_bp = Blueprint("inventory", __name__)
+
+
+def _apply_product_weight(product, unit_weight_raw, weight_unit_raw):
+    """Set product packaging weight. Blank weight clears weight-based sales mode."""
+    unit_weight = parse_unit_weight(unit_weight_raw)
+    weight_unit = normalize_weight_unit(weight_unit_raw) if unit_weight else None
+    if unit_weight and not weight_unit:
+        weight_unit = "kg"
+    product.unit_weight = unit_weight
+    product.weight_unit = weight_unit if unit_weight else None
 
 
 def _apply_product_photo(product):
@@ -96,6 +112,33 @@ def _inventory_page(form=None, open_modal=False):
     categories = Category.query.filter_by(is_deleted=False, parent_id=None).order_by(Category.name).all()
     if not open_modal:
         open_modal = bool(session.pop("open_inventory_modal", False))
+
+    from app.services.fifo_service import stock_valuation
+
+    # Same valuation as dashboard (open layers × unit cost). When filtered, sum
+    # remaining value for the products currently listed.
+    if category_id or (range_start and range_end):
+        product_ids = [p.id for p in products]
+        if product_ids:
+            filtered_val = (
+                db.session.query(
+                    func.coalesce(
+                        func.sum(StockLayer.quantity_remaining * StockLayer.unit_cost),
+                        0,
+                    )
+                )
+                .filter(
+                    StockLayer.product_id.in_(product_ids),
+                    StockLayer.quantity_remaining > 0,
+                )
+                .scalar()
+            )
+            stock_value = Decimal(str(filtered_val or 0))
+        else:
+            stock_value = Decimal("0")
+    else:
+        stock_value = stock_valuation()
+
     return render_template(
         "inventory/index.html",
         products=products,
@@ -106,6 +149,8 @@ def _inventory_page(form=None, open_modal=False):
         selected_period=period,
         start_date=start_raw,
         end_date=end_raw,
+        stock_value=stock_value,
+        product_count=len(products),
     )
 
 
@@ -163,6 +208,7 @@ def create_product():
                 product.sale_price = form.sale_price.data or 0
                 product.minimum_stock = form.minimum_stock.data or 0
                 product.description = form.description.data
+                _apply_product_weight(product, form.unit_weight.data, form.weight_unit.data)
                 _apply_product_photo(product)
                 action = "update"
             else:
@@ -190,6 +236,7 @@ def create_product():
                     minimum_stock=form.minimum_stock.data or 0,
                     description=form.description.data,
                 )
+                _apply_product_weight(product, form.unit_weight.data, form.weight_unit.data)
                 db.session.add(product)
                 db.session.flush()
                 _apply_product_photo(product)
@@ -260,6 +307,11 @@ def edit_product(product_id):
         product.sale_price = Decimal(request.form.get("sale_price") or 0)
         product.minimum_stock = Decimal(request.form.get("minimum_stock") or 0)
         product.description = (request.form.get("description") or "").strip() or None
+        _apply_product_weight(
+            product,
+            request.form.get("unit_weight"),
+            request.form.get("weight_unit"),
+        )
         _apply_product_photo(product)
         log_audit("update", "product", product.id, product.name)
         db.session.commit()
@@ -329,7 +381,7 @@ def detail(product_id):
         open_batch_count=open_batch_count,
         closed_batch_count=closed_batch_count,
         form=form,
-        today=date.today(),
+        today=date.today(),  # calendar day for expiry highlighting only
         selected_period=period,
         start_date=start_raw,
         end_date=end_raw,
@@ -418,6 +470,11 @@ def edit_layer_entry(layer_id):
         sale_price = Decimal(request.form.get("sale_price") or 0)
         product.purchase_price = purchase_price
         product.sale_price = sale_price
+        _apply_product_weight(
+            product,
+            request.form.get("unit_weight"),
+            request.form.get("weight_unit"),
+        )
 
         old_purchased = Decimal(str(layer.quantity_received or 0))
         old_unit_cost = Decimal(str(layer.unit_cost or 0))
@@ -659,13 +716,44 @@ def delete_layer(layer_id):
         return redirect(url_for("inventory.index"))
     product_id = layer.product_id
     try:
+        # Reverse linked purchase / vendor payable before clearing stock.
+        reversed_info = reverse_purchase_for_layer(
+            layer, notes=f"Batch #{layer_id} deleted"
+        )
         remaining = Decimal(str(layer.quantity_remaining or 0))
         if remaining > 0:
             adjust_batch(layer, Decimal("0"), current_user.id, notes="Batch cleared / deleted")
         db.session.delete(layer)
-        log_audit("delete", "stock_layer", layer_id, f"product={product_id}")
+        db.session.flush()
+        product = db.session.get(Product, product_id)
+        if product:
+            open_qty = (
+                db.session.query(func.coalesce(func.sum(StockLayer.quantity_remaining), 0))
+                .filter(StockLayer.product_id == product_id)
+                .scalar()
+            )
+            product.current_stock = Decimal(str(open_qty or 0))
+        audit_detail = f"product={product_id}"
+        if reversed_info:
+            audit_detail += (
+                f" purchase={reversed_info.get('purchase_id')}"
+                f" vendor={reversed_info.get('vendor_id')}"
+                f" purchase_deleted={reversed_info.get('deleted')}"
+            )
+            log_audit(
+                "delete" if reversed_info.get("deleted") else "update",
+                "purchase",
+                reversed_info.get("purchase_id"),
+                reversed_info.get("invoice_no"),
+            )
+        log_audit("delete", "stock_layer", layer_id, audit_detail)
         db.session.commit()
-        flash("Batch deleted.", "success")
+        if reversed_info and reversed_info.get("deleted"):
+            flash("Batch deleted. Linked purchase removed and vendor balance updated.", "success")
+        elif reversed_info:
+            flash("Batch deleted. Purchase and vendor balance recalculated.", "success")
+        else:
+            flash("Batch deleted.", "success")
     except Exception as exc:
         db.session.rollback()
         flash(str(exc), "danger")
@@ -681,19 +769,39 @@ def delete_product(product_id):
         flash("Product not found.", "danger")
         return redirect(url_for("inventory.index"))
     try:
-        # Soft-delete; clear remaining stock on open layers for consistency
-        open_layers = (
-            StockLayer.query.filter_by(product_id=product.id)
-            .filter(StockLayer.quantity_remaining > 0)
-            .all()
-        )
-        for layer in open_layers:
-            adjust_batch(layer, Decimal("0"), current_user.id, notes="Product deleted — stock cleared")
+        layers = StockLayer.query.filter_by(product_id=product.id).all()
+        purchases_removed = 0
+        for layer in layers:
+            info = reverse_purchase_for_layer(
+                layer, notes=f"Product deleted: {product.name}"
+            )
+            if info and info.get("deleted"):
+                purchases_removed += 1
+            remaining = Decimal(str(layer.quantity_remaining or 0))
+            if remaining > 0:
+                adjust_batch(
+                    layer,
+                    Decimal("0"),
+                    current_user.id,
+                    notes="Product deleted — stock cleared",
+                )
+            db.session.delete(layer)
+
         product.is_deleted = True
         product.current_stock = Decimal("0")
         log_audit("delete", "product", product.id, product.name)
         db.session.commit()
-        flash("Product deleted (soft). History kept; stock cleared.", "success")
+        if purchases_removed:
+            flash(
+                f"Product deleted. {purchases_removed} linked purchase(s) removed; "
+                "vendor balances and stock value recalculated.",
+                "success",
+            )
+        else:
+            flash(
+                "Product deleted (soft). Linked purchases reversed where needed; stock cleared.",
+                "success",
+            )
         return redirect(url_for("inventory.index"))
     except Exception as exc:
         db.session.rollback()

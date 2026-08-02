@@ -8,9 +8,25 @@
       <h1 class="h3 mb-1">Users</h1>
       <p class="text-muted mb-0">Super Admin — manage users, roles, and registration keys</p>
     </div>
-    <button type="button" class="btn btn-success px-3" data-bs-toggle="modal" data-bs-target="#formModal">
-      <i class="fa-solid fa-plus me-1"></i> Add User
-    </button>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      {% if mysql_configured %}
+      <button type="button"
+              class="btn btn-outline-primary px-3"
+              id="btn-sync-registration"
+              {% if not cloud_registry_online %}disabled title="Cloud registry offline — connect and retry"{% else %}title="Sync trial dates + registration status (MySQL ↔ SQLite)"{% endif %}>
+        <i class="fa-solid fa-cloud-arrow-down me-1"></i>
+        Sync registration
+        {% if cloud_registry_online %}
+        <span class="badge bg-success-subtle text-success border border-success-subtle ms-1">Online</span>
+        {% else %}
+        <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle ms-1">Offline</span>
+        {% endif %}
+      </button>
+      {% endif %}
+      <button type="button" class="btn btn-success px-3" data-bs-toggle="modal" data-bs-target="#formModal">
+        <i class="fa-solid fa-plus me-1"></i> Add User
+      </button>
+    </div>
   </div>
 
   {% if not mysql_configured %}
@@ -18,6 +34,35 @@
     <i class="fa-solid fa-triangle-exclamation me-1"></i>
     MySQL is not configured. New users cannot be saved to the cloud registry until
     <code>MYSQL_DATABASE_URI</code> is set in <code>.env</code>.
+  </div>
+  {% elif not cloud_registry_online %}
+  <div class="alert alert-warning">
+    <i class="fa-solid fa-wifi me-1"></i>
+    Cloud registry is offline. Connect to the internet to sync who has registered their PC.
+  </div>
+  {% endif %}
+
+  <div class="alert alert-secondary py-2 small mb-3">
+    <i class="fa-solid fa-laptop me-1"></i>
+    Trial access is checked on this PC from <strong>local SQLite</strong> (end time + PC clock) —
+    it works <strong>fully offline</strong>. Sync is only needed to mirror status with MySQL for admin.
+  </div>
+
+  {% if expired_trials %}
+  <div class="alert alert-danger d-flex flex-wrap align-items-start justify-content-between gap-2">
+    <div>
+      <i class="fa-solid fa-hourglass-end me-1"></i>
+      <strong>{{ expired_trials|length }} trial expired</strong> —
+      {% for u in expired_trials %}
+        <span class="font-monospace">{{ u.username }}</span>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+      <div class="small mt-1 mb-0">They need a registration key (regenerate if lost). Sync Sync registration to refresh from MySQL.</div>
+    </div>
+  </div>
+  {% elif active_trials %}
+  <div class="alert alert-info py-2 small">
+    <i class="fa-solid fa-hourglass-half me-1"></i>
+    {{ active_trials|length }} user(s) on active trial.
   </div>
   {% endif %}
 
@@ -29,8 +74,10 @@
           <tr>
             <th>Username</th>
             <th>Name</th>
+            <th>Company</th>
             <th>Role</th>
             <th>Status</th>
+            <th>Trial time</th>
             <th>Registration Key</th>
             <th>Email</th>
             <th class="text-end">Actions</th>
@@ -38,20 +85,46 @@
         </thead>
         <tbody>
           {% for u in users %}
-          <tr>
+          <tr class="{% if u.is_trial_expired() %}table-danger{% elif u.is_on_trial() %}table-info{% endif %}">
             <td>{{ u.username }}</td>
             <td>{{ u.full_name }}</td>
+            <td class="small">
+              {% if u.is_super_admin() %}
+              <span class="text-muted">Agri Books</span>
+              {% elif u.company_name %}
+              <div class="d-flex align-items-center gap-2">
+                {% if u.company_logo_url %}
+                <img src="{{ u.company_logo_url }}" alt="" width="22" height="22" class="rounded-circle object-fit-cover border">
+                {% endif %}
+                <span>{{ u.company_name }}</span>
+              </div>
+              {% else %}
+              <span class="text-muted">—</span>
+              {% endif %}
+            </td>
             <td>{{ u.role_label }}</td>
             <td>
-              {% if u.registration_status_label == 'Registered' %}
-              <span class="badge bg-success-subtle text-success border border-success-subtle">Registered</span>
+              {% if u.is_registered or u.is_super_admin() %}
+              <span class="badge bg-success-subtle text-success border border-success-subtle">{{ u.registration_status_label }}</span>
+              {% elif u.is_on_trial() %}
+              <span class="badge bg-info-subtle text-info border border-info-subtle">{{ u.registration_status_label }}</span>
+              {% elif u.is_trial_expired() %}
+              <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Trial Expired</span>
               {% else %}
               <span class="badge bg-warning-subtle text-warning border border-warning-subtle">Not Registered</span>
               {% endif %}
             </td>
+            <td class="small {% if u.is_trial_expired() %}text-danger fw-semibold{% elif u.is_on_trial() %}text-info{% endif %}">
+              {% if u.is_on_trial() or u.is_trial_expired() %}
+              <div class="fw-semibold">{{ u.license_expires_at.strftime('%Y-%m-%d %H:%M') if u.license_expires_at else '—' }}</div>
+              <div class="{% if u.is_trial_expired() %}text-danger{% else %}text-muted{% endif %}">{{ u.trial_remaining_label() }}</div>
+              {% else %}
+              <span class="text-muted">—</span>
+              {% endif %}
+            </td>
             <td>
               {% if u.registration_key %}
-              <span class="font-monospace small user-reg-key">{{ u.registration_key }}</span>
+              <span class="font-monospace small user-reg-key" data-user-id="{{ u.id }}">{{ u.registration_key }}</span>
               <button type="button" class="btn btn-sm btn-link p-0 ms-1 copy-reg-key-btn" title="Copy key"
                       data-key="{{ u.registration_key }}">
                 <i class="fa-regular fa-copy"></i>
@@ -65,6 +138,13 @@
             <td>{{ u.email }}</td>
             <td class="text-end text-nowrap">
               {% if not u.is_super_admin() %}
+              <button type="button"
+                      class="btn btn-sm btn-outline-warning btn-regen-key"
+                      title="Regenerate registration key (clears device binding)"
+                      data-user-id="{{ u.id }}"
+                      data-username="{{ u.username }}">
+                <i class="fa-solid fa-key"></i>
+              </button>
               <a href="{{ url_for('auth.download_user_package', user_id=u.id) }}"
                  class="btn btn-sm btn-outline-success"
                  title="{% if package_flags.get(u.id) %}Download data package{% else %}Build &amp; download data package{% endif %}">
@@ -84,13 +164,18 @@
               </a>
               {% endif %}
               {% if not u.is_super_admin() and u.id != current_user.id %}
-              <form method="post" action="{{ url_for('auth.delete_user', user_id=u.id) }}" class="d-inline"
-                    onsubmit="return confirm('Delete user {{ u.username }}?');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete user">
-                  <i class="fa-solid fa-trash"></i>
-                </button>
-              </form>
+              <button type="button" class="btn btn-sm btn-outline-danger btn-delete-confirm" title="Delete user{% if mysql_configured %} (local + MySQL){% endif %}"
+                      data-action="{{ url_for('auth.delete_user', user_id=u.id) }}"
+                      data-title="Delete user “{{ u.username }}”?"
+                      data-message="{% if mysql_configured %}This removes the account from this admin PC and from the MySQL cloud registry. Internet is required.{% else %}This account will no longer be able to sign in. Choose Yes only if you are sure.{% endif %}"
+                      data-effects="{% if mysql_configured %}Delete login from local SQLite|Delete user from MySQL erp_user_registry|Clear registration key in cloud|They cannot sign in or activate a PC anymore|Business data they created is kept{% else %}Remove this user login|They cannot access the app anymore|Business data they created is kept{% endif %}"
+                      {% if mysql_configured %}
+                      data-requires-online="1"
+                      data-online-check-url="{{ url_for('api.internet_status') }}?for=registry"
+                      data-offline-message="Connect to the internet to delete this user from MySQL as well. You can keep using the app offline."
+                      {% endif %}>
+                <i class="fa-solid fa-trash"></i>
+              </button>
               {% endif %}
             </td>
           </tr>
@@ -120,6 +205,26 @@
     </div>
     <div class="col-md-6">{{ form.full_name.label(class='form-label') }}{{ form.full_name(class='form-control') }}</div>
     <div class="col-md-6">{{ form.role.label(class='form-label') }}{{ form.role(class='form-select') }}</div>
+    <div class="col-md-8">
+      {{ form.company_name.label(class='form-label') }}
+      {{ form.company_name(class='form-control', placeholder='e.g. Mian Brother Fertilizers') }}
+    </div>
+    <div class="col-md-4">
+      <label class="form-label d-block">Company Logo</label>
+      {% from 'partials/macros.html' import photo_field %}
+      {{ photo_field(icon='fa-image', label='Company logo', upload='ajax', folder='logos', clear_name='clear_company_logo', picker_id='create-user-logo-picker') }}
+    </div>
+    <div class="col-md-4">
+      {{ form.trial_amount.label(class='form-label') }}
+      {{ form.trial_amount(class='form-control', min=1, max=9999) }}
+    </div>
+    <div class="col-md-4">
+      {{ form.trial_unit.label(class='form-label') }}
+      {{ form.trial_unit(class='form-select') }}
+    </div>
+    <div class="col-md-4 d-flex align-items-end">
+      <div class="form-text mb-2">Trial starts when the user is created (default 7 days).</div>
+    </div>
     <div class="col-md-6">
       <div class="password-field-wrap">
         {{ form.password.label(class='form-label') }}
@@ -140,15 +245,12 @@
       </div>
     </div>
     <div class="col-12">
-      <p class="text-muted small mb-0">
-        User is saved in <strong>SQLite</strong> (offline ERP). Registration key is stored in
-        <strong>MySQL</strong> for PC activation. A <strong>data package zip</strong>
-        (<code>username_MBF_data.zip</code>) is built automatically — empty DB with
-        <strong>only that user’s login</strong> (no admin, no business data). Default role
-        <strong>Sales</strong> starts <strong>Not Registered</strong> — including Admin,
-        Manager, and Accountant roles. Only <strong>Super Admin</strong> is registered
-        automatically.
-      </p>
+      <ul class="text-muted small mb-0 ps-3">
+        <li>Saved in SQLite; registration key in MySQL for PC activation</li>
+        <li>Data package zip built automatically (login only)</li>
+        <li>Trial length is set above, then key for lifetime — Super Admin skips this</li>
+        <li>Company name &amp; logo show in their sidebar; login shows Agri Books</li>
+      </ul>
     </div>
   </div>
 </form>
@@ -205,6 +307,77 @@ document.querySelectorAll('.btn-rebuild-package').forEach((btn) => {
       btn.disabled = false;
     }
   });
+});
+
+document.querySelectorAll('.btn-regen-key').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const userId = btn.dataset.userId;
+    const username = btn.dataset.username || 'user';
+    if (!userId) return;
+    if (!window.confirm(
+      `Regenerate registration key for ${username}?\n\n` +
+      `This creates a new key and clears their PC binding so they must register again.`
+    )) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/auth/users/${userId}/regenerate-key`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': window.CSRF_TOKEN || '',
+          'X-Requested-With': 'XMLHttpRequest',
+          Accept: 'application/json',
+        },
+        credentials: 'same-origin',
+        body: '{}',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        window.showErpToast?.('danger', data.error || 'Could not regenerate key.');
+        btn.disabled = false;
+        return;
+      }
+      window.showErpToast?.(data.warning ? 'warning' : 'success', data.message || 'Key regenerated.');
+      window.location.reload();
+    } catch (_) {
+      window.showErpToast?.('danger', 'Could not regenerate key.');
+      btn.disabled = false;
+    }
+  });
+});
+
+document.getElementById('btn-sync-registration')?.addEventListener('click', async () => {
+  const btn = document.getElementById('btn-sync-registration');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  const original = btn.innerHTML;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Syncing…';
+  try {
+    const res = await fetch('{{ url_for("auth.sync_registration") }}', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': window.CSRF_TOKEN || '',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Accept': 'application/json',
+      },
+      credentials: 'same-origin',
+      body: '{}',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      window.showErpToast?.('danger', data.error || 'Could not sync registration.');
+      btn.disabled = false;
+      btn.innerHTML = original;
+      return;
+    }
+    window.showErpToast?.('success', data.message || 'Registration synced.');
+    window.location.reload();
+  } catch (_) {
+    window.showErpToast?.('danger', 'Could not sync registration.');
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
 });
 </script>
 {% endblock %}

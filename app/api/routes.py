@@ -276,6 +276,23 @@ def quick_vendor():
         photo=photo,
     )
     db.session.add(vendor)
+    db.session.flush()
+    if opening:
+        from app.services.ledger_service import post_ledger_entry
+        from app.utils.working_date import get_working_date
+
+        opening_d = Decimal(str(opening))
+        debit = opening_d if opening_d > 0 else Decimal("0")
+        credit = abs(opening_d) if opening_d < 0 else Decimal("0")
+        post_ledger_entry(
+            "vendor",
+            vendor.id,
+            "opening",
+            debit=debit,
+            credit=credit,
+            entry_date=get_working_date(),
+            notes="Opening balance",
+        )
     db.session.commit()
     return jsonify({"ok": True, "id": vendor.id, "name": vendor.name, "phone": vendor.phone or ""})
 
@@ -286,7 +303,7 @@ def upload_photo():
     from app.utils.uploads import image_url, save_image
 
     folder = (request.form.get("folder") or "misc").strip().lower()
-    allowed = {"customers", "vendors", "sales", "products", "misc"}
+    allowed = {"customers", "vendors", "sales", "products", "misc", "logos"}
     if folder not in allowed:
         return jsonify({"ok": False, "error": "Invalid upload folder."}), 400
     try:
@@ -334,6 +351,9 @@ def products_lookup():
     results = []
     for p in rows:
         fifo_price = float(next_fifo_sale_price(p))
+        from app.utils.weight_utils import format_stock_display
+
+        stock_label = format_stock_display(p)
         results.append(
             {
                 "id": p.id,
@@ -351,9 +371,12 @@ def products_lookup():
                 "minimum_stock": float(p.minimum_stock or 0),
                 "description": p.description or "",
                 "stock": float(p.current_stock or 0),
+                "stock_display": stock_label,
+                "unit_weight": float(p.unit_weight) if p.unit_weight is not None else None,
+                "weight_unit": p.weight_unit or "",
                 "photo_url": p.photo_url,
                 "photo": p.photo or "",
-                "label": f"{p.name} ({p.sku}) — {fifo_price:.2f} · stock {float(p.current_stock or 0):.3g}",
+                "label": f"{p.name} ({p.sku}) — {fifo_price:.2f} · stock {stock_label}",
             }
         )
     return jsonify({"results": results})
@@ -417,12 +440,37 @@ def quick_customer():
 @api_bp.route("/products/quick", methods=["POST"])
 @login_required
 def quick_product():
-    from app.services.fifo_service import add_stock_layer
+    """Same logic as Inventory Add Product: require vendor + qty, record a purchase."""
+    from decimal import Decimal
+
+    from flask_login import current_user
+
+    from app.models import Vendor
+    from app.services.audit_service import log_audit
+    from app.services.purchase_service import record_purchase
+    from app.utils.product_codes import ensure_product_codes
+    from app.utils.uploads import accept_uploaded_path
+    from app.utils.working_date import get_working_date
 
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
         return jsonify({"ok": False, "error": "Product name is required."}), 400
+
+    try:
+        vendor_id = int(data.get("vendor_id") or 0)
+    except (TypeError, ValueError):
+        vendor_id = 0
+    vendor = db.session.get(Vendor, vendor_id) if vendor_id else None
+    if not vendor or vendor.is_deleted:
+        return jsonify({"ok": False, "error": "Vendor is required."}), 400
+
+    try:
+        qty = Decimal(str(data.get("opening_stock") or 0))
+    except Exception:
+        qty = Decimal("0")
+    if qty <= 0:
+        return jsonify({"ok": False, "error": "Purchase quantity is required."}), 400
 
     category_id = data.get("category_id")
     if category_id:
@@ -432,9 +480,12 @@ def quick_product():
     if not cat:
         return jsonify({"ok": False, "error": "Create a category first in Inventory."}), 400
 
-    opening = float(data.get("opening_stock") or 0)
-    purchase = float(data.get("purchase_price") or 0)
-    sale_price = float(data.get("sale_price") or 0)
+    try:
+        purchase_price = Decimal(str(data.get("purchase_price") or 0))
+        sale_price = Decimal(str(data.get("sale_price") or 0))
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid price values."}), 400
+
     sub_id = data.get("subcategory_id")
     try:
         sub_id = int(sub_id) if sub_id and int(sub_id) > 0 else None
@@ -442,6 +493,9 @@ def quick_product():
         sub_id = None
 
     batch_number = (data.get("batch_number") or "").strip() or None
+    if batch_number and batch_number.startswith("#"):
+        batch_number = batch_number[1:].strip() or None
+    invoice_no = (data.get("invoice_no") or "").strip() or None
     expiry_raw = (data.get("expiry_date") or "").strip()
     expiry_date = None
     if expiry_raw:
@@ -452,46 +506,97 @@ def quick_product():
         except ValueError:
             return jsonify({"ok": False, "error": "Invalid expiry date. Use YYYY-MM-DD."}), 400
 
-    from app.utils.product_codes import ensure_product_codes
-    from app.utils.uploads import accept_uploaded_path
+    photo = accept_uploaded_path(data.get("photo"), "products")
+    existing_id = data.get("existing_product_id")
+    action = "create"
+    product = None
+    try:
+        from app.utils.weight_utils import normalize_weight_unit, parse_unit_weight
+
+        uw = parse_unit_weight(data.get("unit_weight"))
+        wu = normalize_weight_unit(data.get("weight_unit")) if uw else None
+        if uw and not wu:
+            wu = "kg"
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    if existing_id:
+        try:
+            product = db.session.get(Product, int(existing_id))
+        except (TypeError, ValueError):
+            product = None
+        if not product or product.is_deleted:
+            return jsonify({"ok": False, "error": "Selected product not found."}), 400
+        product.name = name
+        barcode_val = (data.get("barcode") or "").strip() or product.barcode
+        product.barcode = barcode_val
+        product.brand = (data.get("brand") or "").strip() or None
+        product.category_id = cat.id
+        product.subcategory_id = sub_id
+        product.purchase_price = purchase_price
+        product.sale_price = sale_price
+        product.minimum_stock = data.get("minimum_stock") or product.minimum_stock or 0
+        product.description = (data.get("description") or "").strip() or None
+        product.unit_weight = uw
+        product.weight_unit = wu if uw else None
+        if photo:
+            product.photo = photo
+        action = "update"
+    else:
+        try:
+            sku, barcode = ensure_product_codes(data.get("sku"), data.get("barcode"))
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        if Product.query.filter_by(sku=sku).first():
+            return jsonify({"ok": False, "error": f"SKU '{sku}' already exists."}), 400
+        if barcode and Product.query.filter_by(barcode=barcode).first():
+            return jsonify({"ok": False, "error": f"Barcode '{barcode}' already exists."}), 400
+
+        product = Product(
+            name=name,
+            sku=sku,
+            barcode=barcode,
+            brand=(data.get("brand") or "").strip() or None,
+            category_id=cat.id,
+            subcategory_id=sub_id,
+            sale_price=sale_price,
+            purchase_price=purchase_price,
+            current_stock=Decimal("0"),
+            opening_stock=qty,
+            minimum_stock=data.get("minimum_stock") or 0,
+            description=(data.get("description") or "").strip() or None,
+            photo=photo,
+            unit_weight=uw,
+            weight_unit=wu if uw else None,
+        )
+        db.session.add(product)
+        db.session.flush()
 
     try:
-        sku, barcode = ensure_product_codes(data.get("sku"), data.get("barcode"))
-    except RuntimeError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    if Product.query.filter_by(sku=sku).first():
-        return jsonify({"ok": False, "error": f"SKU '{sku}' already exists."}), 400
-    if barcode and Product.query.filter_by(barcode=barcode).first():
-        return jsonify({"ok": False, "error": f"Barcode '{barcode}' already exists."}), 400
-    photo = accept_uploaded_path(data.get("photo"), "products")
-    product = Product(
-        name=name,
-        sku=sku,
-        barcode=barcode,
-        brand=(data.get("brand") or "").strip() or None,
-        category_id=cat.id,
-        subcategory_id=sub_id,
-        sale_price=sale_price,
-        purchase_price=purchase,
-        current_stock=opening,
-        opening_stock=opening,
-        minimum_stock=data.get("minimum_stock") or 0,
-        description=(data.get("description") or "").strip() or None,
-        photo=photo,
-    )
-    db.session.add(product)
-    db.session.flush()
-    if opening > 0:
-        add_stock_layer(
-            product.id,
-            opening,
-            purchase or sale_price,
-            "opening",
-            sale_price=sale_price,
-            batch_number=batch_number,
-            expiry_date=expiry_date,
+        purchase = record_purchase(
+            vendor_id=vendor.id,
+            items=[
+                {
+                    "product": product,
+                    "quantity": qty,
+                    "unit_price": purchase_price or product.purchase_price,
+                    "sale_price": sale_price or product.sale_price,
+                    "batch_number": batch_number,
+                    "expiry_date": expiry_date,
+                }
+            ],
+            user_id=current_user.id,
+            invoice_no=invoice_no,
+            purchase_date=get_working_date(),
+            notes=f"{'Restock' if action == 'update' else 'Sale quick-add'}: {product.name}",
         )
-    db.session.commit()
+        log_audit(action, "product", product.id, product.name)
+        log_audit("create", "purchase", purchase.id, purchase.invoice_no)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
     return jsonify(
         {
             "ok": True,
@@ -499,7 +604,14 @@ def quick_product():
             "name": product.name,
             "sku": product.sku,
             "sale_price": float(product.sale_price or 0),
+            "list_price": float(product.sale_price or 0),
             "stock": float(product.current_stock or 0),
+            "stock_display": product.stock_display,
+            "unit_weight": float(product.unit_weight) if product.unit_weight is not None else None,
+            "weight_unit": product.weight_unit or "",
             "photo_url": product.photo_url,
+            "purchase_id": purchase.id,
+            "purchase_invoice": purchase.invoice_no,
+            "restocked": action == "update",
         }
     )

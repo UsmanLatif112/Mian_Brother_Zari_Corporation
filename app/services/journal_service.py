@@ -18,6 +18,88 @@ def _d(value):
     return Decimal(str(value or 0))
 
 
+def _fmt_qty(value) -> str:
+    text = f"{_d(value):.3f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _fmt_particular(*parts) -> str:
+    """Join particulars as: name / text / text."""
+    cleaned = [str(p).strip() for p in parts if p is not None and str(p).strip()]
+    return " / ".join(cleaned)
+
+
+def _sale_line_particular(it) -> str:
+    """Sale: name / units / sold weight unit — e.g. fhgj / 0.75 / 300 g."""
+    product = getattr(it, "product", None)
+    name = (getattr(product, "name", None) or "Item").strip() or "Item"
+    sale_weight = getattr(it, "sale_weight", None)
+    weight_unit = (
+        getattr(it, "weight_unit", None)
+        or getattr(product, "weight_unit", None)
+        or ""
+    ).strip()
+    qty = getattr(it, "quantity", None)
+    unit_weight = getattr(product, "unit_weight", None)
+
+    if sale_weight is not None and _d(sale_weight) > 0:
+        unit = weight_unit or "kg"
+        units = qty if qty is not None and _d(qty) > 0 else None
+        if units is None and unit_weight is not None and _d(unit_weight) > 0:
+            units = _d(sale_weight) / _d(unit_weight)
+        if units is not None and _d(units) > 0:
+            return _fmt_particular(name, _fmt_qty(units), f"{_fmt_qty(sale_weight)} {unit}")
+        return _fmt_particular(name, f"{_fmt_qty(sale_weight)} {unit}")
+
+    if unit_weight is not None and _d(unit_weight) > 0 and qty is not None and _d(qty) > 0:
+        total_w = _d(unit_weight) * _d(qty)
+        unit = weight_unit or "kg"
+        return _fmt_particular(name, _fmt_qty(qty), f"{_fmt_qty(total_w)} {unit}")
+
+    if qty is not None and _d(qty) > 0:
+        return _fmt_particular(name, f"{_fmt_qty(qty)} units")
+    return name
+
+
+def _purchase_line_particular(it) -> str:
+    """Purchase: name / units / weight per unit — e.g. sona / 60 units / 50 kg."""
+    product = getattr(it, "product", None)
+    name = (getattr(product, "name", None) or "Item").strip() or "Item"
+    qty = getattr(it, "quantity", None)
+    unit_weight = getattr(product, "unit_weight", None)
+    weight_unit = (getattr(product, "weight_unit", None) or "").strip()
+
+    parts = [name]
+    if qty is not None and _d(qty) > 0:
+        parts.append(f"{_fmt_qty(qty)} units")
+    if unit_weight is not None and _d(unit_weight) > 0:
+        unit = weight_unit or "kg"
+        parts.append(f"{_fmt_qty(unit_weight)} {unit}")
+    elif weight_unit:
+        parts.append(weight_unit)
+    return _fmt_particular(*parts)
+
+
+def items_particulars(items, *, limit: int = 4, fallback: str = "", kind: str = "sale") -> str:
+    """Particulars from line items only (no amounts — those are in money columns)."""
+    formatter = _purchase_line_particular if kind == "purchase" else _sale_line_particular
+    labels: list[str] = []
+    for it in items or []:
+        label = formatter(it)
+        if label:
+            labels.append(label)
+    if not labels:
+        return fallback
+    if len(labels) <= limit:
+        return " | ".join(labels)
+    shown = " | ".join(labels[:limit])
+    return f"{shown} | +{len(labels) - limit} more"
+
+
+# Back-compat alias used inside this module
+_items_particulars = items_particulars
+
+
 def _row(
     entry_date,
     entry_type,
@@ -53,8 +135,9 @@ def get_general_journal(period="all", start_date=None, end_date=None):
     """
     Cash in/out for the period (no opening balances).
     Expenses: Out when spent; In when you replenish the till on settle.
-    Credit sales = Out; purchases = In; customer advance/settle = In, loan = Out;
-    vendor loan = In, vendor pay = Out.
+    Sales: In = cash received; Out = unpaid credit.
+    Purchases: Out = cash paid to vendor; unpaid not in In/Out (payable until paid).
+    Customer advance/settle = In, loan = Out; vendor loan = In, vendor pay = Out.
     """
     range_start, range_end = _range_for_filter(period, start_date, end_date)
     rows = []
@@ -70,16 +153,9 @@ def get_general_journal(period="all", start_date=None, end_date=None):
         total_paid = _d(s.amount_paid)  # full cash received (may exceed invoice)
         applied = min(total_paid, total)
         due = total - applied if total > applied else Decimal("0")
-        advance = total_paid - applied if total_paid > applied else Decimal("0")
         status = s.payment_status.value if s.payment_status else ""
         party = s.customer.name if s.customer else "Walk-in"
-        note = f"Sale total {total:.2f}"
-        if _d(s.discount) > 0:
-            note += f" · Discount {_d(s.discount):.2f}"
-        if due > 0:
-            note += f" · Credit {due:.2f}"
-        if advance > 0:
-            note += f" · Advance {advance:.2f}"
+        note = _items_particulars(s.items, fallback="Sale")
         rows.append(
             _row(
                 s.sale_date,
@@ -106,14 +182,9 @@ def get_general_journal(period="all", start_date=None, end_date=None):
     for p in pq.order_by(Purchase.purchase_date.desc(), Purchase.id.desc()).all():
         total = _d(p.grand_total)
         paid = _d(p.amount_paid)
-        due = total - paid if total > paid else Decimal("0")
         status = p.payment_status.value if p.payment_status else ""
         party = p.vendor.name if p.vendor else "—"
-        note = f"Purchase total {total:.2f}"
-        if due > 0:
-            note += f" · Credit {due:.2f}"
-        if paid > 0:
-            note += f" · Paid at purchase {paid:.2f}"
+        note = _items_particulars(p.items, fallback="Purchase", kind="purchase")
         rows.append(
             _row(
                 p.purchase_date,
@@ -121,11 +192,13 @@ def get_general_journal(period="all", start_date=None, end_date=None):
                 p.invoice_no,
                 note,
                 party,
-                total,
-                Decimal("0"),
+                Decimal("0"),  # unpaid purchase is payable, not cash In
+                paid if paid > 0 else Decimal("0"),  # Out = cash paid to vendor
                 status.title(),
                 "/purchases/",
                 p.id,
+                total_paid=paid,
+                invoice_total=total,
             )
         )
 
@@ -144,7 +217,7 @@ def get_general_journal(period="all", start_date=None, end_date=None):
                 e.expense_date,
                 "Expense",
                 f"EXP-{e.id}",
-                e.name or cat,
+                _fmt_particular(e.name or cat, cat if e.name and e.name != cat else None),
                 cat,
                 Decimal("0"),
                 amt,
@@ -176,7 +249,11 @@ def get_general_journal(period="all", start_date=None, end_date=None):
                 pay_date,
                 "Expense Settle",
                 f"EXP-{e.id}",
-                s.notes or f"Replenish till: {e.name or cat}",
+                _fmt_particular(
+                    "Replenish till",
+                    e.name or cat,
+                    s.notes if s.notes else None,
+                ),
                 cat,
                 _d(s.amount),
                 Decimal("0"),
@@ -205,7 +282,7 @@ def get_general_journal(period="all", start_date=None, end_date=None):
                 r.receiving_date,
                 label,
                 f"CR-{r.id}",
-                r.notes or label,
+                _fmt_particular(label, r.notes if r.notes else None),
                 r.customer.name if r.customer else "—",
                 Decimal("0") if is_loan else _d(r.amount),
                 _d(r.amount) if is_loan else Decimal("0"),
@@ -234,7 +311,7 @@ def get_general_journal(period="all", start_date=None, end_date=None):
                 v.payment_date,
                 label,
                 f"VP-{v.id}",
-                v.notes or label,
+                _fmt_particular(label, v.notes if v.notes else None),
                 v.vendor.name if v.vendor else "—",
                 _d(v.amount) if is_loan else Decimal("0"),
                 Decimal("0") if is_loan else _d(v.amount),
@@ -267,16 +344,17 @@ def get_general_journal(period="all", start_date=None, end_date=None):
         cq = cq.filter(CashBookEntry.entry_date <= range_end)
     for c in cq.order_by(CashBookEntry.entry_date.desc(), CashBookEntry.id.desc()).all():
         is_in = (c.entry_type or "").lower() == "in"
+        cat_label = (c.category or "Cash movement").replace("_", " ").title()
         rows.append(
             _row(
                 c.entry_date,
                 "Cash In" if is_in else "Cash Out",
                 f"CB-{c.id}",
-                c.notes or (c.category or "Cash movement").replace("_", " ").title(),
+                _fmt_particular(cat_label, c.notes if c.notes else None),
                 "Cash Book",
                 _d(c.amount) if is_in else Decimal("0"),
                 Decimal("0") if is_in else _d(c.amount),
-                (c.category or "").replace("_", " ").title(),
+                cat_label,
                 None,
                 c.id,
             )

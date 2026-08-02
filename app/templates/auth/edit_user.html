@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Edit User{% endblock %}
 {% block content %}
+{% from 'partials/macros.html' import photo_field %}
 <div class="dashboard-page">
   <div class="row justify-content-center">
     <div class="col-lg-8">
@@ -36,6 +37,32 @@
                 {{ edit_form.role(class='form-select') }}
                 {% endif %}
               </div>
+              {% if not edit_user.is_super_admin() %}
+              <div class="col-md-8">
+                {{ edit_form.company_name.label(class='form-label') }}
+                {{ edit_form.company_name(class='form-control', placeholder='Company shown in sidebar') }}
+                <div class="form-text">Customer/staff sidebar shows this name — not Agri Books.</div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label d-block">Company Logo</label>
+                {{ edit_form.company_logo() }}
+                {{ photo_field(icon='fa-image', label='Company logo', upload='ajax', folder='logos', clear_name='clear_company_logo', picker_id='edit-user-logo-picker', current_url=edit_user.company_logo_url) }}
+              </div>
+              <div class="col-md-3">
+                {{ edit_form.trial_amount.label(class='form-label') }}
+                {{ edit_form.trial_amount(class='form-control', min=1, max=9999) }}
+              </div>
+              <div class="col-md-3">
+                {{ edit_form.trial_unit.label(class='form-label') }}
+                {{ edit_form.trial_unit(class='form-select') }}
+              </div>
+              <div class="col-md-6 d-flex align-items-end">
+                <div class="form-check mb-2">
+                  {{ edit_form.reset_trial(class='form-check-input') }}
+                  {{ edit_form.reset_trial.label(class='form-check-label') }}
+                </div>
+              </div>
+              {% endif %}
               <div class="col-md-6">
                 <div class="password-field-wrap">
                   {{ edit_form.password.label(class='form-label') }}

@@ -42,6 +42,11 @@ def index():
 
     purchases = query.order_by(Purchase.purchase_date.desc(), Purchase.id.desc()).all()
 
+    from app.services.journal_service import items_particulars
+
+    for p in purchases:
+        p.particulars = items_particulars(p.items, fallback="—", kind="purchase")
+
     totals_q = db.session.query(
         func.coalesce(func.sum(Purchase.grand_total), 0),
         func.count(Purchase.id),

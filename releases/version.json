@@ -1,8 +1,8 @@
 {
-  "version": "1.1.1",
-  "build": 111,
-  "released_at": "2026-07-27",
-  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.1.1.zip",
-  "sha256": "8d5bf70c56152c8c1e228d5836c7c28e92d80a333c5cccea6f3c29cbbfefc89b",
-  "release_notes": "- Distinct filter icons (period / category / type)\n- Top bar filter UI polish\n- Update packaging for 1.1.1"
+  "version": "1.2.8",
+  "build": 128,
+  "released_at": "2026-08-03",
+  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.2.8.zip",
+  "sha256": "1220e3bd53bb9d68626448a69b965ad7ca8070fd7cec0d2822c5e1652d23ab3d",
+  "release_notes": "- Company logo stored in main DB + staff package DB (bytes + file)\n- Super Admin Users list backfills logos; packages rebuild after branding\n- MySQL registry syncs company name / logo\n- Agri Books branding; Sale Full / Open mode\n- Journal / sales / purchases Particulars (name / units / weight)\n- Purchase cash rule; Stock Value on Inventory\n- Customer ledger & sales print improvements; journal print warning"
 }

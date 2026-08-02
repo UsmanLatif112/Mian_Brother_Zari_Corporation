@@ -109,6 +109,48 @@ def delete_ledger_entry(entry_id):
     return party_type, party_id
 
 
+def delete_ledger_entry_cascading(entry_id, user_id=None):
+    """
+    Delete a ledger row by reversing its source document when possible
+    (sale, purchase, customer/vendor payment), so stock, cash, and stats
+    stay consistent. Manual/opening rows fall back to ledger-only delete.
+    """
+    entry = db.session.get(LedgerEntry, entry_id)
+    if not entry:
+        raise ValueError("Ledger entry not found.")
+
+    party_type, party_id = entry.party_type, entry.party_id
+    ref_type = (entry.reference_type or "").strip().lower()
+    ref_id = entry.reference_id
+
+    if ref_type == "sale" and ref_id:
+        from app.services.sale_service import void_sale
+
+        void_sale(int(ref_id), user_id)
+        return party_type, party_id, "sale"
+
+    if ref_type == "customer_receiving" and ref_id:
+        from app.services.customer_payment_service import delete_customer_payment
+
+        delete_customer_payment(int(ref_id), user_id)
+        return party_type, party_id, "customer_receiving"
+
+    if ref_type == "vendor_payment" and ref_id:
+        from app.services.vendor_payment_service import delete_vendor_payment
+
+        delete_vendor_payment(int(ref_id), user_id)
+        return party_type, party_id, "vendor_payment"
+
+    if ref_type == "purchase" and ref_id:
+        from app.services.purchase_service import void_purchase
+
+        void_purchase(int(ref_id), user_id)
+        return party_type, party_id, "purchase"
+
+    delete_ledger_entry(entry_id)
+    return party_type, party_id, "ledger"
+
+
 def delete_ledger_by_reference(reference_type, reference_id, rebuild=True):
     rows = LedgerEntry.query.filter_by(
         reference_type=reference_type, reference_id=reference_id

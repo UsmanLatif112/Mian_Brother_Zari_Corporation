@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
-  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}?v=2" sizes="any">
-  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}?v=2">
-  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='img/favicon-16.png') }}?v=2">
-  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}?v=2">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}?v=7" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}?v=7">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='img/favicon-16.png') }}?v=7">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}?v=7">
   {# All UI libs are local under static/vendor — app works fully offline #}
   <link href="{{ url_for('static', filename='vendor/fonts/plus-jakarta-sans.css') }}" rel="stylesheet">
   <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet">
   <link href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" rel="stylesheet">
   <link href="{{ url_for('static', filename='vendor/datatables/dataTables.bootstrap5.min.css') }}" rel="stylesheet">
   <link href="{{ url_for('static', filename='vendor/cropperjs/cropper.min.css') }}" rel="stylesheet">
-  <link href="{{ url_for('static', filename='css/theme.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/theme.css') }}?v=15" rel="stylesheet">
   {% block extra_css %}{% endblock %}
 </head>
 <body class="erp-body"{% if current_user.is_authenticated %} data-search-scope="{{ search_scope }}" data-search-mode="{{ search_mode }}" data-search-table="{{ search_table_selector }}" data-user-registered="{{ '1' if current_user.is_registration_complete() else '0' }}" data-working-date="{{ working_date }}" data-calendar-today="{{ calendar_today }}" data-desktop-app="{{ '1' if is_desktop_app else '0' }}" data-updates-enabled="{{ '1' if updates_enabled else '0' }}" data-app-version="{{ app_version }}"{% endif %}>
@@ -74,6 +74,8 @@
             <li><hr class="dropdown-divider"></li>
             {% if current_user.is_super_admin() %}
             <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}"><i class="fa-solid fa-key me-2"></i>Change Password</a></li>
+            {% else %}
+            <li><a class="dropdown-item" href="{{ url_for('auth.company_branding') }}"><i class="fa-solid fa-image me-2"></i>Company Branding</a></li>
             {% endif %}
             <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Logout</a></li>
           </ul>
@@ -96,7 +98,7 @@
   {% include 'partials/confirm_modal.html' %}
   {% include 'partials/offline_modal.html' %}
   {% include 'partials/update_modal.html' %}
-  {% if not current_user.is_registration_complete() %}
+  {% if not current_user.is_registration_complete() or current_user.is_on_trial() %}
   {% include 'partials/registration_modal.html' %}
   {% endif %}
   {% endif %}
@@ -107,24 +109,27 @@
   <script src="{{ url_for('static', filename='vendor/datatables/dataTables.bootstrap5.min.js') }}"></script>
   <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
   <script src="{{ url_for('static', filename='vendor/cropperjs/cropper.min.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}?v=7"></script>
   <script>
     window.CSRF_TOKEN = document.querySelector('meta[name=csrf-token]')?.content;
   </script>
-  <script src="{{ url_for('static', filename='js/working-date.js') }}?v=2"></script>
+  <script src="{{ url_for('static', filename='js/working-date.js') }}?v=4"></script>
   {% if current_user.is_authenticated and is_desktop_app and updates_enabled %}
   <script src="{{ url_for('static', filename='js/updates.js') }}?v=1"></script>
   {% endif %}
   <script>
     window.BUSINESS_INFO = {
-      company_name: {{ (business.company_name or app_name or '')|tojson }},
+      company_name: {{ (business.company_name or brand_name or '')|tojson }},
       company_address: {{ (business.company_address or '')|tojson }},
       company_phone: {{ (business.company_phone or '')|tojson }},
       company_email: {{ (business.company_email or '')|tojson }},
-      logo_url: {{ url_for('static', filename='img/logo.png')|tojson }},
+      logo_url: {{ (brand_logo or (suite_logo if brand_is_suite else ''))|tojson }},
+      suite_name: {{ suite_name|tojson }},
+      developer_name: {{ developer_name|tojson }},
+      developer_url: {{ developer_url|tojson }},
     };
   </script>
-  <script src="{{ url_for('static', filename='js/print-filtered.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/print-filtered.js') }}?v=5"></script>
   <script src="{{ url_for('static', filename='js/photo-picker.js') }}"></script>
   {% block extra_js %}{% endblock %}
 </body>

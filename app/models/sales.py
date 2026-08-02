@@ -1,9 +1,9 @@
 import enum
-from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
 from app.models.mixins import TimestampMixin, utcnow
+from app.utils.working_date import default_entry_date
 
 
 class PaymentMethod(str, enum.Enum):
@@ -23,7 +23,7 @@ class Sale(TimestampMixin, db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     invoice_no = db.Column(db.String(50), unique=True, nullable=False, index=True)
-    sale_date = db.Column(db.Date, default=date.today, nullable=False, index=True)
+    sale_date = db.Column(db.Date, default=default_entry_date, nullable=False, index=True)
     customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=True)
     subtotal = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     discount = db.Column(db.Numeric(14, 2), default=Decimal("0"))
@@ -47,13 +47,20 @@ class SaleItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     sale_id = db.Column(db.Integer, db.ForeignKey("sales.id"), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+    # Stock units depleted (fractional when selling by weight)
     quantity = db.Column(db.Numeric(14, 3), nullable=False)
+    # Catalog / full-unit list price snapshot (not overwritten by row override)
+    list_unit_price = db.Column(db.Numeric(14, 2), nullable=True)
+    # Effective per-stock-unit price (line_total / quantity), or list price for piece sales
     unit_price = db.Column(db.Numeric(14, 2), nullable=False)
     discount = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     tax_rate = db.Column(db.Numeric(5, 2), default=Decimal("0"))
     line_total = db.Column(db.Numeric(14, 2), nullable=False)
     cost_of_goods = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     photo = db.Column(db.String(255), nullable=True)
+    # Partial-weight sale details (null for piece-only products)
+    sale_weight = db.Column(db.Numeric(14, 3), nullable=True)
+    weight_unit = db.Column(db.String(10), nullable=True)
 
     product = db.relationship("Product")
 
@@ -69,7 +76,7 @@ class CustomerReceiving(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False)
-    receiving_date = db.Column(db.Date, default=date.today, nullable=False, index=True)
+    receiving_date = db.Column(db.Date, default=default_entry_date, nullable=False, index=True)
     amount = db.Column(db.Numeric(14, 2), nullable=False)
     # advance | loan | account_settle
     payment_type = db.Column(db.String(30), default="account_settle", nullable=False, index=True)

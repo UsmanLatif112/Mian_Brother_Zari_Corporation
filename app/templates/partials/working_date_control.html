@@ -1,10 +1,10 @@
 {% if can_manage_working_date %}
-<div class="dropdown working-date-dropdown" id="working-date-control">
+<div class="working-date-dropdown" id="working-date-control">
   <button type="button"
           class="btn btn-sm working-date-toggle{% if is_custom_working_date %} is-custom{% endif %}"
-          data-bs-toggle="dropdown"
-          data-bs-auto-close="outside"
+          id="working-date-toggle"
           aria-expanded="false"
+          aria-controls="working-date-menu"
           title="Set default date for new entries">
     <i class="fa-solid fa-calendar-day"></i>
     <span class="working-date-toggle-label" id="working-date-toggle-label">{{ working_date_display }}</span>
@@ -12,7 +12,7 @@
     <span class="working-date-dot" aria-hidden="true"></span>
     {% endif %}
   </button>
-  <div class="dropdown-menu dropdown-menu-end working-date-menu">
+  <div class="working-date-menu" id="working-date-menu" hidden>
     <div class="working-date-panel">
       <div class="working-date-panel-head">
         <strong>Working date</strong>
@@ -26,10 +26,10 @@
              aria-label="Working date">
       <div class="working-date-actions">
         <button type="button" class="btn btn-sm btn-primary" id="working-date-apply">
-          <i class="fa-solid fa-check me-1"></i>Apply
+          <i class="fa-solid fa-check me-1" aria-hidden="true"></i>Apply
         </button>
         <button type="button" class="btn btn-sm btn-outline-secondary" id="working-date-reset">
-          <i class="fa-solid fa-rotate-left me-1"></i>Today
+          <i class="fa-solid fa-rotate-left me-1" aria-hidden="true"></i>Today
         </button>
       </div>
     </div>

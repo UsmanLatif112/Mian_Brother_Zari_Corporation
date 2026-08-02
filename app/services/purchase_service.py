@@ -6,7 +6,11 @@ from decimal import Decimal
 from app.extensions import db
 from app.models import LedgerEntry, Purchase, PurchaseItem, Vendor
 from app.services.fifo_service import fifo_receive
-from app.services.ledger_service import post_ledger_entry, rebuild_party_balances
+from app.services.ledger_service import (
+    delete_ledger_by_reference,
+    post_ledger_entry,
+    rebuild_party_balances,
+)
 from app.utils.working_date import get_working_date
 
 
@@ -113,6 +117,7 @@ def record_purchase(
             vendor_id=vendor.id,
             invoice_no=purchase.invoice_no,
             notes=notes,
+            entry_at=purchase_date,
         )
         subtotal += line_total
 
@@ -211,6 +216,195 @@ def _sync_purchase_vendor_ledger(purchase, old_vendor_id, notes=None):
     if old_vendor_id != new_vendor_id:
         rebuild_party_balances("vendor", old_vendor_id)
     return None
+
+
+def reverse_purchase_for_layer(layer, *, notes=None):
+    """
+    When a purchase-backed stock batch is deleted/cleared, reduce the linked
+    Purchase by the *unsold remaining* qty only (sold qty stays on purchase /
+    vendor payable). Rebuilds vendor ledger + balance.
+
+    Returns dict with purchase_id, invoice_no, vendor_id, deleted (bool)
+    or None if nothing to reverse.
+    """
+    if not layer or (layer.source_type or "") != "purchase" or not layer.source_id:
+        return None
+
+    purchase = db.session.get(Purchase, int(layer.source_id))
+    if not purchase:
+        return None
+
+    received = Decimal(
+        str(
+            layer.quantity_received
+            if layer.quantity_received is not None
+            else layer.quantity_remaining
+            or 0
+        )
+    )
+    remaining = Decimal(str(layer.quantity_remaining or 0))
+    if remaining < 0:
+        remaining = Decimal("0")
+    # Only reverse what is still in stock (unsold). Sold portion stays payable.
+    unsold = remaining
+    sold = received - remaining if received > remaining else Decimal("0")
+    if unsold <= 0:
+        return None
+
+    old_purchased = received if received > 0 else unsold
+    item = _find_purchase_item_for_layer(purchase, layer.product_id, old_purchased)
+    if not item:
+        return None
+
+    vendor_id = int(purchase.vendor_id)
+    purchase_id = purchase.id
+    invoice = purchase.invoice_no
+    unit_cost = Decimal(str(item.unit_price or layer.unit_cost or 0))
+    new_purchased = sold  # keep sold qty on the purchase document
+
+    if new_purchased > 0:
+        item.quantity = new_purchased
+        item.unit_price = unit_cost
+        item.line_total = new_purchased * unit_cost
+        db.session.flush()
+        _recompute_purchase_totals(purchase)
+        _sync_purchase_vendor_ledger(
+            purchase,
+            vendor_id,
+            notes=notes or purchase_items_summary(purchase),
+        )
+        return {
+            "purchase_id": purchase_id,
+            "invoice_no": invoice,
+            "vendor_id": vendor_id,
+            "deleted": False,
+            "reversed_qty": float(unsold),
+        }
+
+    # Entire purchased qty still in stock → remove this purchase line (or purchase).
+    remaining_items = [
+        it
+        for it in (purchase.items or [])
+        if it is not item and Decimal(str(it.quantity or 0)) > 0
+    ]
+    if remaining_items:
+        item.quantity = Decimal("0")
+        item.line_total = Decimal("0")
+        db.session.flush()
+        _recompute_purchase_totals(purchase)
+        _sync_purchase_vendor_ledger(
+            purchase,
+            vendor_id,
+            notes=notes or purchase_items_summary(purchase),
+        )
+        return {
+            "purchase_id": purchase_id,
+            "invoice_no": invoice,
+            "vendor_id": vendor_id,
+            "deleted": False,
+            "reversed_qty": float(unsold),
+        }
+
+    db.session.delete(item)
+    db.session.flush()
+    delete_ledger_by_reference("purchase", purchase.id, rebuild=False)
+    db.session.delete(purchase)
+    db.session.flush()
+    rebuild_party_balances("vendor", vendor_id)
+    return {
+        "purchase_id": purchase_id,
+        "invoice_no": invoice,
+        "vendor_id": vendor_id,
+        "deleted": True,
+        "reversed_qty": float(unsold),
+    }
+
+
+def void_purchase(purchase_id, user_id=None, *, notes=None):
+    """
+    Reverse a purchase from ledger/inventory: clear unsold stock, reduce or
+    remove the Purchase document, and rebuild vendor payable. Sold qty stays
+    on the purchase (void related sales first to reverse those).
+    """
+    from sqlalchemy import func
+
+    from app.models import Product, StockLayer
+    from app.services.fifo_service import adjust_batch
+
+    purchase = db.session.get(Purchase, int(purchase_id))
+    if not purchase:
+        raise ValueError("Purchase not found.")
+
+    vendor_id = int(purchase.vendor_id)
+    invoice = purchase.invoice_no
+    pid = purchase.id
+    note = notes or f"Void purchase {invoice}"
+
+    layers = (
+        StockLayer.query.filter_by(source_type="purchase", source_id=pid)
+        .order_by(StockLayer.id)
+        .all()
+    )
+    total_remaining = sum(
+        (Decimal(str(layer.quantity_remaining or 0)) for layer in layers),
+        Decimal("0"),
+    )
+
+    if not layers:
+        delete_ledger_by_reference("purchase", pid, rebuild=False)
+        for item in list(purchase.items or []):
+            db.session.delete(item)
+        db.session.delete(purchase)
+        db.session.flush()
+        rebuild_party_balances("vendor", vendor_id)
+        return {
+            "purchase_id": pid,
+            "invoice_no": invoice,
+            "vendor_id": vendor_id,
+            "deleted": True,
+            "reversed": True,
+        }
+
+    if total_remaining <= 0:
+        raise ValueError(
+            "Cannot reverse this purchase: all stock was already sold. "
+            "Void related sales first, or clear remaining batches from Inventory."
+        )
+
+    product_ids = set()
+    reversed_any = False
+    for layer in layers:
+        product_ids.add(layer.product_id)
+        remaining = Decimal(str(layer.quantity_remaining or 0))
+        if remaining <= 0:
+            continue
+        info = reverse_purchase_for_layer(layer, notes=note)
+        if info:
+            reversed_any = True
+        adjust_batch(layer, Decimal("0"), user_id, notes=note)
+        db.session.delete(layer)
+
+    db.session.flush()
+
+    for product_id in product_ids:
+        product = db.session.get(Product, product_id)
+        if not product:
+            continue
+        open_qty = (
+            db.session.query(func.coalesce(func.sum(StockLayer.quantity_remaining), 0))
+            .filter(StockLayer.product_id == product_id)
+            .scalar()
+        )
+        product.current_stock = Decimal(str(open_qty or 0))
+
+    still = db.session.get(Purchase, pid)
+    return {
+        "purchase_id": pid,
+        "invoice_no": invoice,
+        "vendor_id": vendor_id,
+        "deleted": still is None,
+        "reversed": reversed_any or still is None,
+    }
 
 
 def amend_purchase_for_layer(

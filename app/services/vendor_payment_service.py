@@ -7,8 +7,9 @@ from app.extensions import db
 from app.models import Vendor, VendorPayment
 from app.models.mixins import utcnow
 from app.models.sales import PaymentMethod
-from app.services.cashbook_service import record_cash_movement
-from app.services.ledger_service import post_ledger_entry
+from app.services.cashbook_service import record_cash_movement, reverse_cash_by_reference
+from app.services.ledger_service import delete_ledger_by_reference, post_ledger_entry, rebuild_party_balances
+from app.services.sync_service import enqueue_sync
 from app.utils.working_date import get_working_date
 
 PAYMENT_TYPES = {
@@ -111,3 +112,29 @@ def record_vendor_payment(
     enqueue_sync("vendor_payments", payment.id, "create")
     enqueue_sync("vendors", vendor.id, "update")
     return payment
+
+
+def delete_vendor_payment(payment_id, user_id=None):
+    """Delete vendor payment and reverse ledger (+ cash for loan inflows)."""
+    payment = db.session.get(VendorPayment, payment_id)
+    if not payment:
+        raise ValueError("Payment not found.")
+
+    vendor_id = payment.vendor_id
+    ptype = (payment.payment_type or "").strip().lower()
+
+    if ptype == "loan":
+        reverse_cash_by_reference(
+            "vendor_payment",
+            payment.id,
+            notes=f"Void vendor loan #{payment.id}",
+            created_by_id=user_id,
+        )
+
+    delete_ledger_by_reference("vendor_payment", payment.id, rebuild=False)
+    db.session.delete(payment)
+    db.session.flush()
+    rebuild_party_balances("vendor", vendor_id)
+    enqueue_sync("vendor_payments", payment_id, "delete")
+    enqueue_sync("vendors", vendor_id, "update")
+    return vendor_id

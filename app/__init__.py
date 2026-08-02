@@ -195,7 +195,7 @@ def create_app(config_class=None):
         from app.utils.seed import seed_database
 
         db.create_all()
-        seed_database()
+        seed_database(create_default_admin=True)
         print("Database initialized.")
 
     @app.cli.command("reset-db")
@@ -207,7 +207,7 @@ def create_app(config_class=None):
         db.drop_all()
         db.create_all()
         ensure_customer_type_column()
-        seed_database()
+        seed_database(create_default_admin=True)
         print("Database reset: all tables truncated and defaults seeded (admin / admin123).")
 
     return app
@@ -274,7 +274,7 @@ def register_registration_guard(app):
             return None
         if ep == "static" or (request.path or "").startswith("/static"):
             return None
-        if request.path.startswith("/api/") and ep in ("api.internet", "api.poll_toasts"):
+        if request.path.startswith("/api/") and ep in ("api.internet_status", "api.poll_toasts"):
             return None
         wants_json = (
             request.is_json
@@ -295,6 +295,22 @@ def register_registration_guard(app):
 
 def register_context_processors(app):
     from app.services.settings_service import get_business_info
+    from app.utils.weight_utils import format_qty_display, format_stock_display
+
+    @app.template_filter("qty_display")
+    def qty_display_filter(qty, product=None, unit_weight=None, weight_unit=None):
+        """Format stock qty as whole units + leftover weight when product has unit weight."""
+        if product is not None:
+            return format_qty_display(
+                qty,
+                getattr(product, "unit_weight", None),
+                getattr(product, "weight_unit", None) or "kg",
+            )
+        return format_qty_display(qty, unit_weight, weight_unit or "kg")
+
+    @app.template_filter("stock_display")
+    def stock_display_filter(product):
+        return format_stock_display(product)
 
     @app.context_processor
     def inject_globals():
@@ -317,10 +333,43 @@ def register_context_processors(app):
         custom_wd = is_custom_working_date()
         ver = current_version_info()
 
+        from flask import url_for
+
+        suite_name = "Agri Books"
+        suite_logo = url_for("static", filename="img/logo.png")
+        brand_name = "Agri"
+        brand_sub = "Books"
+        brand_logo = suite_logo
+        brand_is_suite = True
+        display_company = None
+
+        business = get_business_info()
+        if current_user.is_authenticated:
+            if current_user.is_super_admin():
+                brand_name, brand_sub, brand_logo = "Agri", "Books", suite_logo
+                brand_is_suite = True
+            else:
+                display_company = (getattr(current_user, "company_name", None) or "").strip() or None
+                brand_name = display_company or "Business"
+                brand_sub = ""
+                # Never fall back to product logo for staff — company branding only
+                brand_logo = getattr(current_user, "company_logo_url", None)
+                brand_is_suite = False
+                if display_company:
+                    business = {**business, "company_name": display_company}
+
         ctx = {
-            "business": get_business_info(),
-            "app_name": "MBF ERP",
-            "brand_short": "MBF",
+            "business": business,
+            "app_name": suite_name,
+            "brand_short": "ZS",
+            "suite_name": suite_name,
+            "suite_logo": suite_logo,
+            "brand_name": brand_name,
+            "brand_sub": brand_sub,
+            "brand_logo": brand_logo,
+            "brand_is_suite": brand_is_suite,
+            "developer_name": "U. Technologies",
+            "developer_url": "https://udottechnologies.com/",
             "offline_sqlite": is_local_sqlite(),
             "sync_target_label": get_sync_target_label(),
             "search_scope": search_ctx.scope,

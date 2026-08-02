@@ -44,9 +44,12 @@ def cashbook():
 @login_required
 @permission_required("reports.view")
 def daily_closing():
-    today = date.today()
-    from app.models import CustomerReceiving
     from sqlalchemy import func
+
+    from app.models import CustomerReceiving
+    from app.utils.working_date import get_working_date
+
+    today = get_working_date()
 
     cash_sales = (
         db.session.query(func.coalesce(func.sum(Sale.grand_total), 0))

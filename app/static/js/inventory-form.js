@@ -83,6 +83,10 @@
     if (sale) sale.value = Number(p.list_price != null ? p.list_price : p.sale_price || 0).toFixed(2);
     const min = document.getElementById('product-min');
     if (min) min.value = p.minimum_stock != null ? p.minimum_stock : 0;
+    const uw = document.getElementById('product-unit-weight');
+    if (uw) uw.value = p.unit_weight != null && p.unit_weight !== '' ? p.unit_weight : '';
+    const wu = document.getElementById('product-weight-unit');
+    if (wu) wu.value = p.weight_unit || '';
     const desc = document.getElementById('product-description');
     if (desc) desc.value = p.description || '';
 

@@ -149,8 +149,9 @@
             </button>
             <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
                     data-action="{{ url_for('customers.delete', customer_id=c.id) }}"
-                    data-title="Delete customer?"
-                    data-message="Delete {{ c.name }}? History is kept; they will be hidden from lists.">
+                    data-title="Delete customer “{{ c.name }}”?"
+                    data-message="Customer will be hidden from lists. Choose Yes only if you are sure."
+                    data-effects="Hide customer from customer lists|Keep sales and payment history in the database|Customer will no longer appear in new sales lookups">
               <i class="fa-solid fa-trash"></i>
             </button>
             <a href="{{ url_for('customers.detail', customer_id=c.id) }}" class="action-icon-btn" title="Ledger">

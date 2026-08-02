@@ -47,9 +47,11 @@ REGISTRATION_EXEMPT_ENDPOINTS = frozenset(
         "auth.logout",
         "auth.register",
         "auth.change_password",
+        "auth.company_branding",
         "dashboard.index",
-        "api.internet",
+        "api.internet_status",
         "api.poll_toasts",
+        "api.upload_photo",
         "static",
     }
 )

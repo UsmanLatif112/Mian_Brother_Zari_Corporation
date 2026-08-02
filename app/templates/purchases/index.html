@@ -58,7 +58,7 @@
             <th>Invoice</th>
             <th>Vendor</th>
             <th>Date</th>
-            <th>Items</th>
+            <th>Particulars</th>
             <th class="text-end">Total</th>
           </tr>
         </thead>
@@ -68,15 +68,8 @@
             <td>{{ p.invoice_no }}</td>
             <td>{{ p.vendor.name if p.vendor else '—' }}</td>
             <td>{{ p.purchase_date }}</td>
-            <td>
-              {% if p.items %}
-                {% for it in p.items %}
-                  {{ it.product.name if it.product else 'Item' }}
-                  <span class="text-muted">({{ it.quantity }})</span>{% if not loop.last %}, {% endif %}
-                {% endfor %}
-              {% else %}
-              —
-              {% endif %}
+            <td class="journal-particulars" title="{{ p.particulars }}">
+              <span class="journal-particulars-text">{{ p.particulars }}</span>
             </td>
             <td class="text-end fw-semibold">{{ '%.2f'|format(p.grand_total|float) }}</td>
           </tr>

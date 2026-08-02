@@ -12,7 +12,7 @@
         {% for p in products %}
         <button type="button" class="product-tile" data-id="{{ p.id }}" data-name="{{ p.name }}" data-price="{{ p.sale_price }}" data-barcode="{{ p.barcode or '' }}">
           <strong>{{ p.name }}</strong>
-          <span>{{ p.sale_price }} · Stock {{ p.current_stock }}</span>
+          <span>{{ p.sale_price }} · Stock {{ p.stock_display }}</span>
         </button>
         {% endfor %}
       </div>

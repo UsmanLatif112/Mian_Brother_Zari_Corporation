@@ -13,7 +13,7 @@ from app.models import (
     Vendor,
 )
 from app.models.sales import PaymentStatus, SaleItem
-from app.services.cashbook_service import get_cash_dashboard_metrics
+from app.services.cashbook_service import get_cash_dashboard_metrics, period_cash_collections
 from app.services.fifo_service import stock_valuation
 from app.services.account_service import account_previous_amount
 
@@ -134,9 +134,29 @@ def ensure_customer_type_column():
         except Exception:
             pass
 
+    # Product unit weight + sale-line weight fields (partial-weight sales)
+    for table, col, coltype in (
+        ("products", "unit_weight", "NUMERIC(14, 3)"),
+        ("products", "weight_unit", "VARCHAR(10)"),
+        ("sale_items", "sale_weight", "NUMERIC(14, 3)"),
+        ("sale_items", "weight_unit", "VARCHAR(10)"),
+        ("sale_items", "list_unit_price", "NUMERIC(14, 2)"),
+    ):
+        try:
+            insp = inspect(db.engine)
+            cols = {c["name"] for c in insp.get_columns(table)}
+            if col not in cols:
+                with db.engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
+        except Exception:
+            pass
+
 
 def _range_for_filter(period: str, start_date=None, end_date=None):
-    today = date.today()
+    # Anchor periods to the selected working date so "Today" matches posting day.
+    from app.utils.working_date import get_working_date
+
+    today = get_working_date()
     if period == "today":
         return today, today
     if period == "week":
@@ -224,12 +244,19 @@ def _oldest_unpaid_sale_dates(customer_ids):
 
 def get_dashboard_metrics(period="all", start_date=None, end_date=None):
     # Schema ensure runs once at app startup — not on every dashboard hit
+    from app.utils.working_date import get_working_date
+
     start, end = _range_for_filter(period, start_date, end_date)
-    today = date.today()
+    today = get_working_date()
 
     total_sale = _sum_period(Sale.grand_total, Sale.sale_date, start, end)
     total_purchasing = _sum_period(Purchase.grand_total, Purchase.purchase_date, start, end)
-    total_expense = _sum_period(Expense.amount, Expense.expense_date, start, end)
+    expense_q = db.session.query(func.coalesce(func.sum(Expense.amount), 0)).filter(
+        Expense.is_deleted.is_(False)
+    )
+    if start and end:
+        expense_q = expense_q.filter(Expense.expense_date >= start, Expense.expense_date <= end)
+    total_expense = expense_q.scalar() or Decimal("0")
 
     cost_q = db.session.query(func.coalesce(func.sum(SaleItem.cost_of_goods), 0)).join(
         Sale, Sale.id == SaleItem.sale_id
@@ -245,8 +272,9 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
         .filter(Customer.is_deleted.is_(False), Customer.balance > 0)
         .scalar()
     ) or Decimal("0")
+    cash_collections = period_cash_collections(start, end)
     cash_metrics = get_cash_dashboard_metrics(
-        total_sale=total_sale,
+        total_sale=cash_collections,
         previous_amount=account_previous_amount(),
         total_expense=total_expense,
     )
@@ -286,7 +314,7 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
             func.strftime(group_fmt, Expense.expense_date),
             func.coalesce(func.sum(Expense.amount), 0),
         )
-        .filter(*_filters(Expense.expense_date, start, end))
+        .filter(Expense.is_deleted.is_(False), *_filters(Expense.expense_date, start, end))
         .group_by(func.strftime(group_fmt, Expense.expense_date))
         .all()
     }

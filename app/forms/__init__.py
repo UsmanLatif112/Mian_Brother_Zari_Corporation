@@ -11,7 +11,7 @@ from wtforms import (
     SubmitField,
     TextAreaField,
 )
-from wtforms.validators import DataRequired, Email, EqualTo, Length, Optional
+from wtforms.validators import DataRequired, Email, EqualTo, Length, NumberRange, Optional
 
 from app.forms.validators import StrongPassword
 
@@ -20,6 +20,14 @@ USER_ROLE_CHOICES = [
     ("manager", "Manager"),
     ("accountant", "Accountant"),
     ("admin", "Admin"),
+]
+
+TRIAL_UNIT_CHOICES = [
+    ("minutes", "Minutes"),
+    ("hours", "Hours"),
+    ("days", "Days"),
+    ("weeks", "Weeks"),
+    ("months", "Months"),
 ]
 
 
@@ -39,6 +47,22 @@ class UserForm(FlaskForm):
         choices=USER_ROLE_CHOICES,
         default="sales",
     )
+    company_name = StringField(
+        "Company Name",
+        validators=[Optional(), Length(max=200)],
+        description="Optional — staff can set this later in Company Branding.",
+    )
+    company_logo = HiddenField("Company Logo", validators=[Optional()])
+    trial_amount = IntegerField(
+        "Trial length",
+        validators=[Optional(), NumberRange(min=1, max=9999)],
+        default=7,
+    )
+    trial_unit = SelectField(
+        "Trial unit",
+        choices=TRIAL_UNIT_CHOICES,
+        default="days",
+    )
     password = PasswordField("Password", validators=[StrongPassword(required=True)])
     is_active_user = BooleanField("Active", default=True)
     submit = SubmitField("Save")
@@ -53,6 +77,27 @@ class UserEditForm(FlaskForm):
         validators=[Optional()],
         validate_choice=False,
     )
+    company_name = StringField(
+        "Company Name",
+        validators=[Optional(), Length(max=200)],
+    )
+    company_logo = HiddenField("Company Logo", validators=[Optional()])
+    trial_amount = IntegerField(
+        "Trial length",
+        validators=[Optional(), NumberRange(min=1, max=9999)],
+        default=7,
+    )
+    trial_unit = SelectField(
+        "Trial unit",
+        choices=TRIAL_UNIT_CHOICES,
+        default="days",
+        validators=[Optional()],
+    )
+    reset_trial = BooleanField(
+        "Reset / extend trial from now",
+        default=False,
+        description="Starts a new trial window from now using the length above.",
+    )
     password = PasswordField(
         "New Password",
         validators=[StrongPassword(required=False)],
@@ -60,6 +105,15 @@ class UserEditForm(FlaskForm):
     )
     is_active_user = BooleanField("Active", default=True)
     submit = SubmitField("Update User")
+
+
+class CompanyBrandingForm(FlaskForm):
+    company_name = StringField(
+        "Company Name",
+        validators=[DataRequired(), Length(max=200)],
+    )
+    company_logo = HiddenField("Company Logo", validators=[Optional()])
+    submit = SubmitField("Save Branding")
 
 
 class ChangePasswordForm(FlaskForm):
@@ -100,6 +154,18 @@ class ProductForm(FlaskForm):
     tax_rate = DecimalField("GST/Tax %", places=2, default=0)
     opening_stock = DecimalField("Purchase Qty", places=3, default=0)
     minimum_stock = DecimalField("Minimum Stock", places=3, default=0)
+    unit_weight = DecimalField(
+        "Unit Weight",
+        places=3,
+        validators=[Optional()],
+        default=None,
+    )
+    weight_unit = SelectField(
+        "Weight Unit",
+        choices=[("", "—"), ("kg", "kg"), ("g", "g"), ("L", "L"), ("ml", "ml")],
+        validators=[Optional()],
+        default="",
+    )
     batch_number = StringField("Batch No.", validators=[Optional()])
     expiry_date = DateField("Expiry Date", validators=[Optional()], format="%Y-%m-%d")
     vendor_id = IntegerField("Vendor", validators=[DataRequired(message="Vendor is required.")])

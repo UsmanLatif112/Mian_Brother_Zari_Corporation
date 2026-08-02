@@ -9,7 +9,12 @@ from app.extensions import db
 from app.forms import VendorForm
 from app.models import LedgerEntry, Vendor, VendorPayment
 from app.services.audit_service import log_audit
-from app.services.vendor_payment_service import PAYMENT_TYPES, record_vendor_payment
+from app.services.vendor_payment_service import (
+    PAYMENT_TYPES,
+    delete_vendor_payment,
+    record_vendor_payment,
+)
+from app.services.ledger_service import delete_ledger_entry_cascading
 from app.utils.decorators import permission_required
 from app.utils.uploads import delete_image, save_image
 from app.utils.working_date import get_working_date
@@ -129,6 +134,23 @@ def create():
             )
             _apply_vendor_photo(vendor)
             db.session.add(vendor)
+            db.session.flush()
+            if opening:
+                from app.services.ledger_service import post_ledger_entry
+
+                opening_d = Decimal(str(opening))
+                # Vendor balance > 0 means we owe them (debit payable)
+                debit = opening_d if opening_d > 0 else Decimal("0")
+                credit = abs(opening_d) if opening_d < 0 else Decimal("0")
+                post_ledger_entry(
+                    "vendor",
+                    vendor.id,
+                    "opening",
+                    debit=debit,
+                    credit=credit,
+                    entry_date=get_working_date(),
+                    notes="Opening balance",
+                )
             log_audit("create", "vendor", None, vendor.name)
             db.session.commit()
             flash("Vendor created.", "success")
@@ -209,6 +231,51 @@ def payment():
                 return redirect(url_for("vendors.detail", vendor_id=int(vendor_id)))
             except (TypeError, ValueError):
                 pass
+        return redirect(url_for("vendors.index"))
+
+
+@vendors_bp.route("/payments/<int:payment_id>/delete", methods=["POST"])
+@login_required
+@permission_required("vendors.*")
+def delete_payment(payment_id):
+    try:
+        vendor_id = delete_vendor_payment(payment_id, current_user.id)
+        log_audit("delete", "vendor_payment", payment_id)
+        db.session.commit()
+        flash("Payment deleted and reversed.", "success")
+        return redirect(url_for("vendors.detail", vendor_id=vendor_id))
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("vendors.index"))
+
+
+@vendors_bp.route("/ledger/<int:entry_id>/delete", methods=["POST"])
+@login_required
+@permission_required("vendors.*")
+def delete_ledger(entry_id):
+    try:
+        party_type, party_id, source = delete_ledger_entry_cascading(
+            entry_id, current_user.id
+        )
+        log_audit("delete", "ledger_entry", entry_id, source)
+        db.session.commit()
+        messages = {
+            "sale": "Sale deleted. Stock, cash, and ledger reversed.",
+            "customer_receiving": "Customer payment deleted and reversed.",
+            "purchase": "Purchase reversed. Stock, purchasing totals, and payable updated.",
+            "vendor_payment": "Payment deleted. Cash and vendor balance reversed.",
+            "ledger": "Ledger entry deleted. Balance recalculated.",
+        }
+        flash(messages.get(source, "Entry deleted and balances recalculated."), "success")
+        if party_type == "vendor":
+            return redirect(url_for("vendors.detail", vendor_id=party_id))
+        if party_type == "customer":
+            return redirect(url_for("customers.detail", customer_id=party_id))
+        return redirect(url_for("vendors.index"))
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
         return redirect(url_for("vendors.index"))
 
 

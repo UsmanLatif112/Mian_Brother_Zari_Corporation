@@ -8,6 +8,7 @@ from app.services.cashbook_service import record_cash_movement, reverse_cash_by_
 from app.services.fifo_service import fifo_deduct, fifo_receive
 from app.services.ledger_service import delete_ledger_by_reference, post_ledger_entry, rebuild_party_balances
 from app.services.sync_service import enqueue_sync
+from app.utils.working_date import get_working_date
 
 
 def generate_invoice_no():
@@ -18,10 +19,15 @@ def generate_invoice_no():
 
 def create_sale(data, items, user_id):
     """Create sale and update customer credit/advance from payment vs total."""
+    from datetime import date as date_cls
+
     cash_received = Decimal(str(data.get("amount_paid", 0)))
+    sale_date = data.get("sale_date") or get_working_date()
+    if isinstance(sale_date, str):
+        sale_date = date_cls.fromisoformat(sale_date)
     sale = Sale(
         invoice_no=data.get("invoice_no") or generate_invoice_no(),
-        sale_date=data["sale_date"],
+        sale_date=sale_date,
         customer_id=data.get("customer_id"),
         discount=Decimal(str(data.get("discount", 0))),
         tax_amount=Decimal(str(data.get("tax_amount", 0))),
@@ -38,7 +44,19 @@ def create_sale(data, items, user_id):
         qty = Decimal(str(line["quantity"]))
         unit_price = Decimal(str(line["unit_price"]))
         line_discount = Decimal(str(line.get("discount", 0)))
-        line_total = qty * unit_price - line_discount
+        if line.get("line_total") is not None:
+            line_total = Decimal(str(line["line_total"]))
+        else:
+            line_total = qty * unit_price - line_discount
+        list_unit_price = line.get("list_unit_price")
+        if list_unit_price is not None:
+            list_unit_price = Decimal(str(list_unit_price))
+        else:
+            list_unit_price = Decimal(str(product.sale_price or 0))
+        sale_weight = line.get("sale_weight")
+        if sale_weight is not None:
+            sale_weight = Decimal(str(sale_weight))
+        weight_unit = line.get("weight_unit")
         cogs = fifo_deduct(
             product,
             qty,
@@ -46,16 +64,20 @@ def create_sale(data, items, user_id):
             "sale",
             sale.id,
             user_id,
+            entry_at=sale_date,
         )
         item = SaleItem(
             sale_id=sale.id,
             product_id=product.id,
             quantity=qty,
             unit_price=unit_price,
+            list_unit_price=list_unit_price,
             discount=line_discount,
             tax_rate=Decimal(str(line.get("tax_rate", 0))),
             line_total=line_total,
             cost_of_goods=cogs,
+            sale_weight=sale_weight,
+            weight_unit=weight_unit,
         )
         db.session.add(item)
         subtotal += line_total
@@ -260,6 +282,7 @@ def void_sale(sale_id, user_id=None):
             user_id,
             notes=f"Void sale {sale.invoice_no}",
             sale_price=item.unit_price,
+            entry_at=sale.sale_date,
         )
 
     reverse_cash_by_reference(

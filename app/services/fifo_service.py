@@ -4,7 +4,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models import InventoryAdjustment, StockLayer, StockMovement
-from app.models.mixins import utcnow
+from app.utils.working_date import as_working_datetime, get_working_datetime
 
 
 def add_stock_layer(
@@ -33,7 +33,7 @@ def add_stock_layer(
         expiry_date=expiry_date,
         vendor_id=int(vendor_id) if vendor_id else None,
         invoice_no=(str(invoice_no).strip() or None) if invoice_no else None,
-        received_at=received_at or utcnow(),
+        received_at=as_working_datetime(received_at) if received_at is not None else get_working_datetime(),
         notes=notes,
     )
     db.session.add(layer)
@@ -52,7 +52,7 @@ def fifo_deduct(
 ):
     qty_needed = Decimal(str(quantity))
     total_cost = Decimal("0")
-    when = entry_at or utcnow()
+    when = as_working_datetime(entry_at) if entry_at is not None else get_working_datetime()
     layers = (
         StockLayer.query.filter_by(product_id=product.id)
         .filter(StockLayer.quantity_remaining > 0)
@@ -101,7 +101,7 @@ def fifo_receive(
     entry_at=None,
 ):
     qty = Decimal(str(quantity))
-    when = entry_at or utcnow()
+    when = as_working_datetime(entry_at) if entry_at is not None else get_working_datetime()
     product.current_stock += qty
     # Keep product list prices as latest defaults for display
     product.purchase_price = Decimal(str(unit_cost))
@@ -167,7 +167,7 @@ def adjust_batch(layer, new_qty, user_id, notes=None, entry_at=None):
     if delta == 0:
         return layer
 
-    when = entry_at or utcnow()
+    when = as_working_datetime(entry_at) if entry_at is not None else get_working_datetime()
     layer.quantity_remaining = new_qty
     # Keep purchased qty as original; if stock is increased above it, raise purchased too
     received = Decimal(str(layer.quantity_received if layer.quantity_received is not None else old_qty))
@@ -240,7 +240,7 @@ def reprice_batch(layer, unit_cost=None, sale_price=None, user_id=None, notes=No
             reference_id=layer.id,
             notes=notes or ("Reprice remaining: " + ", ".join(changes)),
             created_by_id=user_id,
-            created_at=utcnow(),
+            created_at=get_working_datetime(),
         )
     )
     return layer

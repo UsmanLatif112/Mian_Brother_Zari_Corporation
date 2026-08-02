@@ -1,8 +1,8 @@
-from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
 from app.models.mixins import TimestampMixin
+from app.utils.working_date import default_entry_date
 from app.models.sales import PaymentMethod, PaymentStatus
 
 
@@ -12,7 +12,7 @@ class Purchase(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     invoice_no = db.Column(db.String(50), nullable=False, index=True)
     vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=False)
-    purchase_date = db.Column(db.Date, default=date.today, nullable=False, index=True)
+    purchase_date = db.Column(db.Date, default=default_entry_date, nullable=False, index=True)
     subtotal = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     discount = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     tax_amount = db.Column(db.Numeric(14, 2), default=Decimal("0"))
@@ -51,7 +51,7 @@ class VendorPayment(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=False)
-    payment_date = db.Column(db.Date, default=date.today, nullable=False, index=True)
+    payment_date = db.Column(db.Date, default=default_entry_date, nullable=False, index=True)
     amount = db.Column(db.Numeric(14, 2), nullable=False)
     # advance | loan | account_settle
     payment_type = db.Column(db.String(30), default="account_settle", nullable=False, index=True)

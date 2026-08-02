@@ -11,7 +11,7 @@
           <div class="mb-3">
             <label class="form-label">Product</label>
             <select name="product_id" class="form-select" required>
-              {% for p in products %}<option value="{{ p.id }}">{{ p.name }} ({{ p.current_stock }})</option>{% endfor %}
+              {% for p in products %}<option value="{{ p.id }}">{{ p.name }} ({{ p.stock_display }})</option>{% endfor %}
             </select>
           </div>
           <div class="mb-3">
@@ -44,7 +44,7 @@
             <td>{{ h.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
             <td>{{ h.product.name }}</td>
             <td>{{ h.adjustment_type }}</td>
-            <td>{{ h.quantity }}</td>
+            <td>{{ h.quantity|qty_display(h.product) }}</td>
             <td>{{ h.notes or '—' }}</td>
           </tr>
           {% endfor %}

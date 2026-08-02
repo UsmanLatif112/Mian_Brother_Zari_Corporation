@@ -87,7 +87,7 @@
       })
     });
     const data = await res.json();
-    if (data.ok) { alert('Sale complete: ' + data.invoice_no); location.href = '/sales/' + data.sale_id + '/invoice'; }
+    if (data.ok) { alert('Sale complete: ' + data.invoice_no); location.href = '/sales/' + data.sale_id + '/invoice?next=' + encodeURIComponent('/sales/'); }
     else alert(data.error || 'Sale failed');
   }
 

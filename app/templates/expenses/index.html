@@ -152,8 +152,9 @@
               {% endif %}
               <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
                       data-action="{{ url_for('expenses.delete', expense_id=e.id) }}"
-                      data-title="Delete expense?"
-                      data-message="Delete “{{ e.name }}”?{% if e.is_settled %} Settlement cash will be reversed.{% endif %}">
+                      data-title="Delete expense “{{ e.name }}”?"
+                      data-message="Expense will be removed from lists. Choose Yes only if you are sure."
+                      data-effects="{% if e.is_settled %}Reverse settlement cash movement|{% endif %}Hide this expense from totals|Recalculate expense and cash stats">
                 <i class="fa-solid fa-trash"></i>
               </button>
               </div>
@@ -392,12 +393,12 @@ toggleCustomDates();
     const id = btn.dataset.id;
     const name = btn.dataset.name || 'Expense';
     const amount = btn.dataset.amount || '0';
-    const date = btn.dataset.date || '{{ today }}';
     settleForm.action = `/expenses/${id}/settle`;
     document.getElementById('settle-name').textContent = name;
     document.getElementById('settle-booked').textContent = Number(amount).toFixed(2);
     document.getElementById('settle-amount').value = Number(amount).toFixed(2);
-    document.getElementById('settle-date').value = date;
+    document.getElementById('settle-date').value =
+      window.getErpWorkingDate?.() || '{{ today }}';
     document.getElementById('settle-notes').value = '';
     bootstrap.Modal.getOrCreateInstance(settleModal).show();
   });

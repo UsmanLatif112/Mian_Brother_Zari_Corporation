@@ -61,8 +61,9 @@
         </button>
         <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete category"
                 data-action="{{ url_for('categories.delete', category_id=category.id) }}"
-                data-title="Delete category?"
-                data-message="Delete {{ category.name }}? Empty subcategories will also be removed.">
+                data-title="Delete category “{{ category.name }}”?"
+                data-message="Category will be removed if unused. Choose Yes only if you are sure."
+                data-effects="Delete this category|Remove empty subcategories under it|Blocked if products still use it">
           <i class="fa-solid fa-trash"></i>
         </button>
       </div>
@@ -107,8 +108,9 @@
                 </button>
                 <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
                         data-action="{{ url_for('categories.delete', category_id=s.id) }}"
-                        data-title="Delete subcategory?"
-                        data-message="Delete {{ s.name }}? It will be hidden if not used by products.">
+                        data-title="Delete subcategory “{{ s.name }}”?"
+                        data-message="Subcategory will be removed if unused. Choose Yes only if you are sure."
+                        data-effects="Hide / remove this subcategory|Blocked if products still use it">
                   <i class="fa-solid fa-trash"></i>
                 </button>
               </div>

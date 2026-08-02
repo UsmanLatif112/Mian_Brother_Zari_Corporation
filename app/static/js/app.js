@@ -285,6 +285,19 @@
 
   function initRegistrationGuard() {
     const registered = document.body.dataset.userRegistered === '1';
+
+    // Always wire register UI (trial users can register early for lifetime)
+    document.getElementById('open-registration-modal-btn')?.addEventListener('click', () => {
+      showRegistrationModal();
+    });
+    document.getElementById('registration-submit-btn')?.addEventListener('click', submitRegistration);
+    document.getElementById('registration-key-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitRegistration();
+      }
+    });
+
     if (registered) return;
 
     document.querySelectorAll('[data-requires-registration]').forEach((link) => {
@@ -295,21 +308,9 @@
       });
     });
 
-    document.getElementById('open-registration-modal-btn')?.addEventListener('click', () => {
-      showRegistrationModal();
-    });
-
     if (new URLSearchParams(window.location.search).get('registration_required') === '1') {
       showRegistrationModal();
     }
-
-    document.getElementById('registration-submit-btn')?.addEventListener('click', submitRegistration);
-    document.getElementById('registration-key-input')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        submitRegistration();
-      }
-    });
   }
 
   async function submitRegistration() {
@@ -450,20 +451,170 @@
     }
   });
 
-  document.addEventListener('click', (e) => {
+  /**
+   * App confirm modal (callback). For form deletes use .btn-delete-confirm.
+   * options: title, message, effects[], confirmLabel, cancelLabel, confirmClass,
+   *          icon, iconClass, onConfirm
+   */
+  window.showErpConfirm = function showErpConfirm(options) {
+    const opts = options || {};
+    const modalEl = document.getElementById('globalConfirmModal');
+    const form = document.getElementById('global-confirm-form');
+    if (!modalEl || !form || !window.bootstrap) return;
+
+    form.action = '';
+    document.getElementById('global-confirm-title').textContent =
+      opts.title || 'Please confirm';
+    document.getElementById('global-confirm-message').textContent =
+      opts.message || '';
+
+    const effectsWrap = document.getElementById('global-confirm-effects-wrap');
+    const effectsList = document.getElementById('global-confirm-effects');
+    const effects = Array.isArray(opts.effects)
+      ? opts.effects.map(String).filter(Boolean)
+      : [];
+    if (effectsList && effectsWrap) {
+      effectsList.innerHTML = '';
+      if (effects.length) {
+        effects.forEach((text) => {
+          const li = document.createElement('li');
+          li.textContent = text;
+          effectsList.appendChild(li);
+        });
+        effectsWrap.classList.remove('d-none');
+      } else {
+        effectsWrap.classList.add('d-none');
+      }
+    }
+
+    const iconFa = document.getElementById('global-confirm-icon-fa');
+    if (iconFa) {
+      iconFa.className = opts.icon || 'fa-solid fa-triangle-exclamation';
+    }
+    const iconBox = document.getElementById('global-confirm-icon');
+    if (iconBox) {
+      iconBox.className = `erp-confirm-icon ${opts.iconClass || 'erp-confirm-icon--warning'}`;
+    }
+
+    const cancelBtn = document.getElementById('global-confirm-cancel');
+    if (cancelBtn) cancelBtn.textContent = opts.cancelLabel || 'Cancel';
+
+    const submitBtn = document.getElementById('global-confirm-submit');
+    submitBtn.textContent = opts.confirmLabel || 'Continue';
+    submitBtn.className = `btn flex-fill ${opts.confirmClass || 'btn-warning'}`;
+
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+    const onSubmit = (e) => {
+      e.preventDefault();
+      form.removeEventListener('submit', onSubmit);
+      modal.hide();
+      if (typeof opts.onConfirm === 'function') opts.onConfirm();
+    };
+    form.addEventListener('submit', onSubmit);
+
+    modalEl.addEventListener(
+      'hidden.bs.modal',
+      () => {
+        form.removeEventListener('submit', onSubmit);
+      },
+      { once: true }
+    );
+
+    modal.show();
+  };
+
+  document.addEventListener('click', async (e) => {
     const btn = e.target.closest('.btn-delete-confirm');
     if (!btn) return;
     e.preventDefault();
+
+    // Same offline gate as registration / Google Drive backup
+    if (btn.dataset.requiresOnline === '1') {
+      if (!navigator.onLine) {
+        window.showOfflineModal?.(
+          btn.dataset.offlineMessage
+            || 'Connect to the internet to continue. You can keep using the app offline.'
+        );
+        return;
+      }
+      try {
+        const checkUrl = btn.dataset.onlineCheckUrl || '/api/internet?for=registry';
+        const res = await fetch(checkUrl, {
+          credentials: 'same-origin',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!data.online) {
+          window.showOfflineModal?.(
+            btn.dataset.offlineMessage
+              || 'Cloud registry is offline. Connect to the internet, then try again.'
+          );
+          return;
+        }
+      } catch (_) {
+        window.showOfflineModal?.(
+          btn.dataset.offlineMessage
+            || 'Could not reach the cloud. Connect to the internet, then try again.'
+        );
+        return;
+      }
+    }
+
     const modalEl = document.getElementById('globalConfirmModal');
     const form = document.getElementById('global-confirm-form');
     if (!modalEl || !form) return;
+
     form.action = btn.dataset.action || '';
-    document.getElementById('global-confirm-title').textContent = btn.dataset.title || 'Are you sure?';
+    document.getElementById('global-confirm-title').textContent =
+      btn.dataset.title || 'Delete this item?';
     document.getElementById('global-confirm-message').textContent =
-      btn.dataset.message || 'This action cannot be undone easily.';
+      btn.dataset.message || 'Please confirm. Related records and stats may be updated.';
+
+    const effectsWrap = document.getElementById('global-confirm-effects-wrap');
+    const effectsList = document.getElementById('global-confirm-effects');
+    let effects = [];
+    const rawEffects = (btn.dataset.effects || '').trim();
+    if (rawEffects) {
+      try {
+        const parsed = JSON.parse(rawEffects);
+        if (Array.isArray(parsed)) effects = parsed.map(String).filter(Boolean);
+      } catch (_) {
+        effects = rawEffects
+          .split('|')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    }
+    if (effectsList && effectsWrap) {
+      effectsList.innerHTML = '';
+      if (effects.length) {
+        effects.forEach((text) => {
+          const li = document.createElement('li');
+          li.textContent = text;
+          effectsList.appendChild(li);
+        });
+        effectsWrap.classList.remove('d-none');
+      } else {
+        effectsWrap.classList.add('d-none');
+      }
+    }
+
+    const iconFa = document.getElementById('global-confirm-icon-fa');
+    if (iconFa) {
+      iconFa.className = btn.dataset.icon || 'fa-solid fa-triangle-exclamation';
+    }
+    const iconBox = document.getElementById('global-confirm-icon');
+    if (iconBox) {
+      iconBox.className = `erp-confirm-icon ${btn.dataset.iconClass || 'erp-confirm-icon--danger'}`;
+    }
+
+    const cancelBtn = document.getElementById('global-confirm-cancel');
+    if (cancelBtn) cancelBtn.textContent = btn.dataset.cancelLabel || 'No';
+
     const submitBtn = document.getElementById('global-confirm-submit');
-    submitBtn.textContent = btn.dataset.confirmLabel || 'Delete';
-    submitBtn.className = `btn px-4 ${btn.dataset.confirmClass || 'btn-danger'}`;
+    submitBtn.textContent = btn.dataset.confirmLabel || 'Yes, delete';
+    submitBtn.className = `btn flex-fill ${btn.dataset.confirmClass || 'btn-danger'}`;
     bootstrap.Modal.getOrCreateInstance(modalEl).show();
   });
 

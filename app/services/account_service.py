@@ -73,27 +73,39 @@ def account_previous_amount() -> Decimal:
 
 def computed_cash_in_hand(period="all", start_date=None, end_date=None) -> dict:
     """
-    Same formula as dashboard:
+    Same formula as dashboard (collections-based):
     - previous_balance from Account table chain
-    - cash_without_prev_and_expense = total sale
-    - cash_without_expense = sale + previous
-    - cash_in_hand = sale + previous - expense
+    - cash_without_prev_and_expense = cash collections (paid sales + payments)
+    - cash_without_expense = collections + previous
+    - cash_in_hand = collections + previous - expense
     """
     from app.models import Expense, Sale
-    from app.services.cashbook_service import get_cash_dashboard_metrics
+    from app.services.cashbook_service import get_cash_dashboard_metrics, period_cash_collections
     from app.services.dashboard_service import _range_for_filter, _sum_period
 
     start, end = _range_for_filter(period, start_date, end_date)
     total_sale = _sum_period(Sale.grand_total, Sale.sale_date, start, end)
-    total_expense = _sum_period(Expense.amount, Expense.expense_date, start, end)
+    expense_q = Expense.query.filter(Expense.is_deleted.is_(False))
+    # Use ORM sum via dashboard helper path
+    from sqlalchemy import func
+    from app.extensions import db
+
+    exp_q = db.session.query(func.coalesce(func.sum(Expense.amount), 0)).filter(
+        Expense.is_deleted.is_(False)
+    )
+    if start and end:
+        exp_q = exp_q.filter(Expense.expense_date >= start, Expense.expense_date <= end)
+    total_expense = exp_q.scalar() or Decimal("0")
     previous = account_previous_amount()
+    collections = period_cash_collections(start, end)
     metrics = get_cash_dashboard_metrics(
-        total_sale=total_sale,
+        total_sale=collections,
         previous_amount=previous,
         total_expense=total_expense,
     )
     metrics["previous_balance"] = previous
     metrics["total_sale"] = total_sale
+    metrics["cash_collections"] = collections
     metrics["total_expense"] = total_expense
     return metrics
 

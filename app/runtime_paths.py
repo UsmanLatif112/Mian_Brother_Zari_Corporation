@@ -6,7 +6,7 @@ import os
 import sys
 
 
-APP_DISPLAY_NAME = "Mian Brother Fertilizers"
+APP_DISPLAY_NAME = "Agri Books"
 APP_FOLDER_NAME = "MianBrotherFertilizers"
 
 

@@ -15,6 +15,13 @@ if str(ROOT) not in sys.path:
 
 from app.version import APP_BUILD, APP_VERSION
 
+try:
+    from app.version import RELEASE_NOTES as DEFAULT_RELEASE_NOTES
+except ImportError:
+    DEFAULT_RELEASE_NOTES = (
+        "- Registration and working date\n- Auto-update support\n- UI improvements"
+    )
+
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -48,8 +55,7 @@ def main() -> None:
         "released_at": date.today().isoformat(),
         "download_url": f"{base}/{zip_name}",
         "sha256": sha256_file(zip_path),
-        "release_notes": args.notes
-        or "- Registration and working date\n- Auto-update support\n- UI improvements",
+        "release_notes": args.notes or DEFAULT_RELEASE_NOTES,
     }
 
     out = Path(args.output) if args.output else zip_path.parent / "version.json"

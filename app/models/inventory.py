@@ -59,6 +59,9 @@ class Product(SoftDeleteMixin, TimestampMixin, db.Model):
     sale_price = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     wholesale_price = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     retail_price = db.Column(db.Numeric(14, 2), default=Decimal("0"))
+    # One packaging unit's weight/volume (e.g. bag = 50 kg). Used for partial-weight sales.
+    unit_weight = db.Column(db.Numeric(14, 3), nullable=True)
+    weight_unit = db.Column(db.String(10), nullable=True)  # kg | g | L | ml
     tax_rate = db.Column(db.Numeric(5, 2), default=Decimal("0"))
     description = db.Column(db.Text, nullable=True)
     photo = db.Column(db.String(255), nullable=True)
@@ -79,6 +82,24 @@ class Product(SoftDeleteMixin, TimestampMixin, db.Model):
         if not self.photo:
             return None
         return f"/static/uploads/{self.photo}"
+
+    @property
+    def has_unit_weight(self):
+        try:
+            return Decimal(str(self.unit_weight or 0)) > 0
+        except Exception:
+            return False
+
+    @property
+    def stock_display(self):
+        from app.utils.weight_utils import format_stock_display
+
+        return format_stock_display(self)
+
+    def qty_display(self, qty) -> str:
+        from app.utils.weight_utils import format_qty_display
+
+        return format_qty_display(qty, self.unit_weight, self.weight_unit or "kg")
 
 
 class StockLayer(db.Model):
