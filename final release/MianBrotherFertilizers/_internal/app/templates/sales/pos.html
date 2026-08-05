@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% block title %}POS — {{ app_name }}{% endblock %}
+{% block content %}
+<div class="row g-3 pos-layout">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white d-flex gap-2">
+        <input type="search" class="form-control" id="product-search" placeholder="Search product or scan barcode..." autofocus>
+        <button class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#addProductModal"><i class="fa-solid fa-plus"></i></button>
+      </div>
+      <div class="card-body product-grid" id="product-grid">
+        {% for p in products %}
+        <button type="button" class="product-tile" data-id="{{ p.id }}" data-name="{{ p.name }}" data-price="{{ p.sale_price }}" data-barcode="{{ p.barcode or '' }}">
+          <strong>{{ p.name }}</strong>
+          <span>{{ p.sale_price }} · Stock {{ p.stock_display }}</span>
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+        <span>Current Sale</span>
+        <button class="btn btn-sm btn-light" data-bs-toggle="modal" data-bs-target="#customerModal">Customer</button>
+      </div>
+      <div class="card-body p-0">
+        <table class="table mb-0" id="cart-table">
+          <thead><tr><th>Item</th><th>Qty</th><th>Total</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card-footer">
+        <div class="d-flex justify-content-between mb-2"><span>Subtotal</span><strong id="subtotal">0.00</strong></div>
+        <div class="mb-2">
+          <label class="form-label small">Payment</label>
+          <select class="form-select" id="payment-method">
+            <option value="cash">Cash</option>
+            <option value="bank">Bank</option>
+            <option value="credit">Credit</option>
+          </select>
+        </div>
+        <input type="hidden" id="customer-id" value="">
+        <p class="small text-muted mb-2">Customer: <span id="customer-label">Walk-in</span></p>
+        <button class="btn btn-success w-100" id="complete-sale">Complete Sale (F2)</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="customerModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Select Customer</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <select class="form-select mb-3" id="customer-select">
+          <option value="">Walk-in Customer</option>
+          {% for c in customers %}<option value="{{ c.id }}">{{ c.name }} ({{ c.phone or '—' }})</option>{% endfor %}
+        </select>
+        <button class="btn btn-outline-success w-100" data-bs-toggle="collapse" data-bs-target="#new-customer-form">Add New Customer</button>
+        <div class="collapse mt-3" id="new-customer-form">
+          <input class="form-control mb-2" id="nc-name" placeholder="Name">
+          <input class="form-control mb-2" id="nc-phone" placeholder="Phone">
+          <button class="btn btn-success w-100" type="button" id="save-customer">Save Customer</button>
+        </div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-success" data-bs-dismiss="modal" id="apply-customer">Apply</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="addProductModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Quick Add Product</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input class="form-control mb-2" id="np-name" placeholder="Product name">
+        <input class="form-control mb-2" id="np-price" placeholder="Sale price" type="number" step="0.01">
+      </div>
+      <div class="modal-footer"><button class="btn btn-success" id="save-product">Save</button></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/pos.js') }}"></script>
+{% endblock %}

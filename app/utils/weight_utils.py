@@ -62,6 +62,14 @@ def product_has_weight(product) -> bool:
         return False
 
 
+def clean_number(value) -> str:
+    """Strip trailing zeros: 50.000 → 50, 12.500 → 12.5"""
+    try:
+        return _clean_number(Decimal(str(value or 0)))
+    except Exception:
+        return str(value or 0)
+
+
 def _clean_number(value: Decimal) -> str:
     text = f"{value:.3f}".rstrip("0").rstrip(".")
     return text or "0"
@@ -71,9 +79,14 @@ def split_qty_units_and_weight(
     qty, unit_weight
 ) -> tuple[Decimal, Decimal, Decimal]:
     """
-    Split stock qty into (whole_units_abs, leftover_weight_abs, sign).
-    leftover_weight = fractional_units * unit_weight (always >= 0).
-    sign is -1, 0, or 1.
+    Split stock qty into (whole_sealed_bags, open_weight, sign).
+
+    Partial bags are shown as open weight, not as “almost one more bag”.
+    Example (unit_weight=50 kg):
+      51.5 bags → 50 sealed + 75 kg open   (not 51 + 25 kg)
+      50.5 bags → 49 sealed + 75 kg open
+      0.5 bags  → 0 sealed + 25 kg open
+      2 bags    → 2 sealed + 0 kg
     """
     q = Decimal(str(qty or 0))
     if q == 0:
@@ -86,6 +99,11 @@ def split_qty_units_and_weight(
     full = abs_q.to_integral_value(rounding=ROUND_DOWN)
     frac = abs_q - full
     leftover = (frac * uw).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+    # Any open/partial stock means at least one bag was opened — keep that bag
+    # in the open-weight side so sealed bags stay whole.
+    if leftover > 0 and full >= 1:
+        full -= 1
+        leftover = (leftover + uw).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
     return full, leftover, sign
 
 
@@ -94,11 +112,10 @@ def format_qty_display(qty, unit_weight=None, weight_unit: str | None = "kg") ->
     Human-readable qty for weighted products.
 
     Examples (unit_weight=50 kg):
-      48.935  -> 48 + 46.75 kg
-      1.065   -> 1 + 3.25 kg
-      0.065   -> 3.25 kg
-      -0.065  -> -3.25 kg
-      -1.000  -> -1
+      51.5    -> 50 + 75 kg
+      50.5    -> 49 + 75 kg
+      48.935  -> 48 + 46.75 kg  (after borrow when fractional)
+      0.5     -> 25 kg
       2       -> 2
     """
     q = Decimal(str(qty or 0))
@@ -130,14 +147,77 @@ def stock_pieces_and_leftover(product) -> tuple[Decimal, Decimal]:
 
 
 def format_stock_display(product) -> str:
-    if not product_has_weight(product):
-        stock = Decimal(str(getattr(product, "current_stock", 0) or 0))
-        return _clean_number(stock)
-    return format_qty_display(
-        getattr(product, "current_stock", 0) or 0,
-        getattr(product, "unit_weight", None),
-        getattr(product, "weight_unit", None) or "kg",
+    """
+    Stock label: sealed bags + open kg kept separate per packaging size.
+    Examples:
+      50 sealed + 75 kg open (50kg bags) → "50 + 75 kg"
+      Mixed batches → "50×20 kg + 10×100 kg" or with open "49×50 kg + 25 kg"
+    """
+    from app.models import StockLayer
+
+    layers = (
+        StockLayer.query.filter_by(product_id=product.id)
+        .order_by(StockLayer.received_at.asc(), StockLayer.id.asc())
+        .all()
     )
+    stocked = [L for L in layers if L.has_stock()]
+    if not stocked:
+        stock = Decimal(str(getattr(product, "current_stock", 0) or 0))
+        if not product_has_weight(product):
+            return _clean_number(stock)
+        return format_qty_display(
+            stock,
+            getattr(product, "unit_weight", None),
+            getattr(product, "weight_unit", None) or "kg",
+        )
+
+    # Aggregate sealed qty and open weight by packaging
+    groups = {}
+    order = []
+    for layer in stocked:
+        if layer.unit_weight is not None and Decimal(str(layer.unit_weight)) > 0:
+            uw = Decimal(str(layer.unit_weight))
+            wu = (layer.weight_unit or getattr(product, "weight_unit", None) or "kg")
+        elif product_has_weight(product):
+            uw = Decimal(str(product.unit_weight))
+            wu = getattr(product, "weight_unit", None) or "kg"
+        else:
+            uw = None
+            wu = None
+        key = (str(uw) if uw is not None else "", wu or "")
+        if key not in groups:
+            groups[key] = {"sealed": Decimal("0"), "open": Decimal("0")}
+            order.append(key)
+        groups[key]["sealed"] += Decimal(str(layer.quantity_remaining or 0))
+        groups[key]["open"] += Decimal(str(layer.open_weight_remaining or 0))
+
+    parts = []
+    for key in order:
+        uw_s, wu = key
+        sealed = groups[key]["sealed"]
+        open_w = groups[key]["open"]
+        unit = wu or "kg"
+        if not uw_s:
+            if sealed > 0:
+                parts.append(_clean_number(sealed))
+            continue
+        uw = Decimal(uw_s)
+        if sealed > 0 and open_w > 0:
+            if len(order) == 1:
+                parts.append(f"{_clean_number(sealed)} + {_clean_number(open_w)} {unit}")
+            else:
+                parts.append(
+                    f"{_clean_number(sealed)}×{_clean_number(uw)} {unit} + {_clean_number(open_w)} {unit}"
+                )
+        elif sealed > 0:
+            if len(order) == 1:
+                # Single packaging, whole bags only
+                parts.append(_clean_number(sealed))
+            else:
+                parts.append(f"{_clean_number(sealed)}×{_clean_number(uw)} {unit}")
+        elif open_w > 0:
+            parts.append(f"{_clean_number(open_w)} {unit}")
+    return " + ".join(parts) if parts else "0"
 
 
 def weight_to_stock_qty(sale_weight, unit_weight) -> Decimal:

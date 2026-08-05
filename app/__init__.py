@@ -295,11 +295,29 @@ def register_registration_guard(app):
 
 def register_context_processors(app):
     from app.services.settings_service import get_business_info
-    from app.utils.weight_utils import format_qty_display, format_stock_display
+    from app.utils.weight_utils import clean_number, format_qty_display, format_stock_display
 
     @app.template_filter("qty_display")
     def qty_display_filter(qty, product=None, unit_weight=None, weight_unit=None):
-        """Format stock qty as whole units + leftover weight when product has unit weight."""
+        """Format stock qty as whole sealed bags + open weight when applicable."""
+        from decimal import Decimal
+
+        # StockLayer passed as second arg (detail batches table)
+        if product is not None and hasattr(product, "open_weight_remaining"):
+            layer = product
+            sealed = Decimal(str(getattr(layer, "quantity_remaining", None) or qty or 0))
+            open_w = Decimal(str(getattr(layer, "open_weight_remaining", None) or 0))
+            uw = getattr(layer, "effective_unit_weight", None)
+            wu = getattr(layer, "effective_weight_unit", None) or "kg"
+            if uw and open_w > 0:
+                if sealed > 0:
+                    return f"{clean_number(sealed)} + {clean_number(open_w)} {wu}"
+                return f"{clean_number(open_w)} {wu}"
+            if uw:
+                return format_qty_display(sealed, uw, wu)
+            return format_qty_display(sealed, None, wu)
+        if unit_weight is not None:
+            return format_qty_display(qty, unit_weight, weight_unit or "kg")
         if product is not None:
             return format_qty_display(
                 qty,
@@ -311,6 +329,11 @@ def register_context_processors(app):
     @app.template_filter("stock_display")
     def stock_display_filter(product):
         return format_stock_display(product)
+
+    @app.template_filter("clean_num")
+    def clean_num_filter(value):
+        """50.000 → 50, 12.500 → 12.5"""
+        return clean_number(value)
 
     @app.context_processor
     def inject_globals():

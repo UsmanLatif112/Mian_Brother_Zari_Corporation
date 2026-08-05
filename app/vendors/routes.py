@@ -319,12 +319,19 @@ def detail(vendor_id):
     if purchase_ids:
         for p in Purchase.query.filter(Purchase.id.in_(set(purchase_ids))).all():
             purchases_by_id[p.id] = p
+    notes_dirty = False
     for entry in ledger:
         if (entry.reference_type or "") == "purchase" and entry.reference_id:
             purchase = purchases_by_id.get(int(entry.reference_id))
             summary = purchase_items_summary(purchase) if purchase else ""
-            if summary:
+            if summary and summary != (entry.notes or ""):
                 entry.notes = summary
+                notes_dirty = True
+    if notes_dirty:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
     payments = pay_q.order_by(VendorPayment.payment_date.desc()).all()
     return render_template(

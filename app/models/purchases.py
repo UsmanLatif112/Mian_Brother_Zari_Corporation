@@ -42,6 +42,9 @@ class PurchaseItem(db.Model):
     discount = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     tax_rate = db.Column(db.Numeric(5, 2), default=Decimal("0"))
     line_total = db.Column(db.Numeric(14, 2), nullable=False)
+    # Packaging for this purchase line (may differ across restocks of same product)
+    unit_weight = db.Column(db.Numeric(14, 3), nullable=True)
+    weight_unit = db.Column(db.String(10), nullable=True)
 
     product = db.relationship("Product")
 

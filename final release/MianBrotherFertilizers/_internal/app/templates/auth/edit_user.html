@@ -1,0 +1,124 @@
+{% extends 'base.html' %}
+{% block title %}Edit User{% endblock %}
+{% block content %}
+{% from 'partials/macros.html' import photo_field %}
+<div class="dashboard-page">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card dash-panel border-0 shadow-sm">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+          <strong>Edit User — {{ edit_user.username }}</strong>
+          <a href="{{ url_for('auth.users') }}" class="btn btn-sm btn-outline-secondary">Back to Users</a>
+        </div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('auth.edit_user', user_id=edit_user.id) }}"
+                data-password-form="1" data-password-required="0">
+            {{ edit_form.hidden_tag() }}
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">Username</label>
+                <input type="text" class="form-control" value="{{ edit_user.username }}" disabled>
+              </div>
+              <div class="col-md-6">
+                {{ edit_form.email.label(class='form-label') }}
+                {{ edit_form.email(class='form-control') }}
+              </div>
+              <div class="col-md-6">
+                {{ edit_form.full_name.label(class='form-label') }}
+                {{ edit_form.full_name(class='form-control') }}
+              </div>
+              <div class="col-md-6">
+                {% if edit_user.is_super_admin() %}
+                <label class="form-label">Role</label>
+                <input type="text" class="form-control" value="Super Admin" disabled>
+                <input type="hidden" name="role" value="super_admin">
+                {% else %}
+                {{ edit_form.role.label(class='form-label') }}
+                {{ edit_form.role(class='form-select') }}
+                {% endif %}
+              </div>
+              {% if not edit_user.is_super_admin() %}
+              <div class="col-md-8">
+                {{ edit_form.company_name.label(class='form-label') }}
+                {{ edit_form.company_name(class='form-control', placeholder='Company shown in sidebar') }}
+                <div class="form-text">Customer/staff sidebar shows this name — not Agri Books.</div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label d-block">Company Logo</label>
+                {{ edit_form.company_logo() }}
+                {{ photo_field(icon='fa-image', label='Company logo', upload='ajax', folder='logos', clear_name='clear_company_logo', picker_id='edit-user-logo-picker', current_url=edit_user.company_logo_url) }}
+              </div>
+              <div class="col-md-3">
+                {{ edit_form.trial_amount.label(class='form-label') }}
+                {{ edit_form.trial_amount(class='form-control', min=1, max=9999) }}
+              </div>
+              <div class="col-md-3">
+                {{ edit_form.trial_unit.label(class='form-label') }}
+                {{ edit_form.trial_unit(class='form-select') }}
+              </div>
+              <div class="col-md-6 d-flex align-items-end">
+                <div class="form-check mb-2">
+                  {{ edit_form.reset_trial(class='form-check-input') }}
+                  {{ edit_form.reset_trial.label(class='form-check-label') }}
+                </div>
+              </div>
+              {% endif %}
+              <div class="col-md-6">
+                <div class="password-field-wrap">
+                  {{ edit_form.password.label(class='form-label') }}
+                  <div class="input-group">
+                    {{ edit_form.password(class='form-control password-strength-input', placeholder='Leave blank to keep current password', **{'data-password-main': '1'}) }}
+                    <button type="button" class="btn btn-outline-secondary password-toggle-btn" tabindex="-1" aria-label="Show password">
+                      <i class="fa-regular fa-eye"></i>
+                    </button>
+                  </div>
+                  <ul class="password-policy-checklist list-unstyled mt-1 mb-0"></ul>
+                  <div class="invalid-feedback d-none"></div>
+                  <div class="form-text">Only Super Admin can reset user passwords here.</div>
+                </div>
+              </div>
+              <div class="col-md-6 d-flex align-items-end">
+                <div class="form-check mb-2">
+                  {{ edit_form.is_active_user(class='form-check-input') }}
+                  {{ edit_form.is_active_user.label(class='form-check-label') }}
+                </div>
+              </div>
+              {% if edit_user.registration_key %}
+              <div class="col-12">
+                <label class="form-label">Registration Key</label>
+                <div class="input-group">
+                  <input type="text" class="form-control font-monospace" value="{{ edit_user.registration_key }}" readonly>
+                  <button type="button" class="btn btn-outline-secondary copy-reg-key-btn" data-key="{{ edit_user.registration_key }}">
+                    <i class="fa-regular fa-copy"></i> Copy
+                  </button>
+                </div>
+              </div>
+              {% endif %}
+            </div>
+            <div class="mt-4 d-flex gap-2">
+              {{ edit_form.submit(class='btn btn-success') }}
+              <a href="{{ url_for('auth.users') }}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/password-validation.js') }}"></script>
+<script>
+document.querySelector('.copy-reg-key-btn')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const key = btn.getAttribute('data-key') || '';
+  if (!key) return;
+  try {
+    await navigator.clipboard.writeText(key);
+    window.showErpToast?.('success', 'Registration key copied.');
+  } catch (_) {
+    window.prompt('Copy registration key:', key);
+  }
+});
+</script>
+{% endblock %}

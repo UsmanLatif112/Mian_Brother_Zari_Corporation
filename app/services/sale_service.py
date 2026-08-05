@@ -5,7 +5,7 @@ from app.models import Sale, SaleItem
 from app.models.sales import PaymentMethod, PaymentStatus
 from app.services.audit_service import log_audit
 from app.services.cashbook_service import record_cash_movement, reverse_cash_by_reference
-from app.services.fifo_service import fifo_deduct, fifo_receive
+from app.services.fifo_service import fifo_deduct, fifo_deduct_open_weight, fifo_receive
 from app.services.ledger_service import delete_ledger_by_reference, post_ledger_entry, rebuild_party_balances
 from app.services.sync_service import enqueue_sync
 from app.utils.working_date import get_working_date
@@ -57,15 +57,35 @@ def create_sale(data, items, user_id):
         if sale_weight is not None:
             sale_weight = Decimal(str(sale_weight))
         weight_unit = line.get("weight_unit")
-        cogs = fifo_deduct(
-            product,
-            qty,
-            "sale_out",
-            "sale",
-            sale.id,
-            user_id,
-            entry_at=sale_date,
-        )
+        unit_weight = line.get("unit_weight")
+        if unit_weight is not None and str(unit_weight).strip() != "":
+            unit_weight = Decimal(str(unit_weight))
+        else:
+            unit_weight = None
+        if (line.get("sale_mode") or "").strip().lower() == "open" and sale_weight and sale_weight > 0:
+            cogs, qty = fifo_deduct_open_weight(
+                product,
+                sale_weight,
+                "sale_out",
+                "sale",
+                sale.id,
+                user_id,
+                entry_at=sale_date,
+                unit_weight=unit_weight,
+            )
+            if qty > 0:
+                unit_price = line_total / qty
+        else:
+            cogs = fifo_deduct(
+                product,
+                qty,
+                "sale_out",
+                "sale",
+                sale.id,
+                user_id,
+                entry_at=sale_date,
+                unit_weight=unit_weight,
+            )
         item = SaleItem(
             sale_id=sale.id,
             product_id=product.id,

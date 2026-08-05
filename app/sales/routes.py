@@ -110,12 +110,12 @@ def _infer_item_sale_mode(it) -> str | None:
 
 def _parse_sale_request(data):
     """Parse JSON sale payload into (payload, items) or (None, error_response)."""
+    from app.services.fifo_service import fifo_weight_for_qty, next_fifo_packaging, weight_to_stock_qty_fifo
     from app.utils.weight_utils import (
         normalize_weight_unit,
         parse_unit_weight,
         product_has_weight,
         proportional_sale_amount,
-        weight_to_stock_qty,
     )
 
     items_raw = data.get("items") or []
@@ -134,10 +134,20 @@ def _parse_sale_request(data):
         line_discount = Decimal(str(line.get("discount") or 0))
         sale_weight = None
         weight_unit = None
+        line_unit_weight = parse_unit_weight(line.get("unit_weight"))
 
-        if product_has_weight(product):
-            uw = Decimal(str(product.unit_weight))
-            weight_unit = product.weight_unit or normalize_weight_unit(line.get("weight_unit")) or "kg"
+        fifo_uw, fifo_wu = next_fifo_packaging(product, unit_weight=line_unit_weight)
+        has_weight = (fifo_uw is not None and fifo_uw > 0) or product_has_weight(product)
+        if has_weight:
+            uw = fifo_uw if fifo_uw is not None else Decimal(str(product.unit_weight))
+            if line_unit_weight and line_unit_weight > 0:
+                uw = line_unit_weight
+            weight_unit = (
+                fifo_wu
+                or product.weight_unit
+                or normalize_weight_unit(line.get("weight_unit"))
+                or "kg"
+            )
             mode = (line.get("sale_mode") or "full").strip().lower()
             if mode not in ("full", "open"):
                 # Legacy payloads: weight provided without mode → open; else full
@@ -155,7 +165,11 @@ def _parse_sale_request(data):
                         jsonify({"ok": False, "error": f"Invalid sale weight for {product.name}."}),
                         400,
                     )
-                qty = weight_to_stock_qty(sale_weight, uw)
+                try:
+                    qty = weight_to_stock_qty_fifo(product, sale_weight, unit_weight=uw)
+                except ValueError as exc:
+                    return None, (jsonify({"ok": False, "error": str(exc)}), 400)
+                # Price suggestion uses selected packaging
                 suggested = proportional_sale_amount(list_price, uw, sale_weight)
                 if line.get("line_total") is not None and str(line.get("line_total")) != "":
                     line_total = Decimal(str(line.get("line_total")))
@@ -174,14 +188,19 @@ def _parse_sale_request(data):
                     line_total = Decimal("0")
                 unit_price = (line_total / qty) if qty else list_price
             else:
-                # Full bags / units
+                # Full bags / units — FIFO only within this packaging weight
                 qty = Decimal(str(line.get("quantity") or 0))
                 if qty <= 0:
                     return None, (
                         jsonify({"ok": False, "error": f"Invalid quantity for {product.name}."}),
                         400,
                     )
-                sale_weight = qty * uw
+                try:
+                    sale_weight = fifo_weight_for_qty(product, qty, unit_weight=uw)
+                except ValueError as exc:
+                    return None, (jsonify({"ok": False, "error": str(exc)}), 400)
+                if sale_weight is None:
+                    sale_weight = qty * uw
                 unit_price = Decimal(
                     str(line.get("unit_price") if line.get("unit_price") is not None else list_price)
                 )
@@ -215,6 +234,8 @@ def _parse_sale_request(data):
                 "line_total": line_total,
                 "sale_weight": sale_weight,
                 "weight_unit": weight_unit,
+                "unit_weight": uw if has_weight else None,
+                "sale_mode": mode if has_weight else "qty",
                 "discount": line_discount,
                 "tax_rate": line.get("tax_rate", product.tax_rate or 0),
             }
@@ -446,11 +467,27 @@ def pos_submit():
     return create()
 
 
+def _item_unit_weight(it):
+    """Best packaging weight for a sold line (from sale weight / qty when possible)."""
+    qty = Decimal(str(it.quantity or 0))
+    sw = it.sale_weight
+    if sw is not None and qty > 0:
+        # Full-bag sales: sale_weight ≈ qty × unit_weight
+        inferred = (Decimal(str(sw)) / qty).quantize(Decimal("0.001"))
+        if inferred > 0:
+            return float(inferred)
+    if it.product and it.product.unit_weight is not None:
+        return float(it.product.unit_weight)
+    return None
+
+
 @sales_bp.route("/<int:sale_id>")
 @login_required
 @permission_required("sales.view")
 def get_sale(sale_id):
     """JSON payload to load a sale into the Add Sale modal for editing."""
+    from app.services.fifo_service import list_packaging_options
+
     sale = (
         Sale.query.options(
             joinedload(Sale.customer),
@@ -493,9 +530,8 @@ def get_sale(sale_id):
                         "sale_weight": float(it.sale_weight) if it.sale_weight is not None else None,
                         "weight_unit": it.weight_unit
                         or (it.product.weight_unit if it.product else None),
-                        "unit_weight": float(it.product.unit_weight)
-                        if it.product and it.product.unit_weight is not None
-                        else None,
+                        "unit_weight": _item_unit_weight(it),
+                        "packagings": list_packaging_options(it.product) if it.product else [],
                         "sale_mode": _infer_item_sale_mode(it),
                         "photo_url": it.product.photo_url if it.product else None,
                     }

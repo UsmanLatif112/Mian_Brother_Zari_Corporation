@@ -1,0 +1,198 @@
+{% extends 'base.html' %}
+{% from 'partials/macros.html' import form_modal, header_status_filter %}
+{% block title %}{{ category.name }} — Subcategories{% endblock %}
+{% block page_filters %}
+{{ header_status_filter(
+  form_id='category-detail-filter-form',
+  persist_key='category-detail-' ~ category.id,
+  clear_url=url_for('categories.detail', category_id=category.id, status='all'),
+  selected=selected_status,
+  label='Filter',
+  options=[
+    ('all', 'All'),
+    ('with_products', 'With products'),
+    ('empty', 'No products'),
+  ]
+) }}
+{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
+    <div>
+      <a href="{{ url_for('categories.index') }}" class="text-muted small text-decoration-none">
+        <i class="fa-solid fa-arrow-left me-1"></i> Categories
+      </a>
+      <h1 class="h3 mb-1 mt-1">{{ category.name }}</h1>
+      <p class="text-muted mb-0">{{ category.description or 'Subcategories for this category' }}</p>
+    </div>
+    <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#formModal">
+      <i class="fa-solid fa-plus me-1"></i> Add Subcategory
+    </button>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Subcategories</p>
+          <h3 class="mb-0">{{ sub_count }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Products (this category)</p>
+          <h3 class="mb-0">{{ product_count }}</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <strong>Category</strong>
+      <div class="table-actions">
+        <button type="button" class="action-icon-btn action-edit btn-edit-parent" title="Edit category"
+                data-id="{{ category.id }}"
+                data-name="{{ category.name }}"
+                data-description="{{ category.description or '' }}">
+          <i class="fa-solid fa-pen"></i>
+        </button>
+        <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete category"
+                data-action="{{ url_for('categories.delete', category_id=category.id) }}"
+                data-title="Delete category “{{ category.name }}”?"
+                data-message="Category will be removed if unused. Choose Yes only if you are sure."
+                data-effects="Delete this category|Remove empty subcategories under it|Blocked if products still use it">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+    </div>
+    <div class="card-body py-3">
+      <div class="row g-2 small">
+        <div class="col-md-4"><span class="text-muted">Name</span><div class="fw-semibold">{{ category.name }}</div></div>
+        <div class="col-md-8"><span class="text-muted">Description</span><div>{{ category.description or '—' }}</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <strong>Subcategories</strong>
+      <span class="text-muted small">{{ rows|length }} records</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table datatable mb-0 w-100" id="category-subs-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th class="text-end">Products</th>
+            <th class="col-actions">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          {% set s = row.cat %}
+          <tr>
+            <td class="fw-semibold">{{ s.name }}</td>
+            <td class="text-muted small text-truncate" style="max-width:280px" title="{{ s.description or '' }}">{{ s.description or '—' }}</td>
+            <td class="text-end">{{ row.product_count }}</td>
+            <td class="col-actions">
+              <div class="table-actions">
+                <button type="button" class="action-icon-btn action-edit btn-edit-sub" title="Edit"
+                        data-id="{{ s.id }}"
+                        data-name="{{ s.name }}"
+                        data-description="{{ s.description or '' }}">
+                  <i class="fa-solid fa-pen"></i>
+                </button>
+                <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
+                        data-action="{{ url_for('categories.delete', category_id=s.id) }}"
+                        data-title="Delete subcategory “{{ s.name }}”?"
+                        data-message="Subcategory will be removed if unused. Choose Yes only if you are sure."
+                        data-effects="Hide / remove this subcategory|Blocked if products still use it">
+                  <i class="fa-solid fa-trash"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% call form_modal('Add Subcategory', 'Save Subcategory') %}
+<form method="post" action="{{ url_for('categories.create_subcategory', category_id=category.id) }}" id="entity-form">
+  {{ form.hidden_tag() }}
+  <div class="row g-3">
+    <div class="col-12">
+      <label class="form-label">Name <span class="text-danger">*</span></label>
+      {{ form.name(class='form-control', placeholder='Subcategory name', id='sub-name') }}
+    </div>
+    <div class="col-12">
+      <label class="form-label">Description <span class="text-muted fw-normal">(optional)</span></label>
+      {{ form.description(class='form-control', rows=2, id='sub-description') }}
+    </div>
+  </div>
+</form>
+{% endcall %}
+
+<div class="modal fade erp-form-modal" id="editCategoryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="edit-cat-title">Edit</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="edit-category-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="return_detail" id="ec-return-detail" value="">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label">Name <span class="text-danger">*</span></label>
+              <input type="text" name="name" id="ec-name" class="form-control" required maxlength="100">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Description <span class="text-muted fw-normal">(optional)</span></label>
+              <textarea name="description" id="ec-description" class="form-control" rows="2"></textarea>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" form="edit-category-form" class="btn btn-success">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+window.OPEN_FORM_MODAL = {{ 'true' if open_modal else 'false' }};
+(function () {
+  function openEdit(btn, title, returnDetail) {
+    const form = document.getElementById('edit-category-form');
+    form.action = `/categories/${btn.dataset.id}/edit`;
+    document.getElementById('edit-cat-title').textContent = title;
+    document.getElementById('ec-name').value = btn.dataset.name || '';
+    document.getElementById('ec-description').value = btn.dataset.description || '';
+    document.getElementById('ec-return-detail').value = returnDetail ? '1' : '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editCategoryModal')).show();
+  }
+  document.addEventListener('click', (e) => {
+    const parentBtn = e.target.closest('.btn-edit-parent');
+    if (parentBtn) {
+      openEdit(parentBtn, 'Edit Category', true);
+      return;
+    }
+    const subBtn = e.target.closest('.btn-edit-sub');
+    if (subBtn) openEdit(subBtn, 'Edit Subcategory', false);
+  });
+})();
+</script>
+{% endblock %}

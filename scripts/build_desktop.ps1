@@ -12,10 +12,22 @@ python -m pip install -q pywebview waitress pyinstaller pillow
 Write-Host "==> Creating app icon..." -ForegroundColor Cyan
 python scripts\make_app_icon.py
 
+$SpecPath = Join-Path $Root "MianBrotherFertilizers.spec"
+if (-not (Test-Path $SpecPath)) {
+    throw "Missing MianBrotherFertilizers.spec - cannot build. Restore it from git before releasing."
+}
+
 Write-Host "==> Building with PyInstaller (this can take several minutes)..." -ForegroundColor Cyan
-python -m PyInstaller --noconfirm --clean MianBrotherFertilizers.spec
+python -m PyInstaller --noconfirm --clean $SpecPath
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller failed with exit code $LASTEXITCODE"
+}
 
 $Dist = Join-Path $Root "dist\MianBrotherFertilizers"
+$BuiltExe = Join-Path $Dist "MianBrotherFertilizers.exe"
+if (-not (Test-Path $BuiltExe)) {
+    throw "Build did not produce $BuiltExe - aborting so an old dist is not re-zipped."
+}
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 
 # Ship MySQL / sync connection settings with the desktop package

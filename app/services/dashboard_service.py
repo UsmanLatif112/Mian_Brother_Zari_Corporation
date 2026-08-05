@@ -97,6 +97,14 @@ def ensure_customer_type_column():
             alters.append(
                 "ALTER TABLE stock_layers ADD COLUMN quantity_received NUMERIC(14, 3)"
             )
+        if "unit_weight" not in layer_cols:
+            alters.append("ALTER TABLE stock_layers ADD COLUMN unit_weight NUMERIC(14, 3)")
+        if "weight_unit" not in layer_cols:
+            alters.append("ALTER TABLE stock_layers ADD COLUMN weight_unit VARCHAR(10)")
+        if "open_weight_remaining" not in layer_cols:
+            alters.append(
+                "ALTER TABLE stock_layers ADD COLUMN open_weight_remaining NUMERIC(14, 3) DEFAULT 0"
+            )
         if alters:
             with db.engine.begin() as conn:
                 for stmt in alters:
@@ -115,6 +123,24 @@ def ensure_customer_type_column():
                         ") WHERE sale_price IS NULL"
                     )
                 )
+                # Copy product packaging onto existing batches once (per-batch weight going forward)
+                if any("unit_weight" in a for a in alters):
+                    conn.execute(
+                        text(
+                            "UPDATE stock_layers SET unit_weight = ("
+                            "SELECT unit_weight FROM products WHERE products.id = stock_layers.product_id"
+                            "), weight_unit = ("
+                            "SELECT weight_unit FROM products WHERE products.id = stock_layers.product_id"
+                            ") WHERE unit_weight IS NULL"
+                        )
+                    )
+                if any("open_weight_remaining" in a for a in alters):
+                    conn.execute(
+                        text(
+                            "UPDATE stock_layers SET open_weight_remaining = 0 "
+                            "WHERE open_weight_remaining IS NULL"
+                        )
+                    )
     except Exception:
         pass
 
@@ -141,6 +167,8 @@ def ensure_customer_type_column():
         ("sale_items", "sale_weight", "NUMERIC(14, 3)"),
         ("sale_items", "weight_unit", "VARCHAR(10)"),
         ("sale_items", "list_unit_price", "NUMERIC(14, 2)"),
+        ("purchase_items", "unit_weight", "NUMERIC(14, 3)"),
+        ("purchase_items", "weight_unit", "VARCHAR(10)"),
     ):
         try:
             insp = inspect(db.engine)
@@ -150,6 +178,109 @@ def ensure_customer_type_column():
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
         except Exception:
             pass
+
+    try:
+        _backfill_purchase_item_weights()
+    except Exception:
+        pass
+
+    try:
+        _migrate_fractional_bags_to_open_weight()
+    except Exception:
+        pass
+
+
+def _backfill_purchase_item_weights():
+    """Copy packaging onto purchase_items from matching stock layers / product."""
+    insp = inspect(db.engine)
+    try:
+        cols = {c["name"] for c in insp.get_columns("purchase_items")}
+    except Exception:
+        return
+    if "unit_weight" not in cols:
+        return
+
+    from app.models import PurchaseItem, StockLayer
+
+    items = PurchaseItem.query.filter(
+        (PurchaseItem.unit_weight.is_(None)) | (PurchaseItem.unit_weight == 0)
+    ).all()
+    changed = False
+    for it in items:
+        layer = (
+            StockLayer.query.filter_by(
+                product_id=it.product_id,
+                source_type="purchase",
+                source_id=it.purchase_id,
+            )
+            .order_by(StockLayer.id.asc())
+            .first()
+        )
+        uw = None
+        wu = None
+        if layer is not None:
+            if layer.unit_weight is not None and Decimal(str(layer.unit_weight)) > 0:
+                uw = Decimal(str(layer.unit_weight))
+                wu = layer.weight_unit
+            elif layer.effective_unit_weight:
+                uw = layer.effective_unit_weight
+                wu = layer.effective_weight_unit
+        if uw is None and it.product and it.product.unit_weight is not None:
+            if Decimal(str(it.product.unit_weight or 0)) > 0:
+                uw = Decimal(str(it.product.unit_weight))
+                wu = it.product.weight_unit
+        if uw is None:
+            continue
+        it.unit_weight = uw
+        it.weight_unit = (wu or "kg") if uw else None
+        changed = True
+    if changed:
+        db.session.commit()
+
+
+def _migrate_fractional_bags_to_open_weight():
+    """Convert legacy fractional quantity_remaining into sealed + open_weight_remaining."""
+    from decimal import ROUND_DOWN
+
+    from app.models import Product, StockLayer
+    from app.services.fifo_service import sync_product_stock
+    from app.utils.weight_utils import split_qty_units_and_weight
+
+    insp = inspect(db.engine)
+    cols = {c["name"] for c in insp.get_columns("stock_layers")}
+    if "open_weight_remaining" not in cols:
+        return
+
+    layers = StockLayer.query.all()
+    touched_products = set()
+    changed = False
+    for layer in layers:
+        qty = Decimal(str(layer.quantity_remaining or 0))
+        open_w = Decimal(str(layer.open_weight_remaining or 0))
+        if open_w > 0:
+            continue
+        if qty <= 0 or qty == qty.to_integral_value(rounding=ROUND_DOWN):
+            continue
+        uw = None
+        if layer.unit_weight is not None and Decimal(str(layer.unit_weight)) > 0:
+            uw = Decimal(str(layer.unit_weight))
+        elif layer.product and layer.product.unit_weight:
+            uw = Decimal(str(layer.product.unit_weight))
+        if not uw or uw <= 0:
+            continue
+        sealed, leftover, _sign = split_qty_units_and_weight(qty, uw)
+        layer.quantity_remaining = sealed
+        layer.open_weight_remaining = leftover
+        touched_products.add(layer.product_id)
+        changed = True
+
+    if not changed:
+        return
+    for pid in touched_products:
+        product = db.session.get(Product, pid)
+        if product:
+            sync_product_stock(product)
+    db.session.commit()
 
 
 def _range_for_filter(period: str, start_date=None, end_date=None):

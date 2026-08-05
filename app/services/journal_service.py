@@ -62,22 +62,10 @@ def _sale_line_particular(it) -> str:
 
 
 def _purchase_line_particular(it) -> str:
-    """Purchase: name / units / weight per unit — e.g. sona / 60 units / 50 kg."""
-    product = getattr(it, "product", None)
-    name = (getattr(product, "name", None) or "Item").strip() or "Item"
-    qty = getattr(it, "quantity", None)
-    unit_weight = getattr(product, "unit_weight", None)
-    weight_unit = (getattr(product, "weight_unit", None) or "").strip()
+    """Purchase: name / qty × unit wt @ rate — e.g. sona / 60 × 50 kg @ 400.00."""
+    from app.services.purchase_service import purchase_line_particular
 
-    parts = [name]
-    if qty is not None and _d(qty) > 0:
-        parts.append(f"{_fmt_qty(qty)} units")
-    if unit_weight is not None and _d(unit_weight) > 0:
-        unit = weight_unit or "kg"
-        parts.append(f"{_fmt_qty(unit_weight)} {unit}")
-    elif weight_unit:
-        parts.append(weight_unit)
-    return _fmt_particular(*parts)
+    return purchase_line_particular(it)
 
 
 def items_particulars(items, *, limit: int = 4, fallback: str = "", kind: str = "sale") -> str:

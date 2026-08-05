@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from app.extensions import db
 from app.models import LedgerEntry, Purchase, PurchaseItem, Vendor
-from app.services.fifo_service import fifo_receive
+from app.services.fifo_service import fifo_receive, next_product_batch_seq
 from app.services.ledger_service import (
     delete_ledger_by_reference,
     post_ledger_entry,
@@ -20,18 +20,72 @@ def _fmt_qty(value) -> str:
     return text or "0"
 
 
+def _line_packaging(it, purchase=None):
+    """
+    Resolve (unit_weight, weight_unit) for a purchase line.
+    Prefer stored item fields, then stock layer from this purchase, then product.
+    """
+    from app.models import StockLayer
+
+    uw = None
+    wu = None
+    raw_uw = getattr(it, "unit_weight", None)
+    if raw_uw is not None and Decimal(str(raw_uw)) > 0:
+        uw = Decimal(str(raw_uw))
+        wu = (getattr(it, "weight_unit", None) or "").strip() or None
+    if uw is None:
+        purchase_id = getattr(it, "purchase_id", None) or (
+            purchase.id if purchase is not None else None
+        )
+        product_id = getattr(it, "product_id", None)
+        if purchase_id and product_id:
+            layer = (
+                StockLayer.query.filter_by(
+                    product_id=product_id,
+                    source_type="purchase",
+                    source_id=int(purchase_id),
+                )
+                .order_by(StockLayer.id.asc())
+                .first()
+            )
+            if layer is not None:
+                eff = layer.effective_unit_weight
+                if eff and eff > 0:
+                    uw = Decimal(str(eff))
+                    wu = layer.effective_weight_unit
+    if uw is None:
+        product = getattr(it, "product", None)
+        if product is not None and product.unit_weight is not None:
+            if Decimal(str(product.unit_weight or 0)) > 0:
+                uw = Decimal(str(product.unit_weight))
+                wu = product.weight_unit
+    if uw and not wu:
+        wu = "kg"
+    return uw, wu
+
+
+def purchase_line_particular(it, purchase=None) -> str:
+    """
+    Vendor/purchase particular: product / qty × unit wt @ rate
+    e.g. Sona / 50 × 75 kg @ 400.00
+    """
+    name = it.product.name if getattr(it, "product", None) else f"Product #{it.product_id}"
+    qty = _fmt_qty(it.quantity)
+    rate = f"{Decimal(str(it.unit_price or 0)):.2f}"
+    uw, wu = _line_packaging(it, purchase)
+    if uw and uw > 0:
+        return f"{name} / {qty} × {_fmt_qty(uw)} {wu} @ {rate}"
+    return f"{name} / {qty} @ {rate}"
+
+
 def purchase_items_summary(purchase) -> str:
-    """Human-readable list of what was purchased (for vendor ledger notes)."""
+    """Human-readable list of what was purchased (for vendor ledger particulars)."""
     if not purchase:
         return ""
-    parts = []
-    for it in purchase.items or []:
-        name = it.product.name if it.product else f"Product #{it.product_id}"
-        qty = _fmt_qty(it.quantity)
-        price = f"{Decimal(str(it.unit_price or 0)):.2f}"
-        parts.append(f"{name} × {qty} @ {price}")
+    parts = [purchase_line_particular(it, purchase) for it in (purchase.items or [])]
+    parts = [p for p in parts if p]
     if parts:
-        return "; ".join(parts)
+        return " | ".join(parts)
     inv = (purchase.invoice_no or "").strip()
     return f"Purchase {inv}" if inv else "Purchase"
 
@@ -83,6 +137,9 @@ def record_purchase(
         purchase.invoice_no = f"PO-{purchase.id:06d}"
 
     subtotal = Decimal("0")
+    # Batch numbers are per product (not per vendor purchase). Track sequences
+    # so multiple lines of the same product in one purchase get #N, #N+1, …
+    batch_seq_by_product = {}
     for line in items:
         product = line["product"]
         qty = Decimal(str(line["quantity"]))
@@ -95,6 +152,24 @@ def record_purchase(
         else:
             batch_sale = Decimal(str(product.sale_price or 0))
         line_total = qty * price
+        raw_uw = line.get("unit_weight")
+        line_uw = None
+        if raw_uw is not None and str(raw_uw).strip() != "":
+            try:
+                parsed = Decimal(str(raw_uw))
+                if parsed > 0:
+                    line_uw = parsed
+            except Exception:
+                line_uw = None
+        line_wu = None
+        if line_uw is not None:
+            line_wu = (str(line.get("weight_unit") or "").strip() or None) or "kg"
+            if not line_wu and product.weight_unit:
+                line_wu = product.weight_unit
+        elif product.unit_weight is not None and Decimal(str(product.unit_weight or 0)) > 0:
+            line_uw = Decimal(str(product.unit_weight))
+            line_wu = product.weight_unit or "kg"
+
         db.session.add(
             PurchaseItem(
                 purchase_id=purchase.id,
@@ -102,8 +177,17 @@ def record_purchase(
                 quantity=qty,
                 unit_price=price,
                 line_total=line_total,
+                unit_weight=line_uw,
+                weight_unit=line_wu,
             )
         )
+        batch_number = None
+        pid = product.id
+        if pid not in batch_seq_by_product:
+            batch_seq_by_product[pid] = next_product_batch_seq(pid)
+        batch_number = str(batch_seq_by_product[pid])
+        batch_seq_by_product[pid] += 1
+
         fifo_receive(
             product,
             qty,
@@ -112,12 +196,14 @@ def record_purchase(
             purchase.id,
             user_id,
             sale_price=batch_sale,
-            batch_number=line.get("batch_number"),
+            batch_number=batch_number,
             expiry_date=line.get("expiry_date"),
             vendor_id=vendor.id,
             invoice_no=purchase.invoice_no,
             notes=notes,
             entry_at=purchase_date,
+            unit_weight=line_uw if line_uw is not None else line.get("unit_weight"),
+            weight_unit=line_wu if line_wu is not None else line.get("weight_unit"),
         )
         subtotal += line_total
 
@@ -475,6 +561,14 @@ def amend_purchase_for_layer(
     item.quantity = new_purchased
     item.unit_price = new_unit_cost
     item.line_total = new_purchased * new_unit_cost
+    if getattr(layer, "unit_weight", None) is not None:
+        try:
+            uw = Decimal(str(layer.unit_weight))
+            if uw > 0:
+                item.unit_weight = uw
+                item.weight_unit = layer.weight_unit or item.weight_unit or "kg"
+        except Exception:
+            pass
     _recompute_purchase_totals(purchase)
 
     # Always refresh ledger notes from line items (what was purchased)

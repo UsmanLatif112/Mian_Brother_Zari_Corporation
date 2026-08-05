@@ -113,6 +113,11 @@ class StockLayer(db.Model):
     quantity_remaining = db.Column(db.Numeric(14, 3), nullable=False)
     unit_cost = db.Column(db.Numeric(14, 2), nullable=False)  # purchase / cost price
     sale_price = db.Column(db.Numeric(14, 2), nullable=True)  # sell price for this batch
+    # Packaging weight for this batch only (e.g. 20 kg bags vs 100 kg bags).
+    unit_weight = db.Column(db.Numeric(14, 3), nullable=True)
+    weight_unit = db.Column(db.String(10), nullable=True)  # kg | g | L | ml
+    # Kg/L left from bags opened for partial (open) sales. Sealed bags stay in quantity_remaining.
+    open_weight_remaining = db.Column(db.Numeric(14, 3), nullable=True, default=Decimal("0"))
     source_type = db.Column(db.String(30), nullable=False)
     source_id = db.Column(db.Integer, nullable=True)
     batch_number = db.Column(db.String(80), nullable=True, index=True)
@@ -126,6 +131,40 @@ class StockLayer(db.Model):
     vendor = db.relationship("Vendor")
 
     @property
+    def effective_unit_weight(self):
+        """Batch weight if set, else product default."""
+        if self.unit_weight is not None and Decimal(str(self.unit_weight)) > 0:
+            return Decimal(str(self.unit_weight))
+        product = self.product
+        if product and product.unit_weight is not None and Decimal(str(product.unit_weight)) > 0:
+            return Decimal(str(product.unit_weight))
+        return None
+
+    @property
+    def effective_weight_unit(self):
+        if self.weight_unit:
+            return self.weight_unit
+        product = self.product
+        return (product.weight_unit if product else None) or "kg"
+
+    @property
+    def open_weight(self):
+        return Decimal(str(self.open_weight_remaining or 0))
+
+    @property
+    def stock_qty_equivalent(self):
+        """Sealed bags + open weight converted to bag units (for product.current_stock)."""
+        sealed = Decimal(str(self.quantity_remaining or 0))
+        open_w = self.open_weight
+        uw = self.effective_unit_weight
+        if uw and uw > 0 and open_w > 0:
+            return sealed + (open_w / uw)
+        return sealed
+
+    def has_stock(self) -> bool:
+        return Decimal(str(self.quantity_remaining or 0)) > 0 or self.open_weight > 0
+
+    @property
     def quantity_purchased(self):
         """Original bought qty for this batch (falls back to remaining for old rows)."""
         recv = self.quantity_received
@@ -136,7 +175,7 @@ class StockLayer(db.Model):
     @property
     def quantity_used(self):
         bought = self.quantity_purchased
-        left = Decimal(str(self.quantity_remaining or 0))
+        left = self.stock_qty_equivalent
         used = bought - left
         return used if used > 0 else Decimal("0")
 

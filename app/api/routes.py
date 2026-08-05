@@ -318,11 +318,12 @@ def upload_photo():
 @api_bp.route("/products/next-codes")
 @login_required
 def products_next_codes():
-    from app.models import StockLayer
+    from app.services.fifo_service import next_product_batch_seq
     from app.utils.product_codes import generate_unique_barcode, generate_unique_sku
 
     try:
-        next_batch = (db.session.query(db.func.max(StockLayer.id)).scalar() or 0) + 1
+        product_id = request.args.get("product_id", type=int)
+        next_batch = next_product_batch_seq(product_id) if product_id else 1
         return jsonify(
             {
                 "ok": True,
@@ -338,7 +339,12 @@ def products_next_codes():
 @api_bp.route("/products/lookup")
 @login_required
 def products_lookup():
-    from app.services.fifo_service import next_fifo_sale_price
+    from app.services.fifo_service import (
+        list_packaging_options,
+        next_fifo_packaging,
+        next_fifo_sale_price,
+        next_product_batch_seq,
+    )
 
     q = (request.args.get("q") or "").strip()
     query = Product.query.filter(Product.is_deleted.is_(False))
@@ -350,10 +356,23 @@ def products_lookup():
     rows = query.order_by(Product.name).limit(20).all()
     results = []
     for p in rows:
-        fifo_price = float(next_fifo_sale_price(p))
+        packagings = list_packaging_options(p)
         from app.utils.weight_utils import format_stock_display
 
         stock_label = format_stock_display(p)
+        if packagings:
+            # Default to first in-stock packaging (oldest FIFO group)
+            first = packagings[0]
+            unit_weight = first.get("unit_weight")
+            weight_unit = first.get("weight_unit") or ""
+            fifo_price = float(first.get("sale_price") or 0)
+        else:
+            fifo_uw, fifo_wu = next_fifo_packaging(p)
+            unit_weight = float(fifo_uw) if fifo_uw is not None else (
+                float(p.unit_weight) if p.unit_weight is not None else None
+            )
+            weight_unit = fifo_wu or p.weight_unit or ""
+            fifo_price = float(next_fifo_sale_price(p, unit_weight=unit_weight))
         results.append(
             {
                 "id": p.id,
@@ -366,16 +385,18 @@ def products_lookup():
                 "subcategory_id": p.subcategory_id or "",
                 "subcategory_name": p.subcategory.name if p.subcategory else "",
                 "sale_price": fifo_price,
-                "list_price": float(p.sale_price or 0),
+                "list_price": fifo_price,
                 "purchase_price": float(p.purchase_price or 0),
                 "minimum_stock": float(p.minimum_stock or 0),
                 "description": p.description or "",
                 "stock": float(p.current_stock or 0),
                 "stock_display": stock_label,
-                "unit_weight": float(p.unit_weight) if p.unit_weight is not None else None,
-                "weight_unit": p.weight_unit or "",
+                "unit_weight": unit_weight,
+                "weight_unit": weight_unit,
+                "packagings": packagings,
                 "photo_url": p.photo_url,
                 "photo": p.photo or "",
+                "next_batch": next_product_batch_seq(p.id),
                 "label": f"{p.name} ({p.sku}) — {fifo_price:.2f} · stock {stock_label}",
             }
         )
@@ -583,6 +604,8 @@ def quick_product():
                     "sale_price": sale_price or product.sale_price,
                     "batch_number": batch_number,
                     "expiry_date": expiry_date,
+                    "unit_weight": data.get("unit_weight"),
+                    "weight_unit": data.get("weight_unit"),
                 }
             ],
             user_id=current_user.id,

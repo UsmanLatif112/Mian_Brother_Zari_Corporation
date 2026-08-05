@@ -1,0 +1,326 @@
+{% extends 'base.html' %}
+{% from 'partials/macros.html' import header_period_filter %}
+{% block title %}Dashboard — {{ app_name }}{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='dash-filter-form',
+  persist_key='dashboard',
+  clear_url=url_for('dashboard.index', period='all'),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onDashPeriodChange()',
+  label='Filter',
+  variant='dashboard'
+) }}
+{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
+  <div>
+    <h1 class="h3 mb-1">Dashboard</h1>
+    <p class="text-muted mb-0">Business overview by selected period</p>
+  </div>
+</div>
+
+{% if current_user.is_on_trial() %}
+<div class="card border-info border-2 shadow-sm mb-4 registration-banner">
+  <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-3">
+    <div>
+      <h2 class="h6 mb-1 text-info-emphasis">
+        <i class="fa-solid fa-hourglass-half me-1"></i> Trial active
+        {% if current_user.trial_days_remaining() is not none %}
+          — {{ current_user.trial_days_remaining() }} day(s) left
+        {% endif %}
+      </h2>
+      <p class="text-muted small mb-0">
+        Full access during trial. After it ends you must enter your registration key for a lifetime license on this PC.
+      </p>
+    </div>
+    <button type="button" class="btn btn-outline-primary" id="open-registration-modal-btn">
+      <i class="fa-solid fa-key me-1"></i> Register early
+    </button>
+  </div>
+</div>
+{% elif not current_user.is_registration_complete() %}
+<div class="card border-warning border-2 shadow-sm mb-4 registration-banner">
+  <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-3">
+    <div>
+      <h2 class="h6 mb-1 text-warning-emphasis">
+        <i class="fa-solid fa-circle-exclamation me-1"></i>
+        {% if current_user.is_trial_expired() %}Trial ended — register this PC{% else %}Computer Not Registered{% endif %}
+      </h2>
+      <p class="text-muted small mb-0">
+        {% if current_user.is_trial_expired() %}
+        Your 7-day trial has ended. Enter the activation key from your administrator to unlock lifetime access.
+        {% else %}
+        Your account is active but this PC is not registered yet. Enter your activation key from the administrator to unlock Sales, Inventory, and other modules.
+        {% endif %}
+      </p>
+    </div>
+    <button type="button" class="btn btn-warning" id="open-registration-modal-btn">
+      <i class="fa-solid fa-key me-1"></i> Register Now
+    </button>
+  </div>
+</div>
+{% endif %}
+
+{% if is_custom_working_date %}
+<div class="alert alert-info py-2 small mb-4 d-flex flex-wrap align-items-center justify-content-between gap-2">
+  <span>
+    <i class="fa-solid fa-calendar-day me-1"></i>
+    Working date is set to <strong>{{ working_date }}</strong>. New sales, purchases, inventory, payments, expenses, and “Today” filters use this date.
+  </span>
+  {% if can_manage_working_date %}
+  <span class="text-muted">Change it from the top bar.</span>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="row g-3 mb-4">
+  {% set kpis = [
+    ('Total Sale', metrics.total_sale, 'fa-sack-dollar', 'success'),
+    ('Total Cost', metrics.total_cost, 'fa-boxes-packing', 'secondary'),
+    ('Gross Profit', metrics.gross_profit, 'fa-chart-line', 'primary'),
+    ('Cash collected (no Prev / Expense)', metrics.cash_without_prev_and_expense, 'fa-wallet', 'info'),
+    ('Previous Balance', metrics.previous_balance, 'fa-scale-balanced', 'secondary'),
+    ('Total Expense', metrics.total_expense, 'fa-receipt', 'danger'),
+    ('Cash + Prev (before Expense)', metrics.cash_without_expense, 'fa-money-bills', 'primary'),
+    ('Cash In Hand (Prev − Expense)', metrics.cash_in_hand, 'fa-money-bill-wave', 'success'),
+    ('Net Profit', metrics.net_profit, 'fa-coins', 'success'),
+    ('Total Credit', metrics.total_credit, 'fa-hand-holding-dollar', 'warning'),
+    ('Total Purchasing', metrics.total_purchasing, 'fa-truck', 'dark'),
+    ('Stock Value', metrics.stock_value, 'fa-warehouse', 'info'),
+  ] %}
+  {% for title, value, icon, color in kpis %}
+  <div class="col-6 col-md-4 col-xl-3">
+    <div class="card stat-card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">{{ title }}</p>
+            <h3 class="mb-0 fw-bold">{{ '%.2f'|format(value|float) }}</h3>
+          </div>
+          <div class="stat-icon bg-{{ color }}-subtle text-{{ color }}"><i class="fa-solid {{ icon }}"></i></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card dash-panel border-0 shadow-sm mb-4">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <strong>Income · Cost · Expense · Gross · Net</strong>
+    <a href="{{ url_for('sales.index') }}" class="redirect-icon-btn" title="Open Sales">
+      <i class="fa-solid fa-up-right-from-square"></i>
+    </a>
+  </div>
+  <div class="card-body pt-3">
+    <canvas id="profitChart" height="100"></canvas>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card dash-panel border-0 shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <strong>Recent Sales</strong>
+        <a href="{{ url_for('sales.index') }}" class="redirect-icon-btn" title="Open Sales">
+          <i class="fa-solid fa-up-right-from-square"></i>
+        </a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Invoice</th><th>Date</th><th class="text-end">Total</th></tr></thead>
+          <tbody>
+            {% for s in metrics.recent_sales %}
+            <tr>
+              <td><a href="{{ url_for('sales.invoice', sale_id=s.id) }}">{{ s.invoice_no }}</a></td>
+              <td>{{ s.sale_date }}</td>
+              <td class="text-end">{{ '%.2f'|format(s.grand_total|float) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-muted small">No sales yet</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card dash-panel border-0 shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <strong>Top Credit Customers</strong>
+        <a href="{{ url_for('customers.index') }}" class="redirect-icon-btn" title="Open Customers">
+          <i class="fa-solid fa-up-right-from-square"></i>
+        </a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Type</th>
+              <th class="text-end">Due</th>
+              <th class="text-end">Days</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in metrics.top_credit %}
+            <tr>
+              <td>
+                <a href="{{ url_for('customers.detail', customer_id=c.id) }}" class="text-decoration-none">{{ c.name }}</a>
+              </td>
+              <td><span class="badge bg-light text-dark border">{{ c.type_label }}</span></td>
+              <td class="text-end">{{ '%.2f'|format(c.balance|float) }}</td>
+              <td class="text-end">
+                {% if c.overdue_days > 0 %}
+                  <span class="text-danger fw-semibold">{{ c.overdue_days }} overdue</span>
+                  <div class="small text-muted">age {{ c.due_days }} / allow {{ c.allowed_days }}</div>
+                {% else %}
+                  <span class="text-success">{{ c.due_days }} / {{ c.allowed_days }}</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted small">No credit balances</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card dash-panel border-0 shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <strong>Recent Expenses</strong>
+        <a href="{{ url_for('expenses.index') }}" class="redirect-icon-btn" title="Open Expenses">
+          <i class="fa-solid fa-up-right-from-square"></i>
+        </a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Expense</th><th>Date</th><th class="text-end">Amount</th></tr></thead>
+          <tbody>
+            {% for e in metrics.recent_expenses %}
+            <tr>
+              <td>{{ e.name }}</td>
+              <td>{{ e.expense_date }}</td>
+              <td class="text-end">{{ '%.2f'|format(e.amount|float) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-muted small">No expenses yet</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card dash-panel border-0 shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <strong>Recent Purchases</strong>
+        <a href="{{ url_for('purchases.index') }}" class="redirect-icon-btn" title="Open Purchases">
+          <i class="fa-solid fa-up-right-from-square"></i>
+        </a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Invoice</th><th>Date</th><th class="text-end">Total</th></tr></thead>
+          <tbody>
+            {% for p in metrics.recent_purchases %}
+            <tr>
+              <td>{{ p.invoice_no }}</td>
+              <td>{{ p.purchase_date }}</td>
+              <td class="text-end">{{ '%.2f'|format(p.grand_total|float) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-muted small">No purchases yet</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card dash-panel border-0 shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <strong>Top Vendors To Pay</strong>
+        <a href="{{ url_for('vendors.index') }}" class="redirect-icon-btn" title="Open Vendors">
+          <i class="fa-solid fa-up-right-from-square"></i>
+        </a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Vendor</th><th>Phone</th><th class="text-end">Payable</th></tr></thead>
+          <tbody>
+            {% for v in metrics.top_vendors %}
+            <tr>
+              <td><a href="{{ url_for('vendors.detail', vendor_id=v.id) }}" class="text-decoration-none">{{ v.name }}</a></td>
+              <td>{{ v.phone or '—' }}</td>
+              <td class="text-end text-danger fw-semibold">{{ '%.2f'|format(v.balance|float) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-muted small">No vendor payables</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card dash-panel border-0 shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <strong>Top Low Stock</strong>
+        <a href="{{ url_for('inventory.index') }}" class="redirect-icon-btn" title="Open Inventory">
+          <i class="fa-solid fa-up-right-from-square"></i>
+        </a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Product</th><th class="text-end">Stock</th><th class="text-end">Min</th></tr></thead>
+          <tbody>
+            {% for p in metrics.low_stock %}
+            <tr>
+              <td>{{ p.name }}</td>
+              <td class="text-end text-danger fw-semibold">{{ p.stock_display }}</td>
+              <td class="text-end">{{ p.minimum_stock|qty_display(p) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-muted small">All stock levels healthy</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onDashPeriodChange() {
+  toggleCustomDates();
+  if (document.getElementById('period-filter')?.value !== 'custom') {
+    document.getElementById('dash-filter-form')?.submit();
+  }
+}
+toggleCustomDates();
+
+window.dashboardCharts = {{ metrics.chart|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

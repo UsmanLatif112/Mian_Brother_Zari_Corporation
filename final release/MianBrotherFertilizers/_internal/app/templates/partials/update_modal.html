@@ -1,0 +1,32 @@
+<div class="modal fade erp-confirm-modal" id="updateModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <div class="erp-confirm-icon erp-confirm-icon--info">
+          <i class="fa-solid fa-cloud-arrow-down"></i>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body pt-2">
+        <h5 class="modal-title mb-1" id="update-modal-title">Check for updates</h5>
+        <p class="text-muted small mb-2" id="update-modal-message">Checking for updates...</p>
+        <div class="alert alert-light border small mb-0 d-none" id="update-modal-notes-wrap">
+          <strong>What's new</strong>
+          <pre class="mb-0 mt-1 small text-muted" id="update-modal-notes" style="white-space: pre-wrap; font-family: inherit;"></pre>
+        </div>
+        <p class="small text-success mb-0 mt-2 d-none" id="update-modal-safe-note">
+          <i class="fa-solid fa-shield-halved me-1"></i>
+          Your database and <code>data/</code> folder will not be changed.
+        </p>
+      </div>
+      <div class="modal-footer border-0 pt-0 flex-wrap gap-2">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="update-modal-later">Later</button>
+        <button type="button" class="btn btn-outline-secondary d-none" id="update-modal-skip">Skip this version</button>
+        <button type="button" class="btn btn-primary d-none" id="update-modal-apply">
+          <i class="fa-solid fa-download me-1"></i>Update now
+        </button>
+        <button type="button" class="btn btn-primary d-none" data-bs-dismiss="modal" id="update-modal-ok">OK</button>
+      </div>
+    </div>
+  </div>
+</div>

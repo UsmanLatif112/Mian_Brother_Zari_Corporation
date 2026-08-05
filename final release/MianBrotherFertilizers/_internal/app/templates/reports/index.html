@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+<h1 class="h3 mb-4">Reports</h1>
+<div class="list-group">
+  <a href="{{ url_for('reports.sales_report') }}" class="list-group-item list-group-item-action">Sales Report</a>
+  <a href="{{ url_for('reports.cashbook') }}" class="list-group-item list-group-item-action">Cash Book</a>
+  <a href="{{ url_for('reports.daily_closing') }}" class="list-group-item list-group-item-action">Daily Closing</a>
+</div>
+{% endblock %}

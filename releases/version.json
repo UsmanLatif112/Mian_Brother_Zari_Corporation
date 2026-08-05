@@ -1,8 +1,8 @@
 {
-  "version": "1.2.8",
-  "build": 128,
-  "released_at": "2026-08-03",
-  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.2.8.zip",
-  "sha256": "1220e3bd53bb9d68626448a69b965ad7ca8070fd7cec0d2822c5e1652d23ab3d",
-  "release_notes": "- Company logo stored in main DB + staff package DB (bytes + file)\n- Super Admin Users list backfills logos; packages rebuild after branding\n- MySQL registry syncs company name / logo\n- Agri Books branding; Sale Full / Open mode\n- Journal / sales / purchases Particulars (name / units / weight)\n- Purchase cash rule; Stock Value on Inventory\n- Customer ledger & sales print improvements; journal print warning"
+  "version": "1.6.0",
+  "build": 160,
+  "released_at": "2026-08-06",
+  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.6.0.zip",
+  "sha256": "d4e5ec9333cc09bc07b50226a4cc700455eb598b7bf47bab8bf3657e83844758",
+  "release_notes": "- Inventory Add Product: each row creates its own purchase + vendor ledger line\n- Vendor ledger Particulars: product / qty \u00d7 unit weight @ rate\n- Sale: choose bag weight when product has multiple sizes (FIFO per weight)\n- Each weight keeps its own stock queue and sale price\n- Unit Wt dropdown UI fixed on sale lines\n- Sealed bags + open kg stock display; unit weight stored per batch\n- Multi-product inventory add from one vendor invoice"
 }

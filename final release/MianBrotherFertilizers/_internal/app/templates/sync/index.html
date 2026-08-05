@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Sync{% endblock %}
+{% block content %}
+<h1 class="h3 mb-2">Synchronization</h1>
+<p class="text-muted mb-4">
+  You are working <strong>offline on SQLite</strong>. When internet is available, push all local data to
+  <strong>{{ sync_target_label }}</strong> (same schema as production).
+</p>
+
+<div class="alert alert-light border mb-4">
+  <div class="d-flex flex-wrap gap-3 align-items-center">
+    <span>Local database: <span class="badge bg-success">SQLite</span></span>
+    <span>Remote: <span class="badge {% if online %}bg-success{% else %}bg-secondary{% endif %}">
+      {% if online %}{{ sync_target_label }} reachable{% else %}{{ sync_target_label }} offline{% endif %}
+    </span></span>
+  </div>
+  <p class="small text-muted mb-0 mt-2">
+    Change target in <code>.env</code>: <code>SYNC_MYSQL_TARGET=production</code> or <code>test</code>.
+    Auto sync is off by default; use the button below when you are ready.
+  </p>
+</div>
+
+<form method="post" action="{{ url_for('sync.run') }}" class="mb-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="btn btn-success btn-lg" {% if not online %}disabled{% endif %}>
+    <i class="fa-solid fa-cloud-arrow-up"></i> Push local data to {{ sync_target_label }}
+  </button>
+  {% if not online %}
+  <p class="small text-warning mt-2 mb-0">Connect to the internet and refresh this page to enable sync.</p>
+  {% endif %}
+</form>
+
+<div class="row g-4">
+  <div class="col-md-6"><div class="card shadow-sm"><div class="card-header">Sync Logs</div>
+  <ul class="list-group list-group-flush">{% for l in logs %}<li class="list-group-item small">{{ l.started_at }} — {{ l.status }} — {{ l.message }}</li>{% endfor %}</ul></div></div>
+  <div class="col-md-6"><div class="card shadow-sm"><div class="card-header">Pending Queue</div>
+  <ul class="list-group list-group-flush">{% for q in queue %}<li class="list-group-item small">{{ q.entity_type }} #{{ q.entity_id }} ({{ q.attempts }} attempts)</li>{% else %}<li class="list-group-item text-muted">Queue empty</li>{% endfor %}</ul></div></div>
+</div>
+{% endblock %}

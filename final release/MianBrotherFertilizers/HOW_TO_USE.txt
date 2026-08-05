@@ -1,0 +1,30 @@
+﻿Mian Brother Fertilizers - Desktop App
+======================================
+
+IMPORTANT (if you downloaded this as a ZIP)
+-------------------------------------------
+Windows often blocks apps from zip downloads. Do ONE of these:
+
+A) Easiest: double-click START_HERE.bat  (recommended)
+B) Or: right-click the ZIP before extracting -> Properties -> check Unblock -> OK,
+   then extract and run MianBrotherFertilizers.exe
+
+Normal use
+----------
+1. Keep this whole folder together (do not move only the .exe).
+2. Prefer START_HERE.bat, or double-click MianBrotherFertilizers.exe.
+3. First login: username admin  /  password admin123
+   (Change the password after first login if you create more users.)
+4. Your data is stored in the "data" folder next to the .exe
+   (database, photos, backups, and data/.env for MySQL sync).
+5. Works fully offline (no internet needed for normal use).
+   Needs Windows 10/11 with Microsoft Edge WebView2
+   (already installed on most PCs).
+   Install if missing:
+   https://developer.microsoft.com/microsoft-edge/webview2/
+6. Sync and Backup: MySQL connection is in data/.env.
+   When internet can reach the MySQL server, status shows Online
+   and you can Push local data to MySQL.
+
+To share with another user: zip this entire "MianBrotherFertilizers" folder
+and send the zip - they unzip and run START_HERE.bat.
