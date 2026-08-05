@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from app.extensions import db
-from app.models.mixins import SoftDeleteMixin, TimestampMixin
+from app.models.mixins import AgencyMixin, SoftDeleteMixin, TimestampMixin
 from app.utils.working_date import default_entry_date
 
 # good | bad | 1_year | 6_month | late_pay
@@ -14,7 +14,7 @@ CUSTOMER_TYPE_CHOICES = [
 ]
 
 
-class Customer(SoftDeleteMixin, TimestampMixin, db.Model):
+class Customer(AgencyMixin, SoftDeleteMixin, TimestampMixin, db.Model):
     __tablename__ = "customers"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -43,7 +43,7 @@ class Customer(SoftDeleteMixin, TimestampMixin, db.Model):
         return f"/static/uploads/{self.photo}"
 
 
-class Vendor(SoftDeleteMixin, TimestampMixin, db.Model):
+class Vendor(AgencyMixin, SoftDeleteMixin, TimestampMixin, db.Model):
     __tablename__ = "vendors"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -63,7 +63,7 @@ class Vendor(SoftDeleteMixin, TimestampMixin, db.Model):
         return f"/static/uploads/{self.photo}"
 
 
-class LedgerEntry(db.Model):
+class LedgerEntry(AgencyMixin, db.Model):
     __tablename__ = "ledger_entries"
 
     id = db.Column(db.Integer, primary_key=True)

@@ -206,6 +206,61 @@ def reverse_cash_by_reference(reference_type, reference_id, notes=None, created_
     return len(rows)
 
 
+def update_cash_by_reference(
+    reference_type,
+    reference_id,
+    *,
+    amount,
+    entry_type,
+    category=None,
+    entry_date=None,
+    notes=None,
+):
+    """
+    Update existing non-void cash rows for a source document and adjust till balance.
+    Reverses old effect(s), then applies the new amount/direction.
+    """
+    rows = CashBookEntry.query.filter_by(
+        reference_type=reference_type, reference_id=reference_id
+    ).all()
+    # Ignore void_* companion rows if any remain linked to the same reference_id
+    live = [r for r in rows if not (r.category or "").startswith("void_")]
+    if not live:
+        return 0
+
+    cash = _get_or_create_balance("cash")
+    new_amount = Decimal(str(amount or 0))
+    new_type = (entry_type or "").strip().lower()
+    if new_type not in ("in", "out"):
+        raise ValueError("Cash entry type must be 'in' or 'out'.")
+
+    for row in live:
+        old_amount = Decimal(str(row.amount or 0))
+        old_type = (row.entry_type or "").strip().lower()
+        if old_type == "in":
+            cash.balance -= old_amount
+        else:
+            cash.balance += old_amount
+
+        if new_type == "in":
+            cash.balance += new_amount
+        else:
+            cash.balance -= new_amount
+
+        row.amount = new_amount
+        row.entry_type = new_type
+        if category is not None:
+            row.category = category
+        if entry_date is not None:
+            row.entry_date = entry_date
+        if notes is not None:
+            row.notes = notes
+        row.balance_after = cash.balance
+
+    cash.updated_at = utcnow()
+    return len(live)
+
+
 def record_bank_movement(amount: Decimal, direction: str):
     bank = _get_or_create_balance("bank")
     amount = Decimal(str(amount))

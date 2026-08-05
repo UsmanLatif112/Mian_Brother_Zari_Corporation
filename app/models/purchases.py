@@ -1,12 +1,12 @@
 from decimal import Decimal
 
 from app.extensions import db
-from app.models.mixins import TimestampMixin
+from app.models.mixins import AgencyMixin, TimestampMixin
 from app.utils.working_date import default_entry_date
 from app.models.sales import PaymentMethod, PaymentStatus
 
 
-class Purchase(TimestampMixin, db.Model):
+class Purchase(AgencyMixin, TimestampMixin, db.Model):
     __tablename__ = "purchases"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -31,7 +31,7 @@ class Purchase(TimestampMixin, db.Model):
     )
 
 
-class PurchaseItem(db.Model):
+class PurchaseItem(AgencyMixin, db.Model):
     __tablename__ = "purchase_items"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -46,7 +46,7 @@ class PurchaseItem(db.Model):
     product = db.relationship("Product")
 
 
-class VendorPayment(db.Model):
+class VendorPayment(AgencyMixin, db.Model):
     __tablename__ = "vendor_payments"
 
     id = db.Column(db.Integer, primary_key=True)

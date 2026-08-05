@@ -76,9 +76,29 @@ def index():
     ui_limit = int(current_app.config.get("BACKUP_UI_LIMIT", 10) or 10)
     backups, backup_total = list_backup_files(limit=ui_limit)
 
+    mysql_sync = None
+    can_sync = current_user.has_permission("sync.view") or can_backup
+    if can_sync:
+        try:
+            from app.services.sync_service import get_sync_status_for_ui
+
+            mysql_sync = get_sync_status_for_ui()
+        except Exception:
+            current_app.logger.exception("MySQL sync status failed")
+            mysql_sync = {
+                "configured": False,
+                "auto_enabled": False,
+                "online": False,
+                "logs": [],
+                "pending_queue": 0,
+                "is_running": False,
+                "can_manual_push": False,
+            }
+
     return render_template(
         "maintenance/index.html",
         can_backup=can_backup,
+        can_sync=can_sync,
         backups=backups,
         backup_total=backup_total,
         backup_ui_limit=ui_limit,
@@ -93,9 +113,132 @@ def index():
         drive_queue_interval_minutes=int(
             current_app.config.get("GOOGLE_DRIVE_QUEUE_INTERVAL_MINUTES", 5) or 5
         ),
+        mysql_sync=mysql_sync,
         is_desktop=_is_desktop(),
         today=date.today().isoformat(),
     )
+
+
+@maintenance_bp.route("/sync/push", methods=["POST"])
+@login_required
+def mysql_push_now():
+    """Manual cloud push from Backup & Cloud page (customers / shop users)."""
+    wants_json = (
+        request.headers.get("X-Requested-With") == "fetch"
+        or request.form.get("ajax") == "1"
+        or request.is_json
+    )
+    # Progress-friendly path: start worker and let UI poll /sync/progress
+    async_start = (
+        request.form.get("async") == "1"
+        or (request.is_json and (request.get_json(silent=True) or {}).get("async"))
+    )
+    can_backup = current_user.has_permission("backup.view")
+    can_sync = current_user.has_permission("sync.view") or can_backup
+    if not can_sync:
+        msg = "You do not have permission to sync to the cloud."
+        if wants_json:
+            return jsonify(ok=False, status="failed", message=msg), 403
+        flash(msg, "danger")
+        return redirect(url_for("maintenance.index"))
+
+    from app.services.sync_service import (
+        friendly_sync_message,
+        run_sync,
+        start_background_sync,
+    )
+
+    if wants_json and async_start:
+        result = start_background_sync(current_user.id)
+        code = 200 if result.get("started") or result.get("status") == "busy" else 400
+        return jsonify(result), code
+
+    try:
+        log = run_sync(current_user.id)
+        # "busy" is not persisted — do not audit as a real push
+        if log.status != "busy" and log.id is not None:
+            log_audit("sync", "database", log.id, log.message)
+        msg = friendly_sync_message(log.message, log.status)
+        ok = log.status == "success"
+        if log.status == "busy":
+            if wants_json:
+                return jsonify(
+                    ok=False,
+                    status="busy",
+                    message=msg
+                    or "Sync already running. Tap Cancel Sync, wait a few seconds, then Sync Now.",
+                )
+            flash(
+                msg
+                or "Sync already running. Tap Cancel Sync, wait a few seconds, then Sync Now.",
+                "warning",
+            )
+            return redirect(url_for("maintenance.index"))
+        if not wants_json:
+            flash(
+                msg or ("Cloud sync completed." if ok else "Cloud sync failed."),
+                "success" if ok else "danger",
+            )
+            return redirect(url_for("maintenance.index"))
+        return jsonify(
+            ok=ok,
+            status=log.status,
+            message=msg or ("Cloud sync completed." if ok else "Cloud sync failed."),
+            records_synced=log.records_synced or 0,
+        )
+    except Exception as exc:
+        current_app.logger.exception("Manual MySQL push failed")
+        msg = friendly_sync_message(str(exc), "failed")
+        if wants_json:
+            return jsonify(ok=False, status="failed", message=msg), 500
+        flash(msg, "danger")
+        return redirect(url_for("maintenance.index"))
+
+
+@maintenance_bp.route("/sync/progress", methods=["GET"])
+@login_required
+def mysql_sync_progress():
+    """Live 0–100% push progress for the Sync Now modal (JSON poll)."""
+    can_backup = current_user.has_permission("backup.view")
+    can_sync = current_user.has_permission("sync.view") or can_backup
+    if not can_sync:
+        return jsonify(ok=False, message="Permission denied"), 403
+    from app.services.sync_service import get_sync_progress, is_sync_lock_held
+
+    p = get_sync_progress()
+    return jsonify(
+        ok=True,
+        progress=p,
+        lock_held=is_sync_lock_held(),
+    )
+
+
+@maintenance_bp.route("/sync/cancel", methods=["POST"])
+@login_required
+def mysql_cancel_sync():
+    """Cancel a live push or clear stuck 'running' history so user can Sync Now."""
+    wants_json = (
+        request.headers.get("X-Requested-With") == "fetch"
+        or request.form.get("ajax") == "1"
+        or request.is_json
+    )
+    can_backup = current_user.has_permission("backup.view")
+    can_sync = current_user.has_permission("sync.view") or can_backup
+    if not can_sync:
+        msg = "You do not have permission to cancel cloud sync."
+        if wants_json:
+            return jsonify(ok=False, message=msg), 403
+        flash(msg, "danger")
+        return redirect(url_for("maintenance.index"))
+
+    from app.services.sync_service import request_cancel_sync
+
+    result = request_cancel_sync()
+    log_audit("sync", "database", 0, result.get("message") or "Sync cancel")
+    if wants_json:
+        return jsonify(result)
+    flash(result.get("message") or "Done.", "success" if result.get("ok") else "warning")
+    return redirect(url_for("maintenance.index"))
 
 
 @maintenance_bp.route("/google/connect", methods=["GET"])

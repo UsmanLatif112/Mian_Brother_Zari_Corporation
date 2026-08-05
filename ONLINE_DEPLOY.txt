@@ -1,0 +1,83 @@
+Agri Books — ONLINE host (MySQL / cPanel)
+=========================================
+
+Two delivery paths (keep both):
+
+  DESKTOP (shops/PCs)
+  -------------------
+  Ship zip: releases/MianBrotherFertilizers-X.Y.Z.zip
+  + version.json on your update host (mbfupdates…).
+  Offline SQLite, Sync → MySQL when online.
+
+  ONLINE (browser / Super Admin + registered shops)
+  -------------------------------------------------
+  Use Git branch **online** on this repo.
+  Clone on cPanel terminal, checkout online, configure MySQL, run Passenger.
+
+Recommended: cPanel Git clone (branch "online")
+-----------------------------------------------
+SSH / Terminal on cPanel (or Git Version Control UI):
+
+  # 1) Clone (once) into your app folder, e.g. agribooks or public_html/agribooks
+  cd ~
+  git clone -b online https://github.com/UsmanLatif112/Mian_Brother_Zari_Corporation.git agribooks
+  cd agribooks
+
+  # Later updates:
+  git fetch origin
+  git checkout online
+  git pull origin online
+
+  # 2) Python virtualenv (cPanel Python App or):
+  #    Create Application: Application root = agribooks
+  #    Application startup file = passenger_wsgi.py
+  #    Application Entry point = application
+
+  # 3) Environment
+  cp .env.online.example .env
+  nano .env   # set SECRET_KEY + MYSQL_DATABASE_URI + keep APP_MODE=online
+
+  # 4) Install deps (use the SAME venv as the cPanel Python App)
+  pip install -r requirements.txt
+
+  # 5) Create tables
+  flask --app run init-db
+  # or: python -c "from app import create_app; from app.extensions import db; app=create_app(); app.app_context().push(); db.create_all()"
+
+  # 6) Super Admin: seed/login, change password
+  # 7) Super Admin creates shop Admins; users log into this site when registered.
+  #    Staff data package (SQLite zip) for desktop machines as needed.
+
+MySQL notes
+-----------
+- APP_MODE=online  → app uses MYSQL_DATABASE_URI as primary DB
+- agency_id = shop Admin user id (multi-tenant filter)
+- Desktop Sync pushes shop data into this same MySQL
+- Super Admin sees all agencies; normal users only their agency
+- Unregistered / trial-only users are blocked when ONLINE_REQUIRE_REGISTERED=true
+
+Passenger
+---------
+File: passenger_wsgi.py
+Callable: application
+Do not run desktop_app.py on the host.
+
+What is NOT on the server
+-------------------------
+- MianBrotherFertilizers.exe / PyInstaller zips (desktop only)
+- Google Drive desktop backup flow (optional; offline package hides most of this)
+- Local shop SQLite files (those live on PCs)
+
+Desktop zip release (unchanged)
+-------------------------------
+Build on your PC with scripts/build_desktop.ps1 (or existing pipeline).
+Host MianBrotherFertilizers-X.Y.Z.zip + version.json for auto-update.
+Do not put huge desktop zips in Git if avoidable; keep on update host only.
+
+Branch purpose
+--------------
+  main / other branches  → development, desktop packaging, local SQLite work
+  online                 → stable host deploy target for cPanel clone
+
+Same app code; online branch is the deploy pointer + this guide.
+Set APP_MODE=online only on the host (.env), never for local desktop runs.

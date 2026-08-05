@@ -82,6 +82,13 @@ def seed_database(*, create_default_admin: bool = False) -> None:
             )
             admin.set_password("admin123")
             db.session.add(admin)
+            db.session.flush()
+            try:
+                from app.services.agency_service import stamp_user_agency
+
+                stamp_user_agency(admin)
+            except Exception:
+                pass
             _seed_reference_data()
             db.session.commit()
         return

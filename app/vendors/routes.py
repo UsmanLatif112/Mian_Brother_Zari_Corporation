@@ -14,7 +14,7 @@ from app.services.vendor_payment_service import (
     delete_vendor_payment,
     record_vendor_payment,
 )
-from app.services.ledger_service import delete_ledger_entry_cascading
+from app.services.ledger_service import delete_ledger_entry_cascading, update_ledger_entry
 from app.utils.decorators import permission_required
 from app.utils.uploads import delete_image, save_image
 from app.utils.working_date import get_working_date
@@ -245,6 +245,29 @@ def delete_payment(payment_id):
         flash("Payment deleted and reversed.", "success")
         return redirect(url_for("vendors.detail", vendor_id=vendor_id))
     except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("vendors.index"))
+
+
+@vendors_bp.route("/ledger/<int:entry_id>/edit", methods=["POST"])
+@login_required
+@permission_required("vendors.*")
+def edit_ledger(entry_id):
+    try:
+        entry = update_ledger_entry(
+            entry_id,
+            entry_date=request.form.get("entry_date"),
+            debit=request.form.get("debit"),
+            credit=request.form.get("credit"),
+            notes=request.form.get("notes"),
+            entry_type=request.form.get("entry_type"),
+        )
+        log_audit("update", "ledger_entry", entry.id)
+        db.session.commit()
+        flash("Ledger entry updated.", "success")
+        return redirect(url_for("vendors.detail", vendor_id=entry.party_id))
+    except (ValueError, TypeError) as exc:
         db.session.rollback()
         flash(str(exc), "danger")
         return redirect(url_for("vendors.index"))

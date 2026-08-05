@@ -138,3 +138,112 @@ def delete_vendor_payment(payment_id, user_id=None):
     enqueue_sync("vendor_payments", payment_id, "delete")
     enqueue_sync("vendors", vendor_id, "update")
     return vendor_id
+
+
+def _normalize_payment_type(raw, *, debit=None, credit=None, fallback="account_settle"):
+    """Map free-text ledger type labels to advance | loan | account_settle."""
+    text = (raw or "").strip().lower().replace("-", " ").replace("_", " ")
+    compact = text.replace(" ", "")
+    if compact == "loan" or text == "loan":
+        return "loan"
+    if compact == "advance" or text == "advance":
+        return "advance"
+    if compact in (
+        "accountsettle",
+        "settle",
+        "settlement",
+        "payment",
+        "vendorpayment",
+    ) or "settle" in text:
+        return "account_settle"
+    if raw and str(raw).strip().lower() in PAYMENT_TYPES:
+        return str(raw).strip().lower()
+    d = Decimal(str(debit or 0))
+    c = Decimal(str(credit or 0))
+    if d > 0 and c <= 0:
+        return "loan"
+    existing = (fallback or "account_settle").strip().lower()
+    return existing if existing in PAYMENT_TYPES else "account_settle"
+
+
+def sync_vendor_payment_from_ledger(entry):
+    """
+    Keep VendorPayment (+ cash for loans) aligned when a linked ledger row is edited.
+    entry.reference_type must be vendor_payment; entry fields are already updated.
+    """
+    from app.services.cashbook_service import update_cash_by_reference
+
+    ref_id = entry.reference_id
+    if not ref_id:
+        return None
+
+    payment = db.session.get(VendorPayment, int(ref_id))
+    if not payment:
+        return None
+
+    debit = Decimal(str(entry.debit or 0))
+    credit = Decimal(str(entry.credit or 0))
+    ptype = _normalize_payment_type(
+        entry.entry_type,
+        debit=debit,
+        credit=credit,
+        fallback=payment.payment_type or "account_settle",
+    )
+
+    if ptype == "loan":
+        amount = debit if debit > 0 else credit
+        entry.debit = amount
+        entry.credit = Decimal("0")
+        entry.entry_type = "loan"
+    else:
+        amount = credit if credit > 0 else debit
+        entry.debit = Decimal("0")
+        entry.credit = amount
+        entry.entry_type = ptype
+
+    if amount <= 0:
+        raise ValueError("Amount must be greater than zero.")
+
+    old_ptype = (payment.payment_type or "").strip().lower()
+    payment.amount = amount
+    payment.payment_date = entry.entry_date
+    payment.notes = entry.notes
+    payment.payment_type = ptype
+
+    vendor = db.session.get(Vendor, payment.vendor_id)
+    name = vendor.name if vendor else "vendor"
+    note = entry.notes
+
+    if ptype == "loan":
+        cash_notes = f"Loan from {name}" + (f" — {note}" if note else "")
+        updated = update_cash_by_reference(
+            "vendor_payment",
+            payment.id,
+            amount=amount,
+            entry_type="in",
+            category="vendor_loan",
+            entry_date=entry.entry_date,
+            notes=cash_notes,
+        )
+        if updated == 0:
+            record_cash_movement(
+                "in",
+                "vendor_loan",
+                amount,
+                "vendor_payment",
+                payment.id,
+                notes=cash_notes,
+                entry_date=entry.entry_date,
+            )
+    elif old_ptype == "loan":
+        # Payment no longer a loan — reverse any loan cash that was on the books
+        reverse_cash_by_reference(
+            "vendor_payment",
+            payment.id,
+            notes=f"Void vendor loan #{payment.id} (edited)",
+        )
+
+    enqueue_sync("vendor_payments", payment.id, "update")
+    if vendor:
+        enqueue_sync("vendors", vendor.id, "update")
+    return payment

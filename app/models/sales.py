@@ -2,7 +2,7 @@ import enum
 from decimal import Decimal
 
 from app.extensions import db
-from app.models.mixins import TimestampMixin, utcnow
+from app.models.mixins import AgencyMixin, TimestampMixin, utcnow
 from app.utils.working_date import default_entry_date
 
 
@@ -18,7 +18,7 @@ class PaymentStatus(str, enum.Enum):
     UNPAID = "unpaid"
 
 
-class Sale(TimestampMixin, db.Model):
+class Sale(AgencyMixin, TimestampMixin, db.Model):
     __tablename__ = "sales"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -41,7 +41,7 @@ class Sale(TimestampMixin, db.Model):
     items = db.relationship("SaleItem", backref="sale", cascade="all, delete-orphan")
 
 
-class SaleItem(db.Model):
+class SaleItem(AgencyMixin, db.Model):
     __tablename__ = "sale_items"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -71,7 +71,7 @@ class SaleItem(db.Model):
         return f"/static/uploads/{self.photo}"
 
 
-class CustomerReceiving(db.Model):
+class CustomerReceiving(AgencyMixin, db.Model):
     __tablename__ = "customer_receivings"
 
     id = db.Column(db.Integer, primary_key=True)

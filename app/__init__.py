@@ -149,6 +149,18 @@ def create_app(config_class=None):
 
     with app.app_context():
         try:
+            from app.services.agency_service import (
+                ensure_agency_id_columns,
+                register_agency_session_listeners,
+            )
+
+            register_agency_session_listeners()
+            ensure_agency_id_columns()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Could not ensure agency_id columns", exc_info=True
+            )
+        try:
             from app.services.dashboard_service import ensure_customer_type_column
 
             ensure_customer_type_column()
@@ -169,22 +181,30 @@ def create_app(config_class=None):
             logging.getLogger(__name__).warning("Could not ensure account tables", exc_info=True)
 
     if app.config.get("SYNC_AUTO_ENABLED") or app.config.get("AUTO_BACKUP_ENABLED", True):
-        try:
-            from app.services.scheduler import init_scheduler
+        # Online hosted mode never needs SQLite backup / push cron
+        from app.services.agency_service import is_online_mode
 
-            init_scheduler(app)
-            if app.config.get("SYNC_AUTO_ENABLED"):
-                logging.getLogger(__name__).info(
-                    "Background MySQL sync enabled (every %s min when online)",
-                    app.config.get("SYNC_INTERVAL_MINUTES", 15),
-                )
-            if app.config.get("AUTO_BACKUP_ENABLED", True):
-                logging.getLogger(__name__).info(
-                    "Background SQLite backup enabled (every %s hour(s))",
-                    app.config.get("AUTO_BACKUP_INTERVAL_HOURS", 1),
-                )
-        except Exception:
-            logging.getLogger(__name__).warning("Scheduler not started", exc_info=True)
+        if is_online_mode():
+            logging.getLogger(__name__).info(
+                "Online mode: background SQLite backup/sync scheduler disabled"
+            )
+        else:
+            try:
+                from app.services.scheduler import init_scheduler
+
+                init_scheduler(app)
+                if app.config.get("SYNC_AUTO_ENABLED"):
+                    logging.getLogger(__name__).info(
+                        "Background MySQL sync enabled (every %s min when online)",
+                        app.config.get("SYNC_INTERVAL_MINUTES", 15),
+                    )
+                if app.config.get("AUTO_BACKUP_ENABLED", True):
+                    logging.getLogger(__name__).info(
+                        "Background SQLite backup enabled (every %s hour(s))",
+                        app.config.get("AUTO_BACKUP_INTERVAL_HOURS", 1),
+                    )
+            except Exception:
+                logging.getLogger(__name__).warning("Scheduler not started", exc_info=True)
     else:
         logging.getLogger(__name__).info(
             "Background jobs off (SYNC_AUTO_ENABLED / AUTO_BACKUP_ENABLED)"
@@ -261,13 +281,42 @@ def register_registration_guard(app):
     from flask import flash, jsonify, redirect, request, url_for
     from flask_login import current_user
 
+    from app.services.agency_service import is_online_mode, online_requires_registered
     from app.utils.decorators import REGISTRATION_EXEMPT_ENDPOINTS
 
     @app.before_request
     def enforce_user_registration():
         if not current_user.is_authenticated:
             return None
+
+        # Online portal: trial-only users cannot use the browser ERP
+        if online_requires_registered():
+            from app.models.user import PRIVILEGED_ROLES
+
+            if current_user.role not in PRIVILEGED_ROLES and not current_user.is_registered:
+                ep = request.endpoint
+                if ep in REGISTRATION_EXEMPT_ENDPOINTS or ep == "static":
+                    return None
+                if ep in ("auth.logout", "auth.login"):
+                    return None
+                wants_json = (
+                    request.is_json
+                    or request.accept_mimetypes.best == "application/json"
+                    or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+                )
+                msg = (
+                    "This online portal is for registered users only. "
+                    "Contact Super Admin for access. Work offline with the desktop app if you are on trial."
+                )
+                if wants_json or (ep and ep.startswith("api.")):
+                    return jsonify({"ok": False, "error": msg, "needs_registration": True}), 403
+                flash(msg, "warning")
+                return redirect(url_for("auth.logout"))
+
         if current_user.is_registration_complete():
+            return None
+        # Desktop / offline trial path still uses is_registration_complete (trial counts)
+        if is_online_mode() and online_requires_registered():
             return None
         ep = request.endpoint
         if not ep or ep in REGISTRATION_EXEMPT_ENDPOINTS:
@@ -319,6 +368,11 @@ def register_context_processors(app):
         from flask import request
         from flask_login import current_user
 
+        from app.services.customer_service import (
+            CUSTOMER_DELETE_DISABLED_HINT,
+            CUSTOMER_DELETE_ENABLED,
+        )
+        from app.services.agency_service import is_online_mode
         from app.services.sync_service import get_sync_target_label, is_local_sqlite
         from app.services.update_service import current_version_info, is_desktop_app, updates_enabled
         from app.utils.search_context import resolve_search_context
@@ -371,6 +425,9 @@ def register_context_processors(app):
             "developer_name": "U. Technologies",
             "developer_url": "https://udottechnologies.com/",
             "offline_sqlite": is_local_sqlite(),
+            "is_online_mode": is_online_mode(),
+            # Desktop/sqlite push+local backup; online portal reads MySQL only
+            "sync_features_enabled": is_local_sqlite() and not is_online_mode(),
             "sync_target_label": get_sync_target_label(),
             "search_scope": search_ctx.scope,
             "search_table_selector": search_ctx.table_selector,
@@ -384,6 +441,8 @@ def register_context_processors(app):
             "app_version": ver["version"],
             "app_build": ver["build"],
             "updates_enabled": updates_enabled(),
+            "customer_delete_enabled": CUSTOMER_DELETE_ENABLED,
+            "customer_delete_disabled_hint": CUSTOMER_DELETE_DISABLED_HINT,
         }
         if current_user.is_authenticated:
             ctx["can_manage_working_date"] = can_manage_working_date(current_user)

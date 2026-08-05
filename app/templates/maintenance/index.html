@@ -4,11 +4,150 @@
 <div class="dashboard-page">
   <h1 class="h3 mb-2">Backup &amp; Cloud</h1>
   <p class="text-muted mb-4">
+    {% if is_online_mode %}
+    Online portal: you are working on <strong>MySQL cloud</strong> data for your shop (agency).
+    Desktop PCs push shop data into this database; registered users review it here.
+    {% else %}
     Your data stays on local SQLite for fast offline work. Backups are saved on this PC and can be
-    copied to <strong>Google Drive</strong> so you can restore after a crash or on a new computer.
+    copied to <strong>Google Drive</strong>. Shop data is also <strong>auto-pushed to MySQL cloud</strong>
+    every few minutes when internet is available (does not replace Drive backups).
+    {% endif %}
   </p>
 
   <div class="row g-4">
+    {% if can_sync and mysql_sync and sync_features_enabled %}
+    <div class="col-12">
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <strong><i class="fa-solid fa-cloud-arrow-up me-1 text-success"></i> MySQL Cloud Sync</strong>
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            {% if mysql_sync.auto_enabled %}
+              <span class="badge bg-success">Auto every {{ mysql_sync.interval_minutes }} min</span>
+            {% else %}
+              <span class="badge bg-secondary">Auto off</span>
+            {% endif %}
+            {% if not mysql_sync.configured %}
+              <span class="badge bg-warning text-dark">Not configured</span>
+            {% elif mysql_sync.online %}
+              <span class="badge bg-success">{{ mysql_sync.target_label }} online</span>
+            {% else %}
+              <span class="badge bg-secondary">{{ mysql_sync.target_label }} offline</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">
+            Local SQLite is always the working database on this PC.
+            When connected, the app pushes shop data to <strong>{{ mysql_sync.target_label }}</strong>
+            automatically every few minutes. You can also push anytime with <strong>Sync Now</strong>.
+            Offline changes stay on this PC until cloud is available.
+            Google Drive backup continues separately as before.
+          </p>
+          {% if not mysql_sync.configured %}
+            <div class="alert alert-warning py-2 small mb-0">
+              Set <code>MYSQL_TEST_DATABASE_URI</code> and <code>SYNC_MYSQL_TARGET=test</code> in <code>.env</code>
+              to enable cloud push. Registry credentials stay on production MySQL and are not used for shop data.
+            </div>
+          {% else %}
+            <form method="post" action="{{ url_for('maintenance.mysql_push_now') }}"
+                  id="mysql-sync-form" class="mb-3 d-flex flex-wrap gap-2 align-items-center"
+                  data-progress-url="{{ url_for('maintenance.mysql_sync_progress') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="ajax" value="1">
+              <input type="hidden" name="async" value="1">
+              <button type="submit" class="btn btn-success" id="btn-mysql-sync-now"
+                      {% if not mysql_sync.online or not mysql_sync.can_manual_push %}disabled title="Cloud is offline or sync is not ready"{% endif %}>
+                <i class="fa-solid fa-cloud-arrow-up me-1"></i> Sync Now
+              </button>
+              <button type="button" class="btn btn-outline-danger" id="btn-mysql-sync-cancel"
+                      data-url="{{ url_for('maintenance.mysql_cancel_sync') }}"
+                      {% if not mysql_sync.is_running %}title="Stops a running or stuck push so you can Sync Now"{% endif %}>
+                <i class="fa-solid fa-ban me-1"></i> Cancel Sync
+              </button>
+              {% if mysql_sync.is_running %}
+              <span class="badge bg-warning text-dark" id="mysql-sync-running-badge">
+                Sync in progress…
+              </span>
+              {% endif %}
+              {% if not mysql_sync.online %}
+              <span class="small text-muted">Connect to the internet to enable Sync Now.</span>
+              {% endif %}
+            </form>
+            {% if mysql_sync.is_running %}
+            <div class="alert alert-warning py-2 small mb-3" id="mysql-sync-running-alert">
+              A push is still running (or stuck). Wait for it to finish, or tap
+              <strong>Cancel Sync</strong> then <strong>Sync Now</strong>.
+            </div>
+            {% endif %}
+            {% if mysql_sync.pending_queue %}
+            <div class="alert alert-info py-2 small mb-3">
+              <strong>{{ mysql_sync.pending_queue }}</strong> queued change{{ 's' if mysql_sync.pending_queue != 1 else '' }}
+              waiting. They push automatically when MySQL is reachable, or use Sync Now when online.
+            </div>
+            {% endif %}
+            {% if not mysql_sync.online %}
+            <div class="alert alert-warning py-2 small mb-3">
+              Cloud MySQL is offline. Work continues on this PC. Data will auto-push when internet is available.
+            </div>
+            {% endif %}
+            {% if mysql_sync.last_at %}
+            <p class="small mb-3">
+              Last push:
+              <strong class="{% if mysql_sync.last_status == 'success' %}text-success{% elif mysql_sync.last_status == 'failed' %}text-danger{% endif %}">
+                {{ mysql_sync.last_status or '—' }}
+              </strong>
+              — {{ mysql_sync.last_message or '' }}
+              <span class="text-muted">({{ mysql_sync.last_at }})</span>
+            </p>
+            {% else %}
+            <p class="small text-muted mb-3">No push history yet. Use Sync Now or wait for the next auto cycle when online.</p>
+            {% endif %}
+
+            <div class="table-responsive">
+              <table class="table table-sm mb-0">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Status</th>
+                    <th>Records</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for l in mysql_sync.logs %}
+                  <tr>
+                    <td class="small text-nowrap">{{ l.completed_at or l.started_at }}</td>
+                    <td class="small">
+                      {% if l.status == 'success' %}
+                        <span class="badge bg-success">passed</span>
+                      {% elif l.status == 'failed' %}
+                        <span class="badge bg-danger">failed</span>
+                      {% else %}
+                        <span class="badge bg-secondary">{{ l.status }}</span>
+                      {% endif %}
+                    </td>
+                    <td class="small">{{ l.records_synced or 0 }}</td>
+                    <td class="small text-muted">{{ l.message or '—' }}</td>
+                  </tr>
+                  {% else %}
+                  <tr>
+                    <td colspan="4" class="small text-muted">No push records yet (last {{ mysql_sync.log_keep }} kept).</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <p class="small text-muted mb-0 mt-2">
+              Showing last {{ mysql_sync.log_keep }} push{{ 'es' if mysql_sync.log_keep != 1 else '' }}.
+              Alerts appear as toasts like Drive backup.
+            </p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if sync_features_enabled %}
     <div class="col-lg-6">
       <div class="card border-0 shadow-sm">
         <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -229,6 +368,51 @@
         </div>
       </div>
     </div>
+    {% endif %}{# sync_features_enabled: Drive + local backup #}
+  </div>
+</div>
+
+{# Blocks UI until MySQL push finishes — not dismissible #}
+<div class="modal fade" id="mysqlSyncBusyModal" tabindex="-1"
+     data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true"
+     aria-labelledby="mysqlSyncBusyTitle">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-0 shadow mysql-sync-busy-card">
+      <div class="modal-body text-center py-5 px-4">
+        <div class="spinner-border text-success mb-3" style="width: 3rem; height: 3rem;" role="status"
+             id="mysql-sync-busy-spinner">
+          <span class="visually-hidden">Syncing…</span>
+        </div>
+        <div class="d-none mb-3" id="mysql-sync-busy-icon-wrap">
+          <div class="erp-confirm-icon erp-confirm-icon--success d-inline-flex" id="mysql-sync-busy-icon-box">
+            <i class="fa-solid fa-circle-check" id="mysql-sync-busy-icon-fa"></i>
+          </div>
+        </div>
+        <h5 class="mb-2" id="mysqlSyncBusyTitle">Syncing to cloud…</h5>
+        <p class="small text-muted mb-0" id="mysql-sync-busy-lead">
+          Please wait on this page. Do not open other menus until sync finishes.
+        </p>
+        <div class="mysql-sync-progress-wrap mt-4 mb-2" id="mysql-sync-progress-wrap">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="small text-muted" id="mysql-sync-progress-label">Starting…</span>
+            <span class="small fw-semibold text-success" id="mysql-sync-progress-pct">0%</span>
+          </div>
+          <div class="progress mysql-sync-progress" role="progressbar"
+               aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+               id="mysql-sync-progress-bar-wrap">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                 id="mysql-sync-progress-bar" style="width: 0%"></div>
+          </div>
+          <p class="small text-muted mt-2 mb-0" id="mysql-sync-progress-detail"></p>
+        </div>
+        <p class="small text-muted mt-3 mb-0" id="mysql-sync-busy-hint">
+          Large data may take a minute or two.
+        </p>
+        <div class="d-none mt-4" id="mysql-sync-busy-actions">
+          <button type="button" class="btn btn-success px-4" id="mysql-sync-busy-ok">OK</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}
@@ -237,6 +421,413 @@
 <script>
 (function () {
   const csrf = document.querySelector('meta[name="csrf-token"]')?.content || window.CSRF_TOKEN || '';
+
+  /* —— MySQL Sync Now (blocking modal + navigation lock) —— */
+  (function mysqlSyncUi() {
+    const form = document.getElementById('mysql-sync-form');
+    const btn = document.getElementById('btn-mysql-sync-now');
+    const modalEl = document.getElementById('mysqlSyncBusyModal');
+    if (!form || !modalEl) return;
+
+    let syncLock = false;
+    let modal = null;
+    try {
+      modal = bootstrap.Modal.getOrCreateInstance(modalEl, {
+        backdrop: 'static',
+        keyboard: false,
+      });
+    } catch (_) {
+      modal = null;
+    }
+
+    const titleEl = () => document.getElementById('mysqlSyncBusyTitle');
+    const leadEl = () => document.getElementById('mysql-sync-busy-lead');
+    const hintEl = () => document.getElementById('mysql-sync-busy-hint');
+    const spinnerEl = () => document.getElementById('mysql-sync-busy-spinner');
+    const iconWrap = () => document.getElementById('mysql-sync-busy-icon-wrap');
+    const iconBox = () => document.getElementById('mysql-sync-busy-icon-box');
+    const iconFa = () => document.getElementById('mysql-sync-busy-icon-fa');
+    const actionsEl = () => document.getElementById('mysql-sync-busy-actions');
+    const okBtn = document.getElementById('mysql-sync-busy-ok');
+    const progressWrap = () => document.getElementById('mysql-sync-progress-wrap');
+    const progressBar = () => document.getElementById('mysql-sync-progress-bar');
+    const progressPct = () => document.getElementById('mysql-sync-progress-pct');
+    const progressLabel = () => document.getElementById('mysql-sync-progress-label');
+    const progressDetail = () => document.getElementById('mysql-sync-progress-detail');
+    const progressBarWrap = () => document.getElementById('mysql-sync-progress-bar-wrap');
+    const progressUrl = form.dataset.progressUrl || '';
+    let pollTimer = null;
+
+    function setProgressUI(percent, label, detail) {
+      const pct = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+      const bar = progressBar();
+      if (bar) {
+        bar.style.width = pct + '%';
+        bar.classList.toggle('progress-bar-animated', pct < 100);
+        bar.classList.toggle('progress-bar-striped', pct < 100);
+      }
+      const wrap = progressBarWrap();
+      if (wrap) wrap.setAttribute('aria-valuenow', String(pct));
+      if (progressPct()) progressPct().textContent = pct + '%';
+      if (label != null && progressLabel()) progressLabel().textContent = label;
+      if (detail != null && progressDetail()) progressDetail().textContent = detail || '';
+    }
+
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    function setSyncLock(on) {
+      syncLock = on;
+      document.body.classList.toggle('mysql-sync-busy', on);
+      document.documentElement.classList.toggle('mysql-sync-busy', on);
+      if (btn && on) btn.disabled = true;
+      if (!on) stopPolling();
+    }
+
+    function showBusyState(opts) {
+      const o = opts || {};
+      const spinner = spinnerEl();
+      const wrap = iconWrap();
+      const actions = actionsEl();
+      const pWrap = progressWrap();
+      if (spinner) spinner.classList.toggle('d-none', Boolean(o.done));
+      if (wrap) wrap.classList.toggle('d-none', !o.done);
+      if (actions) actions.classList.toggle('d-none', !o.done);
+      if (pWrap) pWrap.classList.toggle('d-none', Boolean(o.hideProgress));
+      if (o.done) {
+        const box = iconBox();
+        const fa = iconFa();
+        if (box) {
+          box.className =
+            'erp-confirm-icon d-inline-flex ' +
+            (o.ok
+              ? 'erp-confirm-icon--success'
+              : o.busy
+                ? 'erp-confirm-icon--warning'
+                : 'erp-confirm-icon--danger');
+        }
+        if (fa) {
+          fa.className = o.ok
+            ? 'fa-solid fa-circle-check'
+            : o.busy
+              ? 'fa-solid fa-hourglass-half'
+              : 'fa-solid fa-circle-xmark';
+        }
+        if (o.ok) setProgressUI(100, 'Complete', o.detail || '');
+        else if (o.busy) setProgressUI(o.percent || 0, 'Busy', o.detail || '');
+        else setProgressUI(o.percent != null ? o.percent : 0, 'Stopped', o.detail || '');
+      }
+      if (titleEl()) titleEl().textContent = o.title || 'Syncing to cloud…';
+      if (leadEl()) {
+        leadEl().textContent =
+          o.lead ||
+          'Please wait on this page. Do not open other menus until sync finishes.';
+      }
+      if (hintEl()) {
+        hintEl().textContent = o.hint || 'Progress updates as tables upload.';
+      }
+      if (!o.done && o.percent != null) {
+        setProgressUI(o.percent, o.progressLabel || o.lead || 'Uploading…', o.detail || '');
+      }
+    }
+
+    function finishAndReload(autoMs) {
+      setSyncLock(false);
+      const wait = typeof autoMs === 'number' ? autoMs : 0;
+      if (wait > 0) {
+        setTimeout(() => window.location.reload(), wait);
+      } else {
+        window.location.reload();
+      }
+    }
+
+    okBtn?.addEventListener('click', () => finishAndReload(0));
+
+    function applyProgressPayload(p) {
+      if (!p) return;
+      const status = p.status || 'running';
+      const percent = p.percent != null ? p.percent : 0;
+      const msg = p.message || 'Uploading…';
+      let detail = p.detail || '';
+      if (p.table && !detail) detail = p.table;
+      if (p.records_synced != null && p.total_records) {
+        detail = (detail ? detail + ' · ' : '') + p.records_synced + ' / ' + p.total_records + ' records';
+      } else if (p.records_synced) {
+        detail = (detail ? detail + ' · ' : '') + p.records_synced + ' records';
+      }
+      setProgressUI(percent, msg, detail);
+      if (leadEl() && status === 'running') leadEl().textContent = msg;
+
+      if (status === 'success') {
+        stopPolling();
+        showBusyState({
+          done: true,
+          ok: true,
+          title: 'Sync finished',
+          lead: msg || 'Cloud sync completed.',
+          hint: 'Your shop data was pushed to the cloud.',
+          detail: detail,
+        });
+        window.showErpToast?.('success', msg || 'Cloud sync completed.');
+        finishAndReload(1200);
+      } else if (status === 'failed' || status === 'cancelled') {
+        stopPolling();
+        showBusyState({
+          done: true,
+          ok: false,
+          percent: percent,
+          title: status === 'cancelled' ? 'Sync cancelled' : 'Sync failed',
+          lead: msg || 'Cloud sync failed.',
+          hint: 'Your data is safe on this PC. You can try again.',
+          detail: detail,
+        });
+      }
+    }
+
+    async function pollProgressOnce() {
+      if (!progressUrl) return null;
+      try {
+        const res = await fetch(progressUrl, {
+          credentials: 'same-origin',
+          headers: { 'X-Requested-With': 'fetch' },
+        });
+        const data = await res.json().catch(() => ({}));
+        return data.progress || null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function startPolling() {
+      stopPolling();
+      pollTimer = setInterval(async () => {
+        if (!syncLock) {
+          stopPolling();
+          return;
+        }
+        const p = await pollProgressOnce();
+        if (p) applyProgressPayload(p);
+      }, 450);
+    }
+
+    function blockNav(e) {
+      if (!syncLock) return;
+      const t = e.target;
+      if (!t || !t.closest) return;
+      // Allow Cancel Sync and OK on busy modal
+      if (t.closest('#btn-mysql-sync-cancel, #mysql-sync-busy-ok, #globalConfirmModal')) return;
+      const nav = t.closest('a[href], button[type="submit"], form, .nav-link, [data-bs-dismiss]');
+      if (nav && !modalEl.contains(nav) && !document.getElementById('globalConfirmModal')?.contains(nav) && nav !== btn) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      }
+    }
+
+    document.addEventListener('click', blockNav, true);
+    document.addEventListener('submit', (e) => {
+      if (!syncLock) return;
+      if (e.target === form) return;
+      if (e.target && e.target.id === 'global-confirm-form') return;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+
+    window.addEventListener('beforeunload', (e) => {
+      if (!syncLock) return;
+      e.preventDefault();
+      e.returnValue = 'Cloud sync is still running. Leave only if you must.';
+      return e.returnValue;
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (syncLock) return;
+      if (btn?.disabled) return;
+
+      setSyncLock(true);
+      showBusyState({
+        title: 'Syncing to cloud…',
+        lead: 'Please wait on this page. Do not open other menus until sync finishes.',
+        hint: 'Progress updates as tables upload.',
+        done: false,
+        percent: 1,
+        progressLabel: 'Starting…',
+        detail: '',
+        hideProgress: false,
+      });
+      setProgressUI(1, 'Starting…', '');
+      try {
+        modal?.show();
+      } catch (_) {}
+
+      try {
+        const fd = new FormData(form);
+        fd.set('async', '1');
+        fd.set('ajax', '1');
+        const res = await fetch(form.action, {
+          method: 'POST',
+          headers: {
+            'X-Requested-With': 'fetch',
+            'X-CSRFToken': csrf,
+          },
+          body: fd,
+          credentials: 'same-origin',
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (data.status === 'busy' || (!data.started && data.status === 'busy')) {
+          showBusyState({
+            done: true,
+            busy: true,
+            ok: false,
+            title: 'Another sync is running',
+            lead: data.message || 'A push is already in progress.',
+            hint: 'Use Cancel Sync, wait a few seconds, then try Sync Now again.',
+            hideProgress: true,
+          });
+          setSyncLock(false);
+          return;
+        }
+
+        if (!data.started && data.status === 'failed') {
+          showBusyState({
+            done: true,
+            ok: false,
+            title: 'Sync failed',
+            lead: data.message || 'Could not start cloud sync.',
+            hint: 'Your data is safe on this PC.',
+            hideProgress: true,
+          });
+          setSyncLock(false);
+          return;
+        }
+
+        if (data.progress) applyProgressPayload(data.progress);
+        startPolling();
+        // immediate first poll
+        const p = await pollProgressOnce();
+        if (p) applyProgressPayload(p);
+      } catch (err) {
+        stopPolling();
+        showBusyState({
+          done: true,
+          ok: false,
+          title: 'Sync failed',
+          lead: (err && err.message) || 'Cloud sync failed. Please try again.',
+          hint: 'Your data is safe on this PC.',
+          hideProgress: true,
+        });
+        setSyncLock(false);
+        window.showErpToast?.('danger', (err && err.message) || 'Cloud sync failed. Please try again.');
+      }
+    });
+
+    async function runCancelSync() {
+      const cancelBtn = document.getElementById('btn-mysql-sync-cancel');
+      if (!cancelBtn || cancelBtn.disabled) return;
+
+      cancelBtn.disabled = true;
+      const prev = cancelBtn.innerHTML;
+      cancelBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Cancelling…';
+
+      setSyncLock(true);
+      showBusyState({
+        title: 'Cancelling sync…',
+        lead: 'Stopping the current cloud push. Please wait on this page.',
+        hint: 'This usually takes a few seconds.',
+        done: false,
+      });
+      try {
+        modal?.show();
+      } catch (_) {}
+
+      try {
+        const fd = new FormData();
+        fd.append('csrf_token', csrf);
+        fd.append('ajax', '1');
+        const res = await fetch(cancelBtn.dataset.url, {
+          method: 'POST',
+          headers: {
+            'X-Requested-With': 'fetch',
+            'X-CSRFToken': csrf,
+          },
+          body: fd,
+          credentials: 'same-origin',
+        });
+        const data = await res.json().catch(() => ({}));
+        const msg = data.message || 'Sync cancel completed.';
+
+        if (data.lock_held) {
+          showBusyState({
+            title: 'Stopping sync…',
+            lead: msg,
+            hint: 'Finishing the current step, then you can Sync Now.',
+            done: false,
+          });
+          await new Promise((r) => setTimeout(r, 2500));
+        }
+
+        showBusyState({
+          done: true,
+          ok: Boolean(data.ok !== false),
+          title: data.ok === false ? 'Could not cancel' : 'Sync cancelled',
+          lead: msg,
+          hint: 'You can use Sync Now when you are ready.',
+        });
+        window.showErpToast?.(
+          data.ok === false ? 'danger' : 'success',
+          msg
+        );
+      } catch (err) {
+        const msg = (err && err.message) || 'Could not cancel sync.';
+        showBusyState({
+          done: true,
+          ok: false,
+          title: 'Could not cancel',
+          lead: msg,
+          hint: 'Try again, or restart the app if a push is stuck.',
+        });
+        window.showErpToast?.('danger', msg);
+        cancelBtn.disabled = false;
+        cancelBtn.innerHTML = prev;
+      }
+    }
+
+    const cancelBtn = document.getElementById('btn-mysql-sync-cancel');
+    cancelBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (cancelBtn.disabled) return;
+
+      if (typeof window.showErpConfirm === 'function') {
+        window.showErpConfirm({
+          title: 'Cancel cloud sync?',
+          message:
+            'Stop the current push so you can run Sync Now again. Your local data stays on this PC.',
+          effects: [
+            'Stops the cloud push that is running or stuck',
+            'Does not delete sales, inventory, or other shop data',
+            'You can Sync Now again after cancel finishes',
+          ],
+          confirmLabel: 'Yes, cancel sync',
+          cancelLabel: 'No, keep waiting',
+          confirmClass: 'btn-danger',
+          icon: 'fa-solid fa-ban',
+          iconClass: 'erp-confirm-icon--danger',
+          onConfirm: () => {
+            runCancelSync();
+          },
+        });
+        return;
+      }
+      // Fallback if confirm helper missing
+      runCancelSync();
+    });
+  })();
 
   function showErr(msg) {
     const errEl = document.getElementById('backup-error');

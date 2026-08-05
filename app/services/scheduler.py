@@ -47,6 +47,20 @@ def init_scheduler(app):
                             log.status,
                             (log.message or "")[:200],
                         )
+                    else:
+                        # Offline: still ensure queue exists as local bookkeeping
+                        try:
+                            from app.models import SyncQueue
+                            from app.extensions import db
+
+                            pending = SyncQueue.query.filter_by(is_resolved=False).count()
+                            if pending:
+                                logger.debug(
+                                    "Auto sync deferred offline with %s queued change(s)",
+                                    pending,
+                                )
+                        except Exception:
+                            pass
                 except Exception:
                     logger.exception("Auto sync job crashed")
 

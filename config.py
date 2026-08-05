@@ -48,9 +48,15 @@ class Config:
     BACKUP_DIR = os.environ.get("BACKUP_DIR") or os.path.join(basedir, "backups")
     SYNC_AUTO_ENABLED = os.environ.get("SYNC_AUTO_ENABLED", "false").lower() == "true"
     SYNC_INTERVAL_MINUTES = int(os.environ.get("SYNC_INTERVAL_MINUTES", "15"))
+    # Keep only N newest push records in sync_logs table (UI + table retention)
+    SYNC_LOG_KEEP = int(os.environ.get("SYNC_LOG_KEEP", "5"))
     # Short MySQL probe — keeps Sync page + cron from hanging when offline
     SYNC_MYSQL_CONNECT_TIMEOUT = int(os.environ.get("SYNC_MYSQL_CONNECT_TIMEOUT", "2"))
     SYNC_MYSQL_CACHE_SECONDS = int(os.environ.get("SYNC_MYSQL_CACHE_SECONDS", "45"))
+    # Multi-row UPSERT batch size (higher = fewer round-trips, faster push)
+    SYNC_PUSH_BATCH_SIZE = int(os.environ.get("SYNC_PUSH_BATCH_SIZE", "200"))
+    SYNC_MYSQL_READ_TIMEOUT = int(os.environ.get("SYNC_MYSQL_READ_TIMEOUT", "120"))
+    SYNC_MYSQL_WRITE_TIMEOUT = int(os.environ.get("SYNC_MYSQL_WRITE_TIMEOUT", "120"))
     # Separate cron: SQLite auto-backup (all files kept on disk; UI shows last N)
     AUTO_BACKUP_ENABLED = os.environ.get("AUTO_BACKUP_ENABLED", "true").lower() == "true"
     AUTO_BACKUP_INTERVAL_HOURS = int(os.environ.get("AUTO_BACKUP_INTERVAL_HOURS", "1"))
@@ -67,8 +73,14 @@ class Config:
     DATABASE_MODE = os.environ.get("DATABASE_MODE", "sqlite")
     MYSQL_HOST = os.environ.get("MYSQL_HOST", "127.0.0.1")
     OFFLINE_FIRST = os.environ.get("OFFLINE_FIRST", "true").lower() == "true"
-    SYNC_MYSQL_TARGET = os.environ.get("SYNC_MYSQL_TARGET", "production")
+    # Shop data push target: production | test (registry always MYSQL_DATABASE_URI)
+    SYNC_MYSQL_TARGET = os.environ.get("SYNC_MYSQL_TARGET", "test")
     UPDATE_MANIFEST_URL = os.environ.get("UPDATE_MANIFEST_URL", "")
+    # desktop | online — online = hosted browser ERP on MySQL (agency multi-tenant)
+    APP_MODE = (os.environ.get("APP_MODE") or "desktop").strip().lower()
+    ONLINE_REQUIRE_REGISTERED = (
+        os.environ.get("ONLINE_REQUIRE_REGISTERED", "true").lower() == "true"
+    )
 
 
 class DevelopmentConfig(Config):
@@ -103,6 +115,14 @@ def apply_database_uri(app) -> None:
     if os.environ.get("DESKTOP_APP", "").lower() in ("1", "true", "yes"):
         app.config["SQLALCHEMY_DATABASE_URI"] = resolve_sqlalchemy_uri()
         return
+    mode = (os.environ.get("APP_MODE") or "").strip().lower()
+    if mode in ("online", "host", "cloud", "web"):
+        uri = os.environ.get("MYSQL_DATABASE_URI") or os.environ.get(
+            "MYSQL_TEST_DATABASE_URI"
+        )
+        if uri:
+            app.config["SQLALCHEMY_DATABASE_URI"] = uri
+            return
     if os.environ.get("FLASK_ENV") == "production":
         app.config["SQLALCHEMY_DATABASE_URI"] = (
             os.environ.get("MYSQL_DATABASE_URI") or resolve_sqlalchemy_uri()

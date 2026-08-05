@@ -1,8 +1,8 @@
 from app.extensions import db
-from app.models.mixins import utcnow
+from app.models.mixins import AgencyMixin, utcnow
 
 
-class SyncLog(db.Model):
+class SyncLog(AgencyMixin, db.Model):
     __tablename__ = "sync_logs"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -14,7 +14,7 @@ class SyncLog(db.Model):
     completed_at = db.Column(db.DateTime, nullable=True)
 
 
-class SyncQueue(db.Model):
+class SyncQueue(AgencyMixin, db.Model):
     __tablename__ = "sync_queue"
 
     id = db.Column(db.Integer, primary_key=True)

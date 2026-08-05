@@ -93,7 +93,19 @@ def update_ledger_entry(entry_id, entry_date=None, debit=None, credit=None, note
     if notes is not None:
         entry.notes = (notes or "").strip() or None
     if entry_type is not None:
-        entry.entry_type = entry_type
+        entry.entry_type = (entry_type or "").strip() or entry.entry_type
+
+    # Cascade to source payment document so receiving / cash stay in sync
+    ref_type = (entry.reference_type or "").strip().lower()
+    if ref_type == "customer_receiving" and entry.reference_id:
+        from app.services.customer_payment_service import sync_customer_receiving_from_ledger
+
+        sync_customer_receiving_from_ledger(entry)
+    elif ref_type == "vendor_payment" and entry.reference_id:
+        from app.services.vendor_payment_service import sync_vendor_payment_from_ledger
+
+        sync_vendor_payment_from_ledger(entry)
+
     rebuild_party_balances(entry.party_type, entry.party_id)
     return entry
 

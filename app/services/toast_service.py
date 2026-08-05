@@ -134,3 +134,26 @@ def notify_queue_failed(count: int) -> None:
         "warning",
         source="drive",
     )
+
+
+def notify_mysql_sync_success(message: str) -> None:
+    push_toast(message or "MySQL cloud sync completed.", "success", source="mysql_sync")
+
+
+def notify_mysql_sync_failed(message: str) -> None:
+    push_toast(
+        message or "MySQL cloud sync failed. Will retry when online.",
+        "warning",
+        source="mysql_sync",
+    )
+
+
+def notify_mysql_sync_queued(*, reason: str | None = None) -> None:
+    """Offline: changes stay in SQLite / sync_queue until internet is back."""
+    if reason and "already running" in reason.lower():
+        return
+    push_toast(
+        "Offline — business changes stay local and will auto-push to MySQL when internet is available.",
+        "warning",
+        source="mysql_sync",
+    )

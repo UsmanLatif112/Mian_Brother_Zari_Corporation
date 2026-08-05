@@ -696,6 +696,54 @@ p { margin-bottom: 0.45rem; }
   justify-content: center;
   z-index: 2000;
 }
+/* Full-page lock while MySQL Sync Now is running */
+html.mysql-sync-busy,
+html.mysql-sync-busy body {
+  overflow: hidden;
+  cursor: wait;
+}
+html.mysql-sync-busy .sidebar,
+html.mysql-sync-busy .navbar,
+html.mysql-sync-busy .app-sidebar,
+html.mysql-sync-busy .sidebar a,
+html.mysql-sync-busy nav a {
+  pointer-events: none !important;
+}
+.mysql-sync-progress-wrap {
+  text-align: left;
+  max-width: 22rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+.mysql-sync-progress {
+  height: 0.85rem;
+  border-radius: 999px;
+  background: rgba(25, 135, 84, 0.12);
+  overflow: hidden;
+}
+.mysql-sync-progress .progress-bar {
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+.mysql-sync-busy-card {
+  max-width: 26rem;
+  margin: 0 auto;
+}
+#mysqlSyncBusyModal {
+  z-index: 2100;
+}
+#mysqlSyncBusyModal + .modal-backdrop,
+.modal-backdrop.show:has(+ #mysqlSyncBusyModal) {
+  z-index: 2090;
+}
+/* Bootstrap places backdrop before modal in DOM; pin both high */
+body.mysql-sync-busy .modal-backdrop {
+  z-index: 2090;
+  pointer-events: all;
+}
+body.mysql-sync-busy #mysqlSyncBusyModal {
+  z-index: 2100;
+}
 .redirect-icon-btn {
   display: inline-flex;
   align-items: center;
@@ -776,6 +824,28 @@ p { margin-bottom: 0.45rem; }
   color: #b91c1c;
   border-color: rgba(239, 68, 68, 0.4);
   background: rgba(239, 68, 68, 0.08);
+}
+.action-icon-btn:disabled,
+.action-icon-btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none;
+  box-shadow: none;
+}
+.action-icon-btn:disabled:hover,
+.action-icon-btn[aria-disabled="true"]:hover {
+  background: #fff;
+  color: #ef4444;
+  border-color: var(--erp-border);
+  transform: none;
+  box-shadow: none;
+}
+[data-theme="dark"] .action-icon-btn:disabled:hover,
+[data-theme="dark"] .action-icon-btn[aria-disabled="true"]:hover {
+  background: #1f2937;
+  color: #9ca3af;
+  border-color: #374151;
 }
 [data-theme="dark"] .action-icon-btn {
   background: #1f2937;

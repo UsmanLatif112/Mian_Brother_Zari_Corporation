@@ -147,13 +147,23 @@
                     data-photo="{{ c.photo_url or '' }}">
               <i class="fa-solid fa-pen"></i>
             </button>
+            {% if customer_delete_enabled %}
             <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
                     data-action="{{ url_for('customers.delete', customer_id=c.id) }}"
                     data-title="Delete customer “{{ c.name }}”?"
-                    data-message="Customer will be hidden from lists. Choose Yes only if you are sure."
-                    data-effects="Hide customer from customer lists|Keep sales and payment history in the database|Customer will no longer appear in new sales lookups">
+                    data-message="If you delete this customer, all related data will be permanently removed. This cannot be undone."
+                    data-effects="Delete all sales for this customer (stock restored, sale cash reversed)|Delete all payments and customer receivings|Delete ledger entries and linked cash-book movements|Remove customer from lists, ledger, journal, and reports"
+                    data-confirm-label="Yes, delete everything"
+                    data-cancel-label="Keep customer">
               <i class="fa-solid fa-trash"></i>
             </button>
+            {% else %}
+            <span class="d-inline-flex" title="{{ customer_delete_disabled_hint }}" data-bs-toggle="tooltip" data-bs-title="{{ customer_delete_disabled_hint }}">
+              <button type="button" class="action-icon-btn action-danger" disabled aria-disabled="true" tabindex="-1">
+                <i class="fa-solid fa-trash"></i>
+              </button>
+            </span>
+            {% endif %}
             <a href="{{ url_for('customers.detail', customer_id=c.id) }}" class="action-icon-btn" title="Ledger">
               <i class="fa-solid fa-up-right-from-square"></i>
             </a>

@@ -55,8 +55,9 @@ def _prepare_env() -> None:
     os.environ["FLASK_ENV"] = "production"
     os.environ.setdefault("OFFLINE_FIRST", "true")
     os.environ.setdefault("DATABASE_MODE", "sqlite")
-    # Keep SYNC_AUTO_ENABLED from .env when present; otherwise off by default
-    os.environ.setdefault("SYNC_AUTO_ENABLED", "false")
+    # Keep SYNC_AUTO_ENABLED from .env when present; default on so shops auto-push
+    os.environ.setdefault("SYNC_AUTO_ENABLED", "true")
+    os.environ.setdefault("SYNC_MYSQL_TARGET", "test")
     os.environ.setdefault("AUTO_BACKUP_ENABLED", "true")
     os.environ.setdefault("SECRET_KEY", "mian-brother-fertilizers-desktop-local-key")
 
@@ -270,6 +271,7 @@ def main() -> int:
             height=860,
             min_size=(1024, 700),
             confirm_close=True,
+            text_select=True,
             js_api=DesktopApi(),
         )
         # On Windows, Edge WebView2 is the renderer; window shell still uses WinForms.

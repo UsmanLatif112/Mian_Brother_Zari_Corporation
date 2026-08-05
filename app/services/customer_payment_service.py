@@ -122,6 +122,114 @@ def record_customer_payment(
     return receiving
 
 
+def _normalize_payment_type(raw, *, debit=None, credit=None, fallback="account_settle"):
+    """Map free-text ledger type labels to advance | loan | account_settle."""
+    text = (raw or "").strip().lower().replace("-", " ").replace("_", " ")
+    compact = text.replace(" ", "")
+    if compact in ("loan",) or text == "loan":
+        return "loan"
+    if compact in ("advance",) or text == "advance":
+        return "advance"
+    if compact in (
+        "accountsettle",
+        "settle",
+        "settlement",
+        "payment",
+        "customerpayment",
+    ) or "settle" in text:
+        return "account_settle"
+    if raw and str(raw).strip().lower() in PAYMENT_TYPES:
+        return str(raw).strip().lower()
+    d = Decimal(str(debit or 0))
+    c = Decimal(str(credit or 0))
+    if d > 0 and c <= 0:
+        return "loan"
+    existing = (fallback or "account_settle").strip().lower()
+    return existing if existing in PAYMENT_TYPES else "account_settle"
+
+
+def sync_customer_receiving_from_ledger(entry):
+    """
+    Keep CustomerReceiving + cash book aligned when a linked ledger row is edited.
+    entry.reference_type must be customer_receiving; entry fields are already updated.
+    """
+    from app.services.cashbook_service import update_cash_by_reference
+
+    ref_id = entry.reference_id
+    if not ref_id:
+        return None
+
+    receiving = db.session.get(CustomerReceiving, int(ref_id))
+    if not receiving:
+        return None
+
+    debit = Decimal(str(entry.debit or 0))
+    credit = Decimal(str(entry.credit or 0))
+    ptype = _normalize_payment_type(
+        entry.entry_type,
+        debit=debit,
+        credit=credit,
+        fallback=receiving.payment_type or "account_settle",
+    )
+
+    if ptype == "loan":
+        amount = debit if debit > 0 else credit
+        entry.debit = amount
+        entry.credit = Decimal("0")
+        entry.entry_type = "loan"
+    else:
+        amount = credit if credit > 0 else debit
+        entry.debit = Decimal("0")
+        entry.credit = amount
+        entry.entry_type = ptype
+
+    if amount <= 0:
+        raise ValueError("Amount must be greater than zero.")
+
+    receiving.amount = amount
+    receiving.receiving_date = entry.entry_date
+    receiving.notes = entry.notes
+    receiving.payment_type = ptype
+
+    customer = db.session.get(Customer, receiving.customer_id)
+    name = customer.name if customer else "customer"
+    label = PAYMENT_TYPES[ptype]
+    note = entry.notes
+    if ptype == "loan":
+        cash_type, category = "out", "customer_loan"
+        cash_notes = f"Loan to {name}" + (f" — {note}" if note else "")
+    else:
+        cash_type = "in"
+        category = "customer_advance" if ptype == "advance" else "customer_settle"
+        cash_notes = f"{label} from {name}" + (f" — {note}" if note else "")
+
+    updated = update_cash_by_reference(
+        "customer_receiving",
+        receiving.id,
+        amount=amount,
+        entry_type=cash_type,
+        category=category,
+        entry_date=entry.entry_date,
+        notes=cash_notes,
+    )
+    # Cash was never posted (edge case) — create it so cash/journal stay consistent
+    if updated == 0:
+        record_cash_movement(
+            cash_type,
+            category,
+            amount,
+            "customer_receiving",
+            receiving.id,
+            notes=cash_notes,
+            entry_date=entry.entry_date,
+        )
+
+    enqueue_sync("customer_receivings", receiving.id, "update")
+    if customer:
+        enqueue_sync("customers", customer.id, "update")
+    return receiving
+
+
 def delete_customer_payment(receiving_id, user_id=None):
     receiving = db.session.get(CustomerReceiving, receiving_id)
     if not receiving:

@@ -11,4 +11,8 @@ build/
 dist/
 *.spec.bak
 data/
-releases/
+# Large binary releases (keep desktop zip outside git; host update CDN separately)
+releases/*.zip
+releases/MianBrotherFertilizers-*/
+releases/online-staging/
+image.png

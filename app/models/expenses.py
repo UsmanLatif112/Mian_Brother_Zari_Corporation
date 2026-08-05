@@ -1,18 +1,18 @@
 from decimal import Decimal
 
 from app.extensions import db
-from app.models.mixins import SoftDeleteMixin, TimestampMixin, utcnow
+from app.models.mixins import AgencyMixin, SoftDeleteMixin, TimestampMixin, utcnow
 from app.utils.working_date import default_entry_date
 
 
-class ExpenseCategory(SoftDeleteMixin, db.Model):
+class ExpenseCategory(AgencyMixin, SoftDeleteMixin, db.Model):
     __tablename__ = "expense_categories"
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
 
 
-class Expense(SoftDeleteMixin, TimestampMixin, db.Model):
+class Expense(AgencyMixin, SoftDeleteMixin, TimestampMixin, db.Model):
     __tablename__ = "expenses"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -32,7 +32,7 @@ class Expense(SoftDeleteMixin, TimestampMixin, db.Model):
     )
 
 
-class ExpenseSettlement(db.Model):
+class ExpenseSettlement(AgencyMixin, db.Model):
     __tablename__ = "expense_settlements"
 
     id = db.Column(db.Integer, primary_key=True)

@@ -3,11 +3,11 @@
 from decimal import Decimal
 
 from app.extensions import db
-from app.models.mixins import SoftDeleteMixin, TimestampMixin, utcnow
+from app.models.mixins import AgencyMixin, SoftDeleteMixin, TimestampMixin, utcnow
 from app.utils.working_date import default_entry_date
 
 
-class AccountCashSetup(db.Model):
+class AccountCashSetup(AgencyMixin, db.Model):
     """Opening / previous balance effective from a given date."""
 
     __tablename__ = "account_cash_setups"
@@ -22,7 +22,7 @@ class AccountCashSetup(db.Model):
     created_by = db.relationship("User")
 
 
-class AccountAmountTaken(SoftDeleteMixin, TimestampMixin, db.Model):
+class AccountAmountTaken(AgencyMixin, SoftDeleteMixin, TimestampMixin, db.Model):
     """Cash taken from the till by a person."""
 
     __tablename__ = "account_amount_taken"

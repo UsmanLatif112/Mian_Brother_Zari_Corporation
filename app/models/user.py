@@ -6,7 +6,7 @@ from flask_login import UserMixin
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db
-from app.models.mixins import SoftDeleteMixin, TimestampMixin, utcnow
+from app.models.mixins import AgencyMixin, SoftDeleteMixin, TimestampMixin, utcnow
 from app.utils.working_date import default_entry_date
 
 # License types stored in users.license_type / erp_user_registry.license_type
@@ -72,7 +72,7 @@ def default_trial_expires_at(from_dt: datetime | None = None) -> datetime:
     return start + timedelta(days=TRIAL_DAYS)
 
 
-class User(UserMixin, TimestampMixin, SoftDeleteMixin, db.Model):
+class User(UserMixin, AgencyMixin, TimestampMixin, SoftDeleteMixin, db.Model):
     __tablename__ = "users"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -88,6 +88,10 @@ class User(UserMixin, TimestampMixin, SoftDeleteMixin, db.Model):
     is_active_user = db.Column(db.Boolean, default=True, nullable=False)
     last_login_at = db.Column(db.DateTime, nullable=True)
     remote_id = db.Column(db.Integer, nullable=True, index=True)
+    # Shop ownership:
+    # - Admin: agency_id == id (this user IS the agency / shop)
+    # - Staff: agency_id points to their shop Admin user id
+    # AgencyMixin already defines agency_id; documented here for User semantics.
     is_registered = db.Column(db.Boolean, default=False, nullable=False)
     registration_key = db.Column(db.String(32), nullable=True)
     registered_at = db.Column(db.DateTime, nullable=True)
@@ -281,7 +285,7 @@ class User(UserMixin, TimestampMixin, SoftDeleteMixin, db.Model):
 
 
 
-class AuditLog(db.Model):
+class AuditLog(AgencyMixin, db.Model):
     __tablename__ = "audit_logs"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -296,7 +300,7 @@ class AuditLog(db.Model):
     user = db.relationship("User", backref="audit_logs")
 
 
-class Setting(db.Model):
+class Setting(AgencyMixin, db.Model):
     __tablename__ = "settings"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -305,7 +309,7 @@ class Setting(db.Model):
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
 
-class Notification(db.Model):
+class Notification(AgencyMixin, db.Model):
     __tablename__ = "notifications"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -319,8 +323,8 @@ class Notification(db.Model):
     user = db.relationship("User", backref="notifications")
 
 
-class AccountBalance(db.Model):
-    """Singleton-style rows for cash and bank."""
+class AccountBalance(AgencyMixin, db.Model):
+    """Per-agency rows for cash and bank."""
 
     __tablename__ = "account_balances"
 
@@ -330,7 +334,7 @@ class AccountBalance(db.Model):
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
 
-class CashBookEntry(db.Model):
+class CashBookEntry(AgencyMixin, db.Model):
     __tablename__ = "cash_book_entries"
 
     id = db.Column(db.Integer, primary_key=True)

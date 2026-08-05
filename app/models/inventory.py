@@ -1,10 +1,10 @@
 from decimal import Decimal
 
 from app.extensions import db
-from app.models.mixins import SoftDeleteMixin, TimestampMixin
+from app.models.mixins import AgencyMixin, SoftDeleteMixin, TimestampMixin
 
 
-class UnitType(db.Model):
+class UnitType(AgencyMixin, db.Model):
     __tablename__ = "unit_types"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -13,7 +13,7 @@ class UnitType(db.Model):
     is_custom = db.Column(db.Boolean, default=False)
 
 
-class Unit(db.Model):
+class Unit(AgencyMixin, db.Model):
     __tablename__ = "units"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -27,7 +27,7 @@ class Unit(db.Model):
     __table_args__ = (db.UniqueConstraint("unit_type_id", "name", name="uq_unit_type_name"),)
 
 
-class Category(SoftDeleteMixin, TimestampMixin, db.Model):
+class Category(AgencyMixin, SoftDeleteMixin, TimestampMixin, db.Model):
     __tablename__ = "categories"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -39,7 +39,7 @@ class Category(SoftDeleteMixin, TimestampMixin, db.Model):
     parent = db.relationship("Category", remote_side=[id], backref="subcategories")
 
 
-class Product(SoftDeleteMixin, TimestampMixin, db.Model):
+class Product(AgencyMixin, SoftDeleteMixin, TimestampMixin, db.Model):
     __tablename__ = "products"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -102,7 +102,7 @@ class Product(SoftDeleteMixin, TimestampMixin, db.Model):
         return format_qty_display(qty, self.unit_weight, self.weight_unit or "kg")
 
 
-class StockLayer(db.Model):
+class StockLayer(AgencyMixin, db.Model):
     """FIFO stock batches — each purchase creates its own cost & sale price."""
 
     __tablename__ = "stock_layers"
@@ -141,7 +141,7 @@ class StockLayer(db.Model):
         return used if used > 0 else Decimal("0")
 
 
-class StockMovement(db.Model):
+class StockMovement(AgencyMixin, db.Model):
     __tablename__ = "stock_movements"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -160,7 +160,7 @@ class StockMovement(db.Model):
     created_by = db.relationship("User")
 
 
-class InventoryAdjustment(db.Model):
+class InventoryAdjustment(AgencyMixin, db.Model):
     __tablename__ = "inventory_adjustments"
 
     id = db.Column(db.Integer, primary_key=True)

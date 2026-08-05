@@ -1,8 +1,8 @@
 {
-  "version": "1.2.8",
-  "build": 128,
-  "released_at": "2026-08-03",
-  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.2.8.zip",
-  "sha256": "1220e3bd53bb9d68626448a69b965ad7ca8070fd7cec0d2822c5e1652d23ab3d",
-  "release_notes": "- Company logo stored in main DB + staff package DB (bytes + file)\n- Super Admin Users list backfills logos; packages rebuild after branding\n- MySQL registry syncs company name / logo\n- Agri Books branding; Sale Full / Open mode\n- Journal / sales / purchases Particulars (name / units / weight)\n- Purchase cash rule; Stock Value on Inventory\n- Customer ledger & sales print improvements; journal print warning"
+  "version": "1.4.0",
+  "build": 140,
+  "released_at": "2026-08-05",
+  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.4.0.zip",
+  "sha256": "2601e305f75bc3d6a41a1ae761dd85851dc5d99e4640431880122d78f0b08def",
+  "release_notes": "- MySQL cloud sync: faster batched upload + 0\u2013100% progress bar\n- Sync Now / Cancel Sync with in-app modals (no browser alerts)\n- Auto push every 15 minutes when online (local SQLite \u2192 cloud)\n- Clean error messages (no SQL dumps for shop users)\n- agency_id on all business tables (shop Admin = agency)\n- Schema auto-heal when cloud columns are missing\n- Desktop copy/paste, vendor/customer ledger edits, cascade tools from 1.3.x"
 }

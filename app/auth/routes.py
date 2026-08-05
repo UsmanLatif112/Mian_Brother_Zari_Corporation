@@ -673,6 +673,12 @@ def create_user():
         )
 
         db.session.flush()
+        try:
+            from app.services.agency_service import stamp_user_agency
+
+            stamp_user_agency(user)
+        except Exception:
+            pass
         log_audit("create", "user", user.id, username)
 
         try:

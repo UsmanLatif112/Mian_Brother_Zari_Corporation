@@ -294,16 +294,30 @@ def edit(customer_id):
 @login_required
 @permission_required("customers.*")
 def delete(customer_id):
-    customer = db.session.get(Customer, customer_id)
-    if not customer or customer.is_deleted:
-        flash("Customer not found.", "danger")
+    from app.services.customer_service import (
+        CUSTOMER_DELETE_DISABLED_HINT,
+        CUSTOMER_DELETE_ENABLED,
+        delete_customer_cascade,
+    )
+
+    if not CUSTOMER_DELETE_ENABLED:
+        flash(CUSTOMER_DELETE_DISABLED_HINT, "warning")
         return redirect(url_for("customers.index"))
-    customer.is_deleted = True
-    from app.models.mixins import utcnow
-    customer.deleted_at = utcnow()
-    log_audit("delete", "customer", customer.id, customer.name)
-    db.session.commit()
-    flash("Customer deleted.", "success")
+
+    try:
+        name = delete_customer_cascade(customer_id, current_user.id)
+        log_audit("delete", "customer", customer_id, name)
+        db.session.commit()
+        flash(
+            f"Customer “{name}” deleted. Related sales, payments, ledger, and cash entries were removed.",
+            "success",
+        )
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    except Exception as exc:
+        db.session.rollback()
+        flash(f"Could not delete customer: {exc}", "danger")
     return redirect(url_for("customers.index"))
 
 
