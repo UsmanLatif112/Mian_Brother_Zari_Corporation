@@ -148,6 +148,26 @@ def create_app(config_class=None):
     register_registration_guard(app)
 
     with app.app_context():
+        # Online/MySQL: create tables on first boot if empty (then seed default super admin)
+        try:
+            from sqlalchemy import inspect as sa_inspect
+
+            from app.services.agency_service import is_online_mode
+
+            uri = app.config.get("SQLALCHEMY_DATABASE_URI") or ""
+            if is_online_mode() or uri.startswith("mysql"):
+                if not sa_inspect(db.engine).has_table("users"):
+                    from app.utils.seed import seed_database
+
+                    db.create_all()
+                    seed_database(create_default_admin=True)
+                    logging.getLogger(__name__).info(
+                        "Online first-run: created MySQL tables and default admin"
+                    )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Could not bootstrap database tables", exc_info=True
+            )
         try:
             from app.services.agency_service import (
                 ensure_agency_id_columns,

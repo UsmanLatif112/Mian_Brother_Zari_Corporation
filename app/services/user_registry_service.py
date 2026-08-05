@@ -397,6 +397,9 @@ def ensure_user_registration_columns() -> None:
 
     try:
         insp = inspect(db.engine)
+        if not insp.has_table("users"):
+            # Fresh DB — run flask --app run init-db (or online bootstrap create_all)
+            return
         cols = {c["name"] for c in insp.get_columns("users")}
         alters = []
         if "is_registered" not in cols:

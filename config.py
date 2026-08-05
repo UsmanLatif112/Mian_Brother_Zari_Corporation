@@ -117,12 +117,24 @@ def apply_database_uri(app) -> None:
         return
     mode = (os.environ.get("APP_MODE") or "").strip().lower()
     if mode in ("online", "host", "cloud", "web"):
-        uri = os.environ.get("MYSQL_DATABASE_URI") or os.environ.get(
-            "MYSQL_TEST_DATABASE_URI"
+        uri = (
+            (os.environ.get("MYSQL_DATABASE_URI") or "").strip()
+            or (os.environ.get("MYSQL_TEST_DATABASE_URI") or "").strip()
         )
-        if uri:
-            app.config["SQLALCHEMY_DATABASE_URI"] = uri
-            return
+        if not uri:
+            raise RuntimeError(
+                "APP_MODE=online requires MYSQL_DATABASE_URI in .env "
+                "(see .env.online.example). App refused to fall back to SQLite."
+            )
+        if not uri.startswith("mysql"):
+            raise RuntimeError(
+                "APP_MODE=online requires a mysql+pymysql:// URI, got: "
+                f"{uri.split('://', 1)[0]}://"
+            )
+        app.config["SQLALCHEMY_DATABASE_URI"] = uri
+        app.config["APP_MODE"] = "online"
+        app.config["OFFLINE_FIRST"] = False
+        return
     if os.environ.get("FLASK_ENV") == "production":
         app.config["SQLALCHEMY_DATABASE_URI"] = (
             os.environ.get("MYSQL_DATABASE_URI") or resolve_sqlalchemy_uri()

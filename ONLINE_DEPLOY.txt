@@ -33,20 +33,39 @@ SSH / Terminal on cPanel (or Git Version Control UI):
   #    Application startup file = passenger_wsgi.py
   #    Application Entry point = application
 
-  # 3) Environment
+  # 3) Environment — REQUIRED (without this you get SQLite + "NoSuchTableError: users")
   cp .env.online.example .env
-  nano .env   # set SECRET_KEY + MYSQL_DATABASE_URI + keep APP_MODE=online
+  nano .env   # must set:
+  #   APP_MODE=online
+  #   SECRET_KEY=long-random-string
+  #   MYSQL_DATABASE_URI=mysql+pymysql://USER:PASSWORD@localhost:3306/DB_NAME
+  # Use cPanel MySQL "username" (often mygymlahore_user) and host usually localhost
 
   # 4) Install deps (use the SAME venv as the cPanel Python App)
   pip install -r requirements.txt
+  # needs: Flask, SQLAlchemy, PyMySQL, etc.
 
-  # 5) Create tables
-  flask --app run init-db
-  # or: python -c "from app import create_app; from app.extensions import db; app=create_app(); app.app_context().push(); db.create_all()"
+  # 5) Create tables + default admin  (from app folder, with venv active)
+  export FLASK_APP=run.py
+  flask init-db
+  # Expect: "Database initialized."
+  # Login later with seed admin (see seed) — change password immediately.
 
-  # 6) Super Admin: seed/login, change password
-  # 7) Super Admin creates shop Admins; users log into this site when registered.
+  # Confirm MySQL (must say mysql, NOT sqlite):
+  python -c "from run import app; print(app.config['SQLALCHEMY_DATABASE_URI'][:40])"
+
+  # 6) Do NOT use `python run.py` for production.
+  #    Use cPanel Python App → passenger_wsgi.py → entry "application"
+  #    `python run.py` is only for a quick terminal check.
+
+  # 7) Super Admin creates shop Admins; registered users log into this site.
   #    Staff data package (SQLite zip) for desktop machines as needed.
+
+If you see NoSuchTableError: users + sqlite in the traceback
+----------------------------------------------------------------
+1) .env is missing or APP_MODE is not online / MYSQL_DATABASE_URI empty
+2) You never ran: flask init-db
+Fix .env, then flask init-db, then restart the Python App.
 
 MySQL notes
 -----------
