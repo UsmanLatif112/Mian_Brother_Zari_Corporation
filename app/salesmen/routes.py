@@ -1,0 +1,298 @@
+from datetime import date as date_cls
+from decimal import Decimal
+
+from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask_login import login_required
+from sqlalchemy import func
+from sqlalchemy.orm import joinedload
+
+from app.extensions import db
+from app.forms import SalesmanForm
+from app.models import LedgerEntry, Sale, Salesman
+from app.services.audit_service import log_audit
+from app.services.ledger_service import delete_ledger_entry, post_ledger_entry
+from app.utils.decorators import permission_required
+from app.utils.uploads import delete_image, save_image
+from app.utils.working_date import get_working_date
+
+salesmen_bp = Blueprint("salesmen", __name__)
+
+
+def _apply_salesman_photo(salesman):
+    if request.form.get("clear_photo") == "1":
+        delete_image(salesman.photo)
+        salesman.photo = None
+        return
+    try:
+        path = save_image(request.files.get("photo"), "salesmen")
+    except ValueError:
+        raise
+    if path:
+        delete_image(salesman.photo)
+        salesman.photo = path
+
+
+def _parse_date(value):
+    if not value:
+        return None
+    try:
+        return date_cls.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _sales_totals_by_salesman(salesman_ids):
+    """Map salesman_id → total grand_total of attributed sales."""
+    if not salesman_ids:
+        return {}
+    rows = (
+        db.session.query(Sale.salesman_id, func.coalesce(func.sum(Sale.grand_total), 0))
+        .filter(Sale.salesman_id.in_(salesman_ids))
+        .group_by(Sale.salesman_id)
+        .all()
+    )
+    return {int(sid): Decimal(str(total or 0)) for sid, total in rows}
+
+
+def _salesman_page(form=None, open_modal=False):
+    from datetime import datetime, time
+
+    from app.services.dashboard_service import _range_for_filter
+
+    period = request.args.get("period", "all")
+    period_start = _parse_date(request.args.get("start_date"))
+    period_end = _parse_date(request.args.get("end_date"))
+    range_start, range_end = _range_for_filter(period, period_start, period_end)
+
+    query = Salesman.query.filter_by(is_deleted=False)
+    if range_start and range_end:
+        start_dt = datetime.combine(range_start, time.min)
+        end_dt = datetime.combine(range_end, time.max)
+        query = query.filter(Salesman.created_at >= start_dt, Salesman.created_at <= end_dt)
+
+    salesmen = query.order_by(Salesman.name).all()
+    totals = _sales_totals_by_salesman([s.id for s in salesmen])
+    for s in salesmen:
+        s.total_sales = totals.get(s.id, Decimal("0"))
+
+    total_sales_all = sum((s.total_sales for s in salesmen), Decimal("0"))
+    total_credit = (
+        db.session.query(func.coalesce(func.sum(Salesman.balance), 0))
+        .filter(Salesman.is_deleted.is_(False), Salesman.balance > 0)
+        .scalar()
+        or Decimal("0")
+    )
+
+    return render_template(
+        "salesmen/index.html",
+        salesmen=salesmen,
+        form=form or SalesmanForm(),
+        open_modal=open_modal or request.args.get("open_modal") == "1",
+        today=get_working_date().isoformat(),
+        total_sales_all=total_sales_all,
+        total_credit=total_credit,
+        selected_period=period,
+        start_date=period_start.isoformat() if period_start else "",
+        end_date=period_end.isoformat() if period_end else "",
+    )
+
+
+@salesmen_bp.route("/")
+@login_required
+@permission_required("salesmen.view")
+def index():
+    return _salesman_page()
+
+
+@salesmen_bp.route("/create", methods=["GET", "POST"])
+@login_required
+@permission_required("salesmen.*")
+def create():
+    if request.method == "GET":
+        return redirect(url_for("salesmen.index", open_modal=1))
+    form = SalesmanForm()
+    if form.validate_on_submit():
+        try:
+            opening_raw = form.opening_balance.data
+            opening = Decimal("0") if opening_raw in (None, "") else Decimal(str(opening_raw))
+            salesman = Salesman(
+                name=form.name.data.strip(),
+                phone=(form.phone.data or "").strip() or None,
+                company=(form.company.data or "").strip() or None,
+                address=(form.address.data or "").strip() or None,
+                opening_balance=opening,
+                balance=opening,
+                notes=(form.notes.data or "").strip() or None,
+            )
+            _apply_salesman_photo(salesman)
+            db.session.add(salesman)
+            db.session.flush()
+            if opening:
+                opening_d = Decimal(str(opening))
+                debit = opening_d if opening_d > 0 else Decimal("0")
+                credit = abs(opening_d) if opening_d < 0 else Decimal("0")
+                post_ledger_entry(
+                    "salesman",
+                    salesman.id,
+                    "opening",
+                    debit=debit,
+                    credit=credit,
+                    entry_date=get_working_date(),
+                    notes="Opening balance",
+                )
+            log_audit("create", "salesman", None, salesman.name)
+            db.session.commit()
+            flash("Salesman created.", "success")
+            return redirect(url_for("salesmen.index"))
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return _salesman_page(form=form, open_modal=True)
+    return _salesman_page(form=form, open_modal=True)
+
+
+@salesmen_bp.route("/<int:salesman_id>/edit", methods=["POST"])
+@login_required
+@permission_required("salesmen.*")
+def edit(salesman_id):
+    salesman = db.session.get(Salesman, salesman_id)
+    if not salesman or salesman.is_deleted:
+        flash("Salesman not found.", "danger")
+        return redirect(url_for("salesmen.index"))
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Name is required.", "danger")
+        return redirect(url_for("salesmen.index"))
+    try:
+        salesman.name = name
+        salesman.phone = (request.form.get("phone") or "").strip() or None
+        salesman.company = (request.form.get("company") or "").strip() or None
+        salesman.address = (request.form.get("address") or "").strip() or None
+        salesman.notes = (request.form.get("notes") or "").strip() or None
+        opening = request.form.get("opening_balance")
+        salesman.opening_balance = (
+            Decimal("0") if opening in (None, "") else Decimal(str(opening))
+        )
+        _apply_salesman_photo(salesman)
+        log_audit("update", "salesman", salesman.id, salesman.name)
+        db.session.commit()
+        flash("Salesman updated.", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    if request.form.get("return_detail"):
+        return redirect(url_for("salesmen.detail", salesman_id=salesman.id))
+    return redirect(url_for("salesmen.index"))
+
+
+@salesmen_bp.route("/<int:salesman_id>/delete", methods=["POST"])
+@login_required
+@permission_required("salesmen.*")
+def delete(salesman_id):
+    salesman = db.session.get(Salesman, salesman_id)
+    if not salesman or salesman.is_deleted:
+        flash("Salesman not found.", "danger")
+        return redirect(url_for("salesmen.index"))
+    salesman.soft_delete()
+    log_audit("delete", "salesman", salesman.id, salesman.name)
+    db.session.commit()
+    flash("Salesman deleted.", "success")
+    return redirect(url_for("salesmen.index"))
+
+
+@salesmen_bp.route("/ledger/<int:entry_id>/delete", methods=["POST"])
+@login_required
+@permission_required("salesmen.*")
+def delete_ledger(entry_id):
+    """Remove salesman attribution only — does not delete/void the sale."""
+    entry = db.session.get(LedgerEntry, entry_id)
+    if not entry or entry.party_type != "salesman":
+        flash("Ledger entry not found.", "danger")
+        return redirect(url_for("salesmen.index"))
+    party_id = entry.party_id
+    try:
+        ref_type = (entry.reference_type or "").strip().lower()
+        ref_id = entry.reference_id
+        if ref_type == "sale" and ref_id:
+            sale = db.session.get(Sale, int(ref_id))
+            if sale and sale.salesman_id == party_id:
+                sale.salesman_id = None
+        delete_ledger_entry(entry_id)
+        db.session.commit()
+        flash("Unlinked from salesman. Sale was not deleted.", "success")
+    except Exception as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    return redirect(url_for("salesmen.detail", salesman_id=party_id))
+
+
+@salesmen_bp.route("/<int:salesman_id>")
+@login_required
+@permission_required("salesmen.view")
+def detail(salesman_id):
+    from datetime import datetime, time
+
+    from app.services.dashboard_service import _range_for_filter
+    from app.services.journal_service import _sale_line_particular
+
+    salesman = db.session.get(Salesman, salesman_id)
+    if not salesman or salesman.is_deleted:
+        flash("Salesman not found.", "danger")
+        return redirect(url_for("salesmen.index"))
+
+    period = request.args.get("period", "all")
+    period_start = _parse_date(request.args.get("start_date"))
+    period_end = _parse_date(request.args.get("end_date"))
+    range_start, range_end = _range_for_filter(period, period_start, period_end)
+
+    ledger_q = LedgerEntry.query.filter_by(party_type="salesman", party_id=salesman.id)
+    if range_start and range_end:
+        ledger_q = ledger_q.filter(
+            LedgerEntry.entry_date >= range_start,
+            LedgerEntry.entry_date <= range_end,
+        )
+    ledger = ledger_q.order_by(LedgerEntry.entry_date.desc(), LedgerEntry.id.desc()).all()
+
+    # Attach invoice + particulars for sale rows
+    sale_ids = [
+        int(e.reference_id)
+        for e in ledger
+        if (e.reference_type or "").lower() == "sale" and e.reference_id
+    ]
+    sales_map = {}
+    if sale_ids:
+        from app.models import SaleItem
+
+        sales = (
+            Sale.query.options(joinedload(Sale.items).joinedload(SaleItem.product))
+            .filter(Sale.id.in_(sale_ids))
+            .all()
+        )
+        for sale in sales:
+            parts = [_sale_line_particular(it) for it in sale.items]
+            sales_map[sale.id] = {
+                "invoice_no": sale.invoice_no,
+                "particulars": " · ".join(parts) if parts else (sale.notes or "—"),
+            }
+
+    for entry in ledger:
+        info = sales_map.get(int(entry.reference_id)) if entry.reference_id else None
+        entry.invoice_no = (info or {}).get("invoice_no") or "—"
+        if (entry.entry_type or "").lower() == "sale" and info:
+            entry.particulars = info.get("particulars") or entry.notes or "—"
+        else:
+            entry.particulars = entry.notes or "—"
+
+    totals = _sales_totals_by_salesman([salesman.id])
+    total_sales = totals.get(salesman.id, Decimal("0"))
+
+    return render_template(
+        "salesmen/detail.html",
+        salesman=salesman,
+        ledger=ledger,
+        total_sales=total_sales,
+        today=get_working_date().isoformat(),
+        selected_period=period,
+        start_date=period_start.isoformat() if period_start else "",
+        end_date=period_end.isoformat() if period_end else "",
+    )

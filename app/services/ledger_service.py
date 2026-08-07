@@ -72,7 +72,77 @@ def rebuild_party_balances(party_type, party_id, sync_party=True):
             party = db.session.get(Vendor, party_id)
             if party:
                 party.balance = bal
+        elif party_type == "salesman":
+            from app.models import Salesman
+
+            party = db.session.get(Salesman, party_id)
+            if party:
+                party.balance = bal
     return bal
+
+
+def sync_party_opening_entry(
+    party_type,
+    party_id,
+    opening_balance,
+    entry_date=None,
+    notes=None,
+):
+    """
+    Keep a single entry_type=opening ledger row in sync with opening_balance.
+
+    Total party.balance is then rebuilt as: opening + later in/out (debit − credit).
+    When opening is 0, any opening row is removed.
+    """
+    opening = Decimal(str(opening_balance or 0))
+    existing = (
+        LedgerEntry.query.filter_by(
+            party_type=party_type, party_id=party_id, entry_type="opening"
+        )
+        .order_by(LedgerEntry.id.asc())
+        .all()
+    )
+    primary = existing[0] if existing else None
+    for dup in existing[1:]:
+        db.session.delete(dup)
+
+    if opening == 0:
+        if primary:
+            db.session.delete(primary)
+            db.session.flush()
+        rebuild_party_balances(party_type, party_id)
+        return None
+
+    debit = opening if opening > 0 else Decimal("0")
+    credit = abs(opening) if opening < 0 else Decimal("0")
+
+    if primary:
+        primary.debit = debit
+        primary.credit = credit
+        if entry_date is not None:
+            primary.entry_date = entry_date
+        if notes is not None:
+            primary.notes = notes
+        entry = primary
+    else:
+        from app.utils.working_date import get_working_date
+
+        entry = LedgerEntry(
+            party_type=party_type,
+            party_id=party_id,
+            entry_date=entry_date or get_working_date(),
+            entry_type="opening",
+            debit=debit,
+            credit=credit,
+            balance_after=opening,
+            notes=notes,
+            created_at=utcnow(),
+        )
+        db.session.add(entry)
+
+    db.session.flush()
+    rebuild_party_balances(party_type, party_id)
+    return entry
 
 
 def update_ledger_entry(entry_id, entry_date=None, debit=None, credit=None, notes=None, entry_type=None):

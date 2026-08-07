@@ -70,6 +70,7 @@
           <th>Particulars</th>
           <th>Date</th>
           <th>Customer</th>
+          <th>Salesman</th>
           <th>Status</th>
           <th class="text-end">Total</th>
           <th class="text-end">Paid</th>
@@ -106,6 +107,7 @@
           </td>
           <td>{{ s.sale_date }}</td>
           <td>{{ s.customer.name if s.customer else 'Walk-in' }}</td>
+          <td>{{ s.salesman.name if s.salesman else '—' }}</td>
           <td>
             {% if s.payment_status.value == 'paid' %}
             <span class="badge bg-success-subtle text-success border border-success-subtle">Paid</span>
@@ -157,19 +159,35 @@
             <label class="form-label">Sale Date</label>
             <input type="date" id="sale-date" name="sale_date" class="form-control erp-entry-date" value="{{ today }}" data-today="{{ today }}" data-erp-entry-date>
           </div>
-          <div class="col-md-6">
+          <div class="col-md-4">
             <label class="form-label" id="customer-label">Customer <span class="text-muted fw-normal" id="customer-optional-hint">(optional)</span></label>
-            <div class="input-group erp-input-group-quick">
-              <input type="text" id="customer-search" class="form-control" placeholder="Search customer or leave blank for walk-in…" autocomplete="off">
-              <button type="button" class="btn erp-btn-quick-add" id="btn-add-customer" title="Add new customer">
-                <i class="fa-solid fa-plus"></i>
-              </button>
+            <div class="position-relative">
+              <div class="input-group erp-input-group-quick">
+                <input type="text" id="customer-search" class="form-control" placeholder="Search customer or leave blank for walk-in…" autocomplete="off">
+                <button type="button" class="btn erp-btn-quick-add" id="btn-add-customer" title="Add new customer">
+                  <i class="fa-solid fa-plus"></i>
+                </button>
+              </div>
+              <input type="hidden" id="customer-id" value="">
+              <div class="lookup-results d-none" id="customer-results"></div>
             </div>
-            <input type="hidden" id="customer-id" value="">
-            <div class="lookup-results d-none" id="customer-results"></div>
             <div class="small text-muted mt-1" id="customer-selected">Walk-in</div>
           </div>
           <div class="col-md-3">
+            <label class="form-label">Salesman <span class="text-muted fw-normal">(optional)</span></label>
+            <div class="position-relative">
+              <div class="input-group erp-input-group-quick">
+                <input type="text" id="salesman-search" class="form-control" placeholder="Field officer / referral…" autocomplete="off">
+                <button type="button" class="btn erp-btn-quick-add" id="btn-add-salesman" title="Add salesman">
+                  <i class="fa-solid fa-plus"></i>
+                </button>
+              </div>
+              <input type="hidden" id="salesman-id" value="">
+              <div class="lookup-results d-none" id="salesman-results"></div>
+            </div>
+            <div class="small text-muted mt-1" id="salesman-selected">None</div>
+          </div>
+          <div class="col-md-2">
             <label class="form-label">Payment Status</label>
             <select id="payment-status" class="form-select">
               <option value="paid">Paid</option>
@@ -306,6 +324,50 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-success" id="qc-save">Save Customer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Nested quick-add salesman #}
+<div class="modal fade erp-form-modal" id="quickSalesmanModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Add Salesman</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2 align-items-end">
+          <div class="col-auto">
+            {{ photo_field(icon='fa-user-tie', label='Photo', upload='ajax', folder='salesmen', picker_id='qs-photo-picker') }}
+          </div>
+          <div class="col-md-5">
+            <label class="form-label">Name</label>
+            <input id="qs-name" class="form-control" placeholder="Salesman name">
+          </div>
+          <div class="col-md-5">
+            <label class="form-label">Phone</label>
+            <input id="qs-phone" class="form-control" placeholder="Phone">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Company <span class="text-muted fw-normal">(optional)</span></label>
+            <input id="qs-company" class="form-control" placeholder="Company">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Opening Balance <span class="text-muted fw-normal">(optional)</span></label>
+            <input type="number" step="0.01" id="qs-balance" class="form-control" placeholder="Leave blank if none">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Address</label>
+            <textarea id="qs-address" class="form-control" rows="2" placeholder="Address"></textarea>
+          </div>
+        </div>
+        <div class="text-danger small mt-2 d-none" id="qs-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="qs-save">Save Salesman</button>
       </div>
     </div>
   </div>

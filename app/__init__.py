@@ -222,6 +222,7 @@ def register_blueprints(app):
     from app.expenses.routes import expenses_bp
     from app.customers.routes import customers_bp
     from app.vendors.routes import vendors_bp
+    from app.salesmen.routes import salesmen_bp
     from app.categories.routes import categories_bp
     from app.account.routes import account_bp
     from app.maintenance.routes import maintenance_bp
@@ -236,6 +237,7 @@ def register_blueprints(app):
     app.register_blueprint(expenses_bp, url_prefix="/expenses")
     app.register_blueprint(customers_bp, url_prefix="/customers")
     app.register_blueprint(vendors_bp, url_prefix="/vendors")
+    app.register_blueprint(salesmen_bp, url_prefix="/salesmen")
     app.register_blueprint(categories_bp, url_prefix="/categories")
     app.register_blueprint(account_bp, url_prefix="/account")
     app.register_blueprint(maintenance_bp, url_prefix="/sync-backup")
@@ -295,12 +297,22 @@ def register_registration_guard(app):
 
 def register_context_processors(app):
     from app.services.settings_service import get_business_info
-    from app.utils.weight_utils import clean_number, format_qty_display, format_stock_display
+    from app.utils.weight_utils import (
+        clean_number,
+        format_movement_qty_display,
+        format_qty_display,
+        format_stock_display,
+        format_stock_total_display,
+    )
 
     @app.template_filter("qty_display")
     def qty_display_filter(qty, product=None, unit_weight=None, weight_unit=None):
         """Format stock qty as whole sealed bags + open weight when applicable."""
         from decimal import Decimal
+
+        # StockMovement: prefer actual open-sale kg (avoids -9.99 from 0.333 bags)
+        if product is not None and hasattr(qty, "movement_type") and hasattr(qty, "quantity"):
+            return format_movement_qty_display(qty, product)
 
         # StockLayer passed as second arg (detail batches table)
         if product is not None and hasattr(product, "open_weight_remaining"):
@@ -326,9 +338,17 @@ def register_context_processors(app):
             )
         return format_qty_display(qty, unit_weight, weight_unit or "kg")
 
+    @app.template_filter("movement_qty_display")
+    def movement_qty_display_filter(movement, product=None):
+        return format_movement_qty_display(movement, product)
+
     @app.template_filter("stock_display")
     def stock_display_filter(product):
         return format_stock_display(product)
+
+    @app.template_filter("stock_total_display")
+    def stock_total_display_filter(product):
+        return format_stock_total_display(product)
 
     @app.template_filter("clean_num")
     def clean_num_filter(value):

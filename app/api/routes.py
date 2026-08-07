@@ -149,38 +149,24 @@ def categories_lookup():
 @api_bp.route("/categories/quick", methods=["POST"])
 @login_required
 def categories_quick():
-    data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
-    if not name:
-        return jsonify({"ok": False, "error": "Category name is required."}), 400
+    from app.services.category_service import get_or_create_category
 
+    data = request.get_json(silent=True) or {}
+    name = data.get("name")
     parent_id = data.get("parent_id")
     try:
-        parent_id = int(parent_id) if parent_id not in (None, "", 0, "0") else None
-    except (TypeError, ValueError):
-        parent_id = None
+        cat, _created = get_or_create_category(name, parent_id=parent_id)
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
-    if parent_id:
-        parent = db.session.get(Category, parent_id)
-        if not parent or parent.is_deleted:
-            return jsonify({"ok": False, "error": "Parent category not found."}), 400
-
-    existing_q = Category.query.filter(
-        Category.name.ilike(name),
-        Category.is_deleted.is_(False),
+    return jsonify(
+        {"ok": True, "id": cat.id, "name": cat.name, "parent_id": cat.parent_id}
     )
-    if parent_id:
-        existing_q = existing_q.filter(Category.parent_id == parent_id)
-    else:
-        existing_q = existing_q.filter(Category.parent_id.is_(None))
-    existing = existing_q.first()
-    if existing:
-        return jsonify({"ok": True, "id": existing.id, "name": existing.name, "parent_id": existing.parent_id})
-
-    cat = Category(name=name, parent_id=parent_id)
-    db.session.add(cat)
-    db.session.commit()
-    return jsonify({"ok": True, "id": cat.id, "name": cat.name, "parent_id": cat.parent_id})
 
 
 @api_bp.route("/customers/lookup")
@@ -230,6 +216,85 @@ def vendors_lookup():
             ]
         }
     )
+
+
+@api_bp.route("/salesmen/lookup")
+@login_required
+def salesmen_lookup():
+    from app.models import Salesman
+
+    q = (request.args.get("q") or "").strip()
+    query = Salesman.query.filter(Salesman.is_deleted.is_(False))
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(
+                Salesman.name.ilike(like),
+                Salesman.phone.ilike(like),
+                Salesman.company.ilike(like),
+            )
+        )
+    rows = query.order_by(Salesman.name).limit(20).all()
+    return jsonify(
+        {
+            "results": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "phone": s.phone or "",
+                    "company": s.company or "",
+                    "label": f"{s.name}"
+                    + (f" · {s.company}" if s.company else "")
+                    + (f" ({s.phone})" if s.phone else ""),
+                }
+                for s in rows
+            ]
+        }
+    )
+
+
+@api_bp.route("/salesmen/quick", methods=["POST"])
+@login_required
+def quick_salesman():
+    from app.models import Salesman
+    from app.services.ledger_service import post_ledger_entry
+    from app.utils.uploads import accept_uploaded_path
+    from app.utils.working_date import get_working_date
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "Salesman name is required."}), 400
+
+    opening = Decimal(str(data.get("opening_balance") or 0))
+    photo = accept_uploaded_path(data.get("photo"), "salesmen")
+    salesman = Salesman(
+        name=name,
+        phone=(data.get("phone") or "").strip() or None,
+        company=(data.get("company") or "").strip() or None,
+        address=(data.get("address") or "").strip() or None,
+        opening_balance=opening,
+        balance=opening,
+        notes=(data.get("notes") or "").strip() or None,
+        photo=photo,
+    )
+    db.session.add(salesman)
+    db.session.flush()
+    if opening:
+        opening_d = Decimal(str(opening))
+        debit = opening_d if opening_d > 0 else Decimal("0")
+        credit = abs(opening_d) if opening_d < 0 else Decimal("0")
+        post_ledger_entry(
+            "salesman",
+            salesman.id,
+            "opening",
+            debit=debit,
+            credit=credit,
+            entry_date=get_working_date(),
+            notes="Opening balance",
+        )
+    db.session.commit()
+    return jsonify({"ok": True, "id": salesman.id, "name": salesman.name})
 
 
 @api_bp.route("/expense-categories/quick", methods=["POST"])
@@ -303,7 +368,7 @@ def upload_photo():
     from app.utils.uploads import image_url, save_image
 
     folder = (request.form.get("folder") or "misc").strip().lower()
-    allowed = {"customers", "vendors", "sales", "products", "misc", "logos"}
+    allowed = {"customers", "vendors", "salesmen", "sales", "products", "misc", "logos"}
     if folder not in allowed:
         return jsonify({"ok": False, "error": "Invalid upload folder."}), 400
     try:
@@ -340,7 +405,6 @@ def products_next_codes():
 @login_required
 def products_lookup():
     from app.services.fifo_service import (
-        list_packaging_options,
         next_fifo_packaging,
         next_fifo_sale_price,
         next_product_batch_seq,
@@ -356,23 +420,15 @@ def products_lookup():
     rows = query.order_by(Product.name).limit(20).all()
     results = []
     for p in rows:
-        packagings = list_packaging_options(p)
         from app.utils.weight_utils import format_stock_display
 
         stock_label = format_stock_display(p)
-        if packagings:
-            # Default to first in-stock packaging (oldest FIFO group)
-            first = packagings[0]
-            unit_weight = first.get("unit_weight")
-            weight_unit = first.get("weight_unit") or ""
-            fifo_price = float(first.get("sale_price") or 0)
-        else:
-            fifo_uw, fifo_wu = next_fifo_packaging(p)
-            unit_weight = float(fifo_uw) if fifo_uw is not None else (
-                float(p.unit_weight) if p.unit_weight is not None else None
-            )
-            weight_unit = fifo_wu or p.weight_unit or ""
-            fifo_price = float(next_fifo_sale_price(p, unit_weight=unit_weight))
+        fifo_uw, fifo_wu = next_fifo_packaging(p)
+        unit_weight = float(fifo_uw) if fifo_uw is not None else (
+            float(p.unit_weight) if p.unit_weight is not None else None
+        )
+        weight_unit = fifo_wu or p.weight_unit or ""
+        fifo_price = float(next_fifo_sale_price(p))
         results.append(
             {
                 "id": p.id,
@@ -393,7 +449,6 @@ def products_lookup():
                 "stock_display": stock_label,
                 "unit_weight": unit_weight,
                 "weight_unit": weight_unit,
-                "packagings": packagings,
                 "photo_url": p.photo_url,
                 "photo": p.photo or "",
                 "next_batch": next_product_batch_seq(p.id),
@@ -408,7 +463,7 @@ def products_lookup():
 def quick_customer():
     from datetime import date
 
-    from app.services.ledger_service import post_ledger_entry
+    from app.services.ledger_service import sync_party_opening_entry
     from app.utils.uploads import accept_uploaded_path
 
     from app.utils.working_date import get_working_date
@@ -441,19 +496,14 @@ def quick_customer():
     )
     db.session.add(customer)
     db.session.flush()
-    if opening != 0:
-        # Positive opening = customer owes us (old credit)
-        debit = opening if opening > 0 else Decimal("0")
-        credit = abs(opening) if opening < 0 else Decimal("0")
-        post_ledger_entry(
-            "customer",
-            customer.id,
-            "opening",
-            debit=debit,
-            credit=credit,
-            entry_date=joined_date,
-            notes=f"Old book balance" + (f" ({customer.old_book_no})" if customer.old_book_no else ""),
-        )
+    sync_party_opening_entry(
+        "customer",
+        customer.id,
+        opening,
+        entry_date=joined_date,
+        notes="Old book balance"
+        + (f" ({customer.old_book_no})" if customer.old_book_no else ""),
+    )
     db.session.commit()
     return jsonify({"ok": True, "id": customer.id, "name": customer.name, "phone": customer.phone or ""})
 

@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Company Branding{% endblock %}
+{% block content %}
+{% from 'partials/macros.html' import photo_field %}
+<div class="dashboard-page">
+  <div class="row justify-content-center">
+    <div class="col-lg-7">
+      <div class="card dash-panel border-0 shadow-sm">
+        <div class="card-header bg-white">
+          <strong>Company Branding</strong>
+        </div>
+        <div class="card-body">
+          <p class="text-muted small">
+            This name and logo appear in your sidebar and on printed invoices.
+            Customers see your company — not Agri Books — in the header.
+          </p>
+          <form method="post" action="{{ url_for('auth.company_branding') }}">
+            {{ form.hidden_tag() }}
+            {{ form.company_logo() }}
+            <div class="row g-3 align-items-start">
+              <div class="col-md-8">
+                {{ form.company_name.label(class='form-label') }}
+                {{ form.company_name(class='form-control', placeholder='Your business name') }}
+              </div>
+              <div class="col-md-4">
+                <label class="form-label d-block">Company Logo</label>
+                {{ photo_field(icon='fa-image', label='Company logo', upload='ajax', folder='logos', clear_name='clear_company_logo', picker_id='self-branding-logo-picker', current_url=current_user.company_logo_url) }}
+                <div class="form-text">Add, replace, or remove anytime.</div>
+              </div>
+            </div>
+            <div class="mt-4 d-flex gap-2">
+              {{ form.submit(class='btn btn-success') }}
+              <a href="{{ url_for('dashboard.index') }}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

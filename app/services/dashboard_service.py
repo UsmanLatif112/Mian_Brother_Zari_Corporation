@@ -185,9 +185,171 @@ def ensure_customer_type_column():
         pass
 
     try:
+        _migrate_category_name_unique()
+    except Exception:
+        pass
+
+    try:
         _migrate_fractional_bags_to_open_weight()
     except Exception:
         pass
+
+    try:
+        _migrate_qty_precision()
+    except Exception:
+        pass
+
+    try:
+        _ensure_salesman_schema()
+    except Exception:
+        pass
+
+
+def _ensure_salesman_schema():
+    """Create salesmen table and sales.salesman_id for existing databases."""
+    from app.models import Salesman
+
+    try:
+        Salesman.__table__.create(db.engine, checkfirst=True)
+    except Exception:
+        pass
+    try:
+        insp = inspect(db.engine)
+        cols = {c["name"] for c in insp.get_columns("sales")}
+        if "salesman_id" not in cols:
+            with db.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE sales ADD COLUMN salesman_id INTEGER"))
+    except Exception:
+        pass
+
+
+def _migrate_qty_precision():
+    """Widen bag-fraction qty columns so 10÷30 kg does not store as 0.333 → 9.99 kg."""
+    dialect = db.engine.dialect.name
+    if dialect not in ("postgresql", "postgres"):
+        # SQLite ignores numeric scale; SQLAlchemy model scale handles new writes.
+        return
+    alters = (
+        ("stock_movements", "quantity", "NUMERIC(18, 6)"),
+        ("stock_movements", "balance_after", "NUMERIC(18, 6)"),
+        ("sale_items", "quantity", "NUMERIC(18, 6)"),
+        ("products", "current_stock", "NUMERIC(18, 6)"),
+    )
+    for table, col, coltype in alters:
+        try:
+            with db.engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {col} TYPE {coltype}"))
+        except Exception:
+            pass
+
+
+def _migrate_category_name_unique():
+    """
+    Drop global UNIQUE on categories.name so names like PGR work freely,
+    soft-deleted names can be reused, and subcategories can share labels.
+    """
+    dialect = db.engine.dialect.name
+    insp = inspect(db.engine)
+    try:
+        cols = {c["name"] for c in insp.get_columns("categories")}
+    except Exception:
+        return
+    if "name" not in cols:
+        return
+
+    if dialect == "sqlite":
+        create_sql = ""
+        try:
+            with db.engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT sql FROM sqlite_master WHERE type='table' AND name='categories'")
+                ).fetchone()
+            create_sql = (row[0] or "") if row else ""
+        except Exception:
+            return
+        # Only migrate when name itself is UNIQUE (legacy schema)
+        lowered = " ".join(create_sql.lower().split())
+        if "name varchar" not in lowered and "name text" not in lowered:
+            # still allow name VARCHAR(100) not null unique
+            pass
+        if "unique" not in lowered:
+            return
+        # Match patterns like: name VARCHAR(100) NOT NULL UNIQUE
+        import re
+
+        if not re.search(r"name\s+varchar\(\d+\)[^,]*unique", lowered):
+            # Also: UNIQUE(name) table constraint
+            if "unique(name)" not in lowered and "unique (name)" not in lowered:
+                return
+
+        with db.engine.begin() as conn:
+            conn.execute(text("PRAGMA foreign_keys=OFF"))
+            conn.execute(text("DROP TABLE IF EXISTS categories_name_mig"))
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE categories_name_mig (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        name VARCHAR(200) NOT NULL,
+                        description TEXT,
+                        parent_id INTEGER,
+                        remote_id INTEGER,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        sync_updated_at DATETIME,
+                        is_deleted BOOLEAN NOT NULL DEFAULT 0,
+                        deleted_at DATETIME,
+                        FOREIGN KEY(parent_id) REFERENCES categories_name_mig (id)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO categories_name_mig (
+                        id, name, description, parent_id, remote_id,
+                        created_at, updated_at, sync_updated_at, is_deleted, deleted_at
+                    )
+                    SELECT
+                        id, name, description, parent_id, remote_id,
+                        created_at, updated_at, sync_updated_at, is_deleted, deleted_at
+                    FROM categories
+                    """
+                )
+            )
+            conn.execute(text("DROP TABLE categories"))
+            conn.execute(text("ALTER TABLE categories_name_mig RENAME TO categories"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_categories_name ON categories (name)"))
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_categories_is_deleted ON categories (is_deleted)")
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_categories_remote_id ON categories (remote_id)")
+            )
+            conn.execute(text("PRAGMA foreign_keys=ON"))
+        return
+
+    if dialect in ("mysql", "mariadb"):
+        # Drop unique index on name if present
+        try:
+            with db.engine.begin() as conn:
+                rows = conn.execute(text("SHOW INDEX FROM categories WHERE Column_name='name'")).fetchall()
+                for row in rows:
+                    # Row mapping varies; Non_unique == 0 means unique
+                    non_unique = row[1] if len(row) > 1 else 1
+                    key_name = row[2] if len(row) > 2 else None
+                    # SHOW INDEX: Non_unique is index 1, Key_name is index 2
+                    try:
+                        non_unique = row._mapping.get("Non_unique", non_unique)
+                        key_name = row._mapping.get("Key_name", key_name)
+                    except Exception:
+                        pass
+                    if key_name and int(non_unique) == 0 and key_name != "PRIMARY":
+                        conn.execute(text(f"ALTER TABLE categories DROP INDEX `{key_name}`"))
+                conn.execute(text("ALTER TABLE categories MODIFY name VARCHAR(200) NOT NULL"))
+        except Exception:
+            pass
 
 
 def _backfill_purchase_item_weights():

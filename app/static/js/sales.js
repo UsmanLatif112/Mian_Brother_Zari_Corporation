@@ -53,7 +53,6 @@
       <td class="sale-unit-wt-td">
         <div class="unit-wt-group input-group input-group-sm">
           <input type="number" min="0" step="0.001" class="form-control unit-weight bg-light" value="" readonly tabindex="-1" placeholder="—">
-          <select class="form-select form-select-sm packaging-select d-none" title="Choose bag weight" aria-label="Bag weight"></select>
           <span class="input-group-text unit-weight-suffix bg-light px-1 small">—</span>
         </div>
       </td>
@@ -96,72 +95,6 @@
     return rowUnitWeight(tr) > 0;
   }
 
-  function applyPackagingOptions(tr, packagings, selectedUw) {
-    const input = tr.querySelector('.unit-weight');
-    const sel = tr.querySelector('.packaging-select');
-    const suffix = tr.querySelector('.unit-weight-suffix');
-    const group = tr.querySelector('.unit-wt-group');
-    const list = (Array.isArray(packagings) ? packagings : []).filter(
-      (p) => p && Number(p.unit_weight) > 0
-    );
-    tr._packagings = list;
-    if (!sel || !input) return;
-
-    if (list.length > 1) {
-      input.classList.add('d-none');
-      sel.classList.remove('d-none');
-      if (suffix) suffix.classList.add('d-none');
-      group?.classList.add('has-packaging-choice');
-      tr.classList.add('has-packaging-choice');
-      const want = Number(selectedUw || list[0].unit_weight);
-      sel.innerHTML = list
-        .map((p) => {
-          const uw = Number(p.unit_weight);
-          const wu = p.weight_unit || 'kg';
-          const price = Number(p.sale_price || 0);
-          const selected = Math.abs(uw - want) < 0.001 ? ' selected' : '';
-          // Short label so the cell stays readable; price lives in List Price
-          return `<option value="${uw}" data-price="${price}" data-wu="${wu}"${selected}>${uw} ${wu}</option>`;
-        })
-        .join('');
-      applySelectedPackaging(tr, { keepDirty: true });
-    } else {
-      sel.classList.add('d-none');
-      sel.innerHTML = '';
-      input.classList.remove('d-none');
-      if (suffix) suffix.classList.remove('d-none');
-      group?.classList.remove('has-packaging-choice');
-      tr.classList.remove('has-packaging-choice');
-    }
-  }
-
-  function applySelectedPackaging(tr, { keepDirty = false } = {}) {
-    const sel = tr.querySelector('.packaging-select');
-    if (!sel || sel.classList.contains('d-none')) return;
-    const opt = sel.selectedOptions[0];
-    if (!opt) return;
-    const uw = opt.value;
-    const price = Number(opt.dataset.price || 0);
-    const wu = opt.dataset.wu || 'kg';
-    tr.querySelector('.product-unit-weight').value = uw;
-    tr.querySelector('.unit-weight').value = uw;
-    tr.querySelector('.product-weight-unit').value = wu;
-    tr.querySelector('.list-price').value = money(price);
-    const suffix = tr.querySelector('.unit-weight-suffix');
-    if (suffix) suffix.textContent = wu;
-    const wSuffix = tr.querySelector('.sale-weight-suffix');
-    if (wSuffix) wSuffix.textContent = wu;
-    if (!keepDirty || tr.dataset.priceDirty !== '1') {
-      if (isOpenSale(tr)) {
-        tr.querySelector('.price').value = money(suggestedWeightAmount(tr));
-      } else {
-        tr.querySelector('.price').value = money(price);
-      }
-      tr.dataset.priceDirty = '0';
-    }
-    applyRowMode(tr);
-  }
-
   function getSaleMode(tr) {
     if (!hasUnitWeight(tr)) return 'qty';
     return tr.querySelector('.sale-mode')?.value === 'open' ? 'open' : 'full';
@@ -194,6 +127,7 @@
     const suffix = tr.querySelector('.unit-weight-suffix');
     const wSuffix = tr.querySelector('.sale-weight-suffix');
     const unit = tr.querySelector('.product-weight-unit')?.value || 'kg';
+    const unitInput = tr.querySelector('.unit-weight');
 
     tr.classList.toggle('mode-weight', open);
     tr.classList.toggle('mode-qty', !open);
@@ -207,6 +141,10 @@
       qty.title = open ? 'Quantity (from weight)' : weighted ? 'Full units' : 'Quantity (pieces)';
     }
     if (suffix) suffix.textContent = weighted ? unit : '—';
+    if (unitInput && weighted) {
+      unitInput.placeholder = '—';
+      unitInput.title = 'Fixed bag weight for this product';
+    }
     if (wSuffix) wSuffix.textContent = unit;
   }
 
@@ -226,20 +164,11 @@
   }
 
   function fillProductOnRow(tr, p, { keepAmount = false } = {}) {
-    const packagings = Array.isArray(p.packagings) ? p.packagings : [];
-    let unitWeight = Number(p.unit_weight || 0);
-    let weightUnit = p.weight_unit || '';
-    let listPrice = Number(
+    const unitWeight = Number(p.unit_weight || 0);
+    const weightUnit = p.weight_unit || '';
+    const listPrice = Number(
       p.list_price ?? p.list_unit_price ?? p.sale_price ?? p.unit_price ?? 0
     );
-    if (packagings.length) {
-      const want = unitWeight > 0 ? unitWeight : Number(packagings[0].unit_weight || 0);
-      const match =
-        packagings.find((x) => Math.abs(Number(x.unit_weight) - want) < 0.001) || packagings[0];
-      unitWeight = Number(match.unit_weight || 0);
-      weightUnit = match.weight_unit || weightUnit || 'kg';
-      listPrice = Number(match.sale_price ?? listPrice);
-    }
     tr.querySelector('.product-id').value = p.id || p.product_id || '';
     tr.querySelector('.product-search').value = p.name || '';
     tr.querySelector('.product-unit-weight').value = unitWeight > 0 ? unitWeight : '';
@@ -250,7 +179,6 @@
     const mode = unitWeight > 0 ? inferEditMode({ ...p, unit_weight: unitWeight }) : 'qty';
     if (unitWeight > 0) setSaleMode(tr, mode === 'open' ? 'open' : 'full');
     applyRowMode(tr);
-    applyPackagingOptions(tr, packagings, unitWeight);
 
     if (unitWeight > 0 && mode === 'open') {
       const saleW =
@@ -468,19 +396,6 @@
       applyRowMode(tr);
       recalc();
     });
-    tr.querySelector('.packaging-select')?.addEventListener('change', () => {
-      tr.dataset.priceDirty = '0';
-      applySelectedPackaging(tr);
-      const uw = rowUnitWeight(tr);
-      if (isOpenSale(tr)) {
-        const sw = Number(tr.querySelector('.sale-weight')?.value || 0);
-        if (!(sw > 0) && uw > 0) tr.querySelector('.sale-weight').value = uw;
-      } else if (uw > 0) {
-        const q = Number(tr.querySelector('.qty')?.value || 0);
-        tr.querySelector('.sale-weight').value = q > 0 ? q * uw : uw;
-      }
-      recalc();
-    });
     tr.querySelector('.price')?.addEventListener('input', () => {
       tr.dataset.priceDirty = '1';
       recalc();
@@ -505,7 +420,6 @@
       tr.querySelector('.product-id').value = '';
       tr.querySelector('.product-unit-weight').value = '';
       tr.querySelector('.product-weight-unit').value = '';
-      applyPackagingOptions(tr, [], null);
       setSaleMode(tr, 'full');
       applyRowMode(tr);
       setProductThumb(tr, null);
@@ -524,7 +438,6 @@
             results.innerHTML =
               rows
                 .map((p) => {
-                  const packs = encodeURIComponent(JSON.stringify(p.packagings || []));
                   return `<button type="button" class="lookup-item"
                       data-id="${p.id}"
                       data-name="${p.name}"
@@ -532,7 +445,6 @@
                       data-list="${p.list_price ?? p.sale_price}"
                       data-unit-weight="${p.unit_weight || ''}"
                       data-weight-unit="${p.weight_unit || ''}"
-                      data-packagings="${packs}"
                       data-photo="${p.photo_url || ''}">${p.label}</button>`;
                 })
                 .join('') +
@@ -557,12 +469,6 @@
         bootstrap.Modal.getOrCreateInstance(document.getElementById('quickProductModal')).show();
         return;
       }
-      let packagings = [];
-      try {
-        packagings = JSON.parse(decodeURIComponent(btn.dataset.packagings || '%5B%5D'));
-      } catch (_) {
-        packagings = [];
-      }
       fillProductOnRow(tr, {
         id: btn.dataset.id,
         name: btn.dataset.name,
@@ -570,7 +476,6 @@
         list_price: btn.dataset.list || btn.dataset.price,
         unit_weight: btn.dataset.unitWeight || '',
         weight_unit: btn.dataset.weightUnit || '',
-        packagings,
         photo_url: btn.dataset.photo || null,
         sale_mode: 'full',
       });
@@ -593,6 +498,9 @@
     document.getElementById('customer-id').value = '';
     document.getElementById('customer-search').value = '';
     document.getElementById('customer-selected').textContent = 'Walk-in';
+    document.getElementById('salesman-id').value = '';
+    document.getElementById('salesman-search').value = '';
+    document.getElementById('salesman-selected').textContent = 'None';
     document.getElementById('payment-status').value = 'paid';
     document.getElementById('sale-discount').value = '0';
     document.getElementById('amount-paid').value = '0';
@@ -629,6 +537,9 @@
       document.getElementById('customer-id').value = s.customer_id || '';
       document.getElementById('customer-search').value = s.customer_id ? s.customer_name || '' : '';
       document.getElementById('customer-selected').textContent = s.customer_name || 'Walk-in';
+      document.getElementById('salesman-id').value = s.salesman_id || '';
+      document.getElementById('salesman-search').value = s.salesman_id ? s.salesman_name || '' : '';
+      document.getElementById('salesman-selected').textContent = s.salesman_name || 'None';
       document.getElementById('payment-status').value = s.payment_status || 'paid';
       document.getElementById('sale-discount').value = money(s.discount || 0);
       document.getElementById('sale-notes').value = s.notes || '';
@@ -744,6 +655,104 @@
 
   document.getElementById('btn-add-customer')?.addEventListener('click', () => {
     openQuickCustomer(custSearch.value.trim());
+  });
+
+  // Salesman search (optional field officer)
+  let salesmanTimer = null;
+  const smSearch = document.getElementById('salesman-search');
+  const smResults = document.getElementById('salesman-results');
+  smSearch?.addEventListener('input', () => {
+    clearTimeout(salesmanTimer);
+    const q = smSearch.value.trim();
+    document.getElementById('salesman-id').value = '';
+    document.getElementById('salesman-selected').textContent = 'None';
+    if (q.length < 1) {
+      smResults.classList.add('d-none');
+      return;
+    }
+    salesmanTimer = setTimeout(async () => {
+      const res = await fetch('/api/salesmen/lookup?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      if (!data.results.length) {
+        smResults.innerHTML = `<button type="button" class="lookup-item lookup-create" data-name="${q}">+ Add "${q}"</button>`;
+      } else {
+        smResults.innerHTML =
+          data.results
+            .map(
+              (s) =>
+                `<button type="button" class="lookup-item" data-id="${s.id}" data-name="${s.name}">${s.label}</button>`
+            )
+            .join('') +
+          `<button type="button" class="lookup-item lookup-create" data-name="${q}">+ Add new salesman</button>`;
+      }
+      smResults.classList.remove('d-none');
+    }, 200);
+  });
+
+  smResults?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.lookup-item');
+    if (!btn) return;
+    if (btn.classList.contains('lookup-create')) {
+      openQuickSalesman(btn.dataset.name || '');
+      smResults.classList.add('d-none');
+      return;
+    }
+    document.getElementById('salesman-id').value = btn.dataset.id;
+    document.getElementById('salesman-selected').textContent = btn.dataset.name;
+    smSearch.value = btn.dataset.name;
+    smResults.classList.add('d-none');
+  });
+
+  function openQuickSalesman(prefillName) {
+    document.getElementById('qs-name').value = prefillName || '';
+    document.getElementById('qs-phone').value = '';
+    document.getElementById('qs-company').value = '';
+    document.getElementById('qs-address').value = '';
+    document.getElementById('qs-balance').value = '';
+    const err = document.getElementById('qs-error');
+    if (err) {
+      err.classList.add('d-none');
+      err.textContent = '';
+    }
+    window.PhotoPicker?.clear?.(document.getElementById('qs-photo-picker'));
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('quickSalesmanModal')).show();
+  }
+
+  document.getElementById('btn-add-salesman')?.addEventListener('click', () => {
+    openQuickSalesman(smSearch.value.trim());
+  });
+
+  document.getElementById('qs-save')?.addEventListener('click', async () => {
+    const err = document.getElementById('qs-error');
+    err.classList.add('d-none');
+    const payload = {
+      name: document.getElementById('qs-name').value.trim(),
+      phone: document.getElementById('qs-phone').value.trim(),
+      company: document.getElementById('qs-company').value.trim(),
+      address: document.getElementById('qs-address').value.trim(),
+      opening_balance: document.getElementById('qs-balance').value || 0,
+      photo: document.querySelector('#qs-photo-picker .photo-path')?.value || '',
+    };
+    if (!payload.name) {
+      err.textContent = 'Salesman name is required.';
+      err.classList.remove('d-none');
+      return;
+    }
+    const res = await fetch('/api/salesmen/quick', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      err.textContent = data.error || 'Could not save salesman';
+      err.classList.remove('d-none');
+      return;
+    }
+    document.getElementById('salesman-id').value = data.id;
+    document.getElementById('salesman-search').value = data.name;
+    document.getElementById('salesman-selected').textContent = data.name;
+    bootstrap.Modal.getInstance(document.getElementById('quickSalesmanModal'))?.hide();
   });
 
   document.getElementById('payment-status')?.addEventListener('change', () => {
@@ -1051,19 +1060,23 @@
         list_unit_price: listPrice,
         line_total: lineTotal,
       };
-      if (hasUnitWeight(tr)) {
-        item.unit_weight = rowUnitWeight(tr);
-        item.weight_unit = tr.querySelector('.product-weight-unit')?.value || '';
-      }
       if (isOpenSale(tr)) {
         item.sale_mode = 'open';
         item.sale_weight = Number(tr.querySelector('.sale-weight')?.value || 0);
         item.quantity = Number(tr.querySelector('.qty')?.value || 0);
         item.unit_price = lineTotal;
+        item.weight_unit = tr.querySelector('.product-weight-unit')?.value || '';
+        if (hasUnitWeight(tr)) {
+          item.unit_weight = rowUnitWeight(tr);
+        }
       } else {
         item.sale_mode = hasUnitWeight(tr) ? 'full' : 'qty';
         item.quantity = Number(tr.querySelector('.qty')?.value || 0);
         item.unit_price = Number(tr.querySelector('.price')?.value || 0);
+        if (hasUnitWeight(tr)) {
+          item.unit_weight = rowUnitWeight(tr);
+          item.weight_unit = tr.querySelector('.product-weight-unit')?.value || '';
+        }
       }
       items.push(item);
     });
@@ -1074,6 +1087,7 @@
     }
     const paymentStatus = document.getElementById('payment-status').value;
     const customerId = document.getElementById('customer-id').value || null;
+    const salesmanId = document.getElementById('salesman-id').value || null;
     if ((paymentStatus === 'unpaid' || paymentStatus === 'partial') && !customerId) {
       err.textContent = 'Select a customer for credit or partial sales.';
       err.classList.remove('d-none');
@@ -1082,6 +1096,7 @@
     const payload = {
       sale_date: document.getElementById('sale-date').value,
       customer_id: customerId,
+      salesman_id: salesmanId,
       payment_status: paymentStatus,
       amount_paid: document.getElementById('amount-paid').value,
       discount: document.getElementById('sale-discount')?.value || 0,

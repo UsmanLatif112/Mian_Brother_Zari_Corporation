@@ -50,6 +50,8 @@
             {{ '%.2f'|format(customer.balance|float) }}
           </h3>
           <div class="small text-muted mt-1">
+            Old account + sales &amp; payments
+            ·
             {% if customer.balance|float > 0 %}Customer owes (credit)
             {% elif customer.balance|float < 0 %}Advance with us
             {% else %}Settled{% endif %}

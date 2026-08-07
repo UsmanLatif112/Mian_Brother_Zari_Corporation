@@ -12,17 +12,15 @@ categories_bp = Blueprint("categories", __name__)
 
 
 def _norm_name(name):
-    return (name or "").strip()
+    from app.services.category_service import normalize_category_name
+
+    return normalize_category_name(name)
 
 
-def _name_taken(name, exclude_id=None):
-    q = Category.query.filter(
-        Category.is_deleted.is_(False),
-        Category.name.ilike(name),
-    )
-    if exclude_id:
-        q = q.filter(Category.id != exclude_id)
-    return q.first() is not None
+def _name_taken(name, exclude_id=None, parent_id=None):
+    from app.services.category_service import find_active_category
+
+    return find_active_category(name, parent_id=parent_id, exclude_id=exclude_id) is not None
 
 
 def _product_count(category_id):
@@ -112,23 +110,27 @@ def create():
 
     form = CategoryForm()
     if form.validate_on_submit():
+        from app.services.category_service import get_or_create_category
+
         name = _norm_name(form.name.data)
-        if not name:
-            flash("Category name is required.", "danger")
+        try:
+            cat, created = get_or_create_category(
+                name,
+                parent_id=None,
+                description=(form.description.data or "").strip() or None,
+            )
+            if created:
+                log_audit("create", "category", cat.id, cat.name)
+                db.session.commit()
+                flash("Category created.", "success")
+            else:
+                db.session.rollback()
+                flash(f'Category "{name}" already exists.', "danger")
+                return redirect(url_for("categories.index", open_modal=1))
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
             return redirect(url_for("categories.index", open_modal=1))
-        if _name_taken(name):
-            flash(f'Category "{name}" already exists.', "danger")
-            return redirect(url_for("categories.index", open_modal=1))
-        cat = Category(
-            name=name,
-            description=(form.description.data or "").strip() or None,
-            parent_id=None,
-        )
-        db.session.add(cat)
-        db.session.flush()
-        log_audit("create", "category", cat.id, cat.name)
-        db.session.commit()
-        flash("Category created.", "success")
         return redirect(url_for("categories.index"))
     flash("Please fix the form errors.", "danger")
     return redirect(url_for("categories.index", open_modal=1))
@@ -195,14 +197,24 @@ def edit(category_id):
     description = (request.form.get("description") or "").strip() or None
     if not name:
         flash("Name is required.", "danger")
-    elif _name_taken(name, exclude_id=cat.id):
+    elif _name_taken(name, exclude_id=cat.id, parent_id=cat.parent_id):
         flash(f'Name "{name}" is already used.', "danger")
     else:
+        from sqlalchemy.exc import IntegrityError
+
         cat.name = name
         cat.description = description
-        log_audit("update", "category", cat.id, cat.name)
-        db.session.commit()
-        flash("Category updated.", "success")
+        try:
+            log_audit("update", "category", cat.id, cat.name)
+            db.session.commit()
+            flash("Category updated.", "success")
+        except IntegrityError:
+            db.session.rollback()
+            flash(
+                f'Name "{name}" conflicts with another category. '
+                "Choose a different name.",
+                "danger",
+            )
 
     if cat.parent_id:
         return redirect(url_for("categories.detail", category_id=cat.parent_id))
@@ -246,23 +258,27 @@ def create_subcategory(category_id):
 
     form = CategoryForm()
     if form.validate_on_submit():
+        from app.services.category_service import get_or_create_category
+
         name = _norm_name(form.name.data)
-        if not name:
-            flash("Subcategory name is required.", "danger")
+        try:
+            sub, created = get_or_create_category(
+                name,
+                parent_id=parent.id,
+                description=(form.description.data or "").strip() or None,
+            )
+            if created:
+                log_audit("create", "category", sub.id, f"{parent.name} / {sub.name}")
+                db.session.commit()
+                flash("Subcategory created.", "success")
+            else:
+                db.session.rollback()
+                flash(f'Name "{name}" already exists under this category.', "danger")
+                return redirect(url_for("categories.detail", category_id=parent.id, open_modal=1))
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
             return redirect(url_for("categories.detail", category_id=parent.id, open_modal=1))
-        if _name_taken(name):
-            flash(f'Name "{name}" already exists.', "danger")
-            return redirect(url_for("categories.detail", category_id=parent.id, open_modal=1))
-        sub = Category(
-            name=name,
-            description=(form.description.data or "").strip() or None,
-            parent_id=parent.id,
-        )
-        db.session.add(sub)
-        db.session.flush()
-        log_audit("create", "category", sub.id, f"{parent.name} / {sub.name}")
-        db.session.commit()
-        flash("Subcategory created.", "success")
         return redirect(url_for("categories.detail", category_id=parent.id))
 
     flash("Please fix the form errors.", "danger")

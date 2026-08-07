@@ -31,7 +31,9 @@ class Category(SoftDeleteMixin, TimestampMixin, db.Model):
     __tablename__ = "categories"
 
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False, unique=True)
+    # Not globally unique — same label allowed as subcategory under another parent.
+    # Soft-deleted rows must not block reuse of a name.
+    name = db.Column(db.String(200), nullable=False, index=True)
     description = db.Column(db.Text, nullable=True)
     parent_id = db.Column(db.Integer, db.ForeignKey("categories.id"), nullable=True)
     remote_id = db.Column(db.Integer, nullable=True, index=True)
@@ -53,7 +55,7 @@ class Product(SoftDeleteMixin, TimestampMixin, db.Model):
     purchase_unit_id = db.Column(db.Integer, db.ForeignKey("units.id"), nullable=True)
     sale_unit_id = db.Column(db.Integer, db.ForeignKey("units.id"), nullable=True)
     opening_stock = db.Column(db.Numeric(14, 3), default=Decimal("0"))
-    current_stock = db.Column(db.Numeric(14, 3), default=Decimal("0"))
+    current_stock = db.Column(db.Numeric(18, 6), default=Decimal("0"))
     minimum_stock = db.Column(db.Numeric(14, 3), default=Decimal("0"))
     purchase_price = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     sale_price = db.Column(db.Numeric(14, 2), default=Decimal("0"))
@@ -96,6 +98,13 @@ class Product(SoftDeleteMixin, TimestampMixin, db.Model):
 
         return format_stock_display(self)
 
+    @property
+    def stock_total_display(self):
+        """List/summary: sealed bags + open kg (e.g. 304 + 19 kg)."""
+        from app.utils.weight_utils import format_stock_total_display
+
+        return format_stock_total_display(self)
+
     def qty_display(self, qty) -> str:
         from app.utils.weight_utils import format_qty_display
 
@@ -132,20 +141,22 @@ class StockLayer(db.Model):
 
     @property
     def effective_unit_weight(self):
-        """Batch weight if set, else product default."""
-        if self.unit_weight is not None and Decimal(str(self.unit_weight)) > 0:
-            return Decimal(str(self.unit_weight))
+        """Product weight (one per product); fall back to batch only if product unset."""
         product = self.product
         if product and product.unit_weight is not None and Decimal(str(product.unit_weight)) > 0:
             return Decimal(str(product.unit_weight))
+        if self.unit_weight is not None and Decimal(str(self.unit_weight)) > 0:
+            return Decimal(str(self.unit_weight))
         return None
 
     @property
     def effective_weight_unit(self):
+        product = self.product
+        if product and product.weight_unit:
+            return product.weight_unit
         if self.weight_unit:
             return self.weight_unit
-        product = self.product
-        return (product.weight_unit if product else None) or "kg"
+        return "kg"
 
     @property
     def open_weight(self):
@@ -186,9 +197,9 @@ class StockMovement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False, index=True)
     movement_type = db.Column(db.String(30), nullable=False)
-    quantity = db.Column(db.Numeric(14, 3), nullable=False)
+    quantity = db.Column(db.Numeric(18, 6), nullable=False)
     unit_cost = db.Column(db.Numeric(14, 2), nullable=True)
-    balance_after = db.Column(db.Numeric(14, 3), nullable=False)
+    balance_after = db.Column(db.Numeric(18, 6), nullable=False)
     reference_type = db.Column(db.String(30), nullable=True)
     reference_id = db.Column(db.Integer, nullable=True)
     notes = db.Column(db.Text, nullable=True)

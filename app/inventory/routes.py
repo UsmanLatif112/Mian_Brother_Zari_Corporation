@@ -29,13 +29,17 @@ inventory_bp = Blueprint("inventory", __name__)
 
 
 def _apply_product_weight(product, unit_weight_raw, weight_unit_raw):
-    """Set product packaging weight. Blank weight clears weight-based sales mode."""
+    """Set product packaging weight and sync every batch to the same weight."""
+    from app.services.fifo_service import _sync_all_layer_weights
+
     unit_weight = parse_unit_weight(unit_weight_raw)
     weight_unit = normalize_weight_unit(weight_unit_raw) if unit_weight else None
     if unit_weight and not weight_unit:
         weight_unit = "kg"
     product.unit_weight = unit_weight
     product.weight_unit = weight_unit if unit_weight else None
+    if unit_weight:
+        _sync_all_layer_weights(product)
 
 
 def _apply_product_photo(product):
@@ -647,19 +651,14 @@ def edit_layer_entry(layer_id):
         sale_price = Decimal(request.form.get("sale_price") or 0)
         product.purchase_price = purchase_price
         product.sale_price = sale_price
-        # This batch's packaging only — does not rewrite other batches.
-        uw = parse_unit_weight(request.form.get("unit_weight"))
-        wu = normalize_weight_unit(request.form.get("weight_unit")) if uw else None
-        if uw and not wu:
-            wu = "kg"
-        layer.unit_weight = uw
-        layer.weight_unit = wu if uw else None
-        # Keep product default in sync with this edit (UI default for new receipts).
+        # One product = one weight: update product and sync all batches.
         _apply_product_weight(
             product,
             request.form.get("unit_weight"),
             request.form.get("weight_unit"),
         )
+        layer.unit_weight = product.unit_weight
+        layer.weight_unit = product.weight_unit
 
         try:
             open_w = Decimal(str(request.form.get("open_weight_remaining") or 0))

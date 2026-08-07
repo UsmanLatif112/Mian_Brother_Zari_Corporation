@@ -11,6 +11,43 @@ from app.services.sync_service import enqueue_sync
 from app.utils.working_date import get_working_date
 
 
+def _sale_particulars_notes(sale) -> str:
+    """Short particulars for salesman / customer ledger notes."""
+    try:
+        from app.services.journal_service import _sale_line_particular
+
+        parts = [_sale_line_particular(it) for it in (sale.items or [])]
+        if parts:
+            return " · ".join(parts)
+    except Exception:
+        pass
+    return f"Sale {sale.invoice_no}"
+
+
+def _post_salesman_sale_ledger(sale, grand, applied):
+    """Attribute one sale row on the salesman ledger (paid / partial / unpaid)."""
+    if not sale.salesman_id:
+        return
+    from app.models import Salesman
+
+    salesman = db.session.get(Salesman, sale.salesman_id)
+    if not salesman or salesman.is_deleted:
+        return
+    notes = _sale_particulars_notes(sale)
+    post_ledger_entry(
+        "salesman",
+        salesman.id,
+        "sale",
+        debit=grand,
+        credit=applied,
+        entry_date=sale.sale_date,
+        reference_type="sale",
+        reference_id=sale.id,
+        notes=notes,
+    )
+    rebuild_party_balances("salesman", salesman.id)
+
+
 def generate_invoice_no():
     last = Sale.query.order_by(Sale.id.desc()).first()
     num = (last.id + 1) if last else 1
@@ -29,6 +66,7 @@ def create_sale(data, items, user_id):
         invoice_no=data.get("invoice_no") or generate_invoice_no(),
         sale_date=sale_date,
         customer_id=data.get("customer_id"),
+        salesman_id=data.get("salesman_id"),
         discount=Decimal(str(data.get("discount", 0))),
         tax_amount=Decimal(str(data.get("tax_amount", 0))),
         payment_method=PaymentMethod(data.get("payment_method", "cash")),
@@ -171,6 +209,8 @@ def create_sale(data, items, user_id):
                 notes=f"Overpayment advance from sale {sale.invoice_no}",
             )
 
+    _post_salesman_sale_ledger(sale, grand, applied)
+
     enqueue_sync("sales", sale.id, "create")
     return sale
 
@@ -249,6 +289,12 @@ def update_sale(sale_id, sale_date=None, notes=None, amount_paid=None, user_id=N
                     notes=f"Overpayment advance from sale {sale.invoice_no}",
                 )
             rebuild_party_balances("customer", sale.customer_id)
+
+        # Refresh salesman attribution for this sale (paid / partial / unpaid)
+        sid = sale.salesman_id
+        if sid:
+            # delete_ledger_by_reference already removed old sale rows for all parties
+            _post_salesman_sale_ledger(sale, grand, new_applied)
 
         reverse_cash_by_reference(
             "sale", sale.id, notes=f"Adjust sale {sale.invoice_no}", created_by_id=user_id

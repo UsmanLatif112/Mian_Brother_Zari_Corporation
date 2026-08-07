@@ -217,8 +217,23 @@ class VendorForm(FlaskForm):
     submit = SubmitField("Save")
 
 
+class SalesmanForm(FlaskForm):
+    name = StringField("Name", validators=[DataRequired()])
+    phone = StringField("Phone", validators=[Optional()])
+    company = StringField("Company", validators=[Optional()])
+    address = TextAreaField("Address", validators=[Optional()])
+    opening_balance = DecimalField(
+        "Opening Balance",
+        places=2,
+        validators=[Optional()],
+        default=None,
+    )
+    notes = TextAreaField("Notes", validators=[Optional()])
+    submit = SubmitField("Save")
+
+
 class CategoryForm(FlaskForm):
-    name = StringField("Name", validators=[DataRequired(), Length(max=100)])
+    name = StringField("Name", validators=[DataRequired(), Length(min=1, max=200)])
     description = TextAreaField("Description", validators=[Optional()])
     submit = SubmitField("Save")
 

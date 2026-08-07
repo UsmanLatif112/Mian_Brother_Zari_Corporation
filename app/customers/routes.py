@@ -16,7 +16,7 @@ from app.services.customer_payment_service import (
 )
 from app.services.ledger_service import (
     delete_ledger_entry_cascading,
-    post_ledger_entry,
+    sync_party_opening_entry,
     update_ledger_entry,
 )
 from app.utils.decorators import permission_required
@@ -39,6 +39,57 @@ def _apply_customer_photo(customer):
     if path:
         delete_image(customer.photo)
         customer.photo = path
+
+
+def _opening_notes(customer):
+    return "Old book balance" + (
+        f" ({customer.old_book_no})" if customer.old_book_no else ""
+    )
+
+
+def _ensure_customer_opening(customer):
+    """
+    Ensure ledger has an Opening row matching opening_balance (date = joined_date).
+    Rebuilds Customer.balance = old + later in/out. Returns True if anything changed.
+    """
+    opening = Decimal(str(customer.opening_balance or 0))
+    rows = (
+        LedgerEntry.query.filter_by(
+            party_type="customer", party_id=customer.id, entry_type="opening"
+        )
+        .order_by(LedgerEntry.id.asc())
+        .all()
+    )
+    primary = rows[0] if rows else None
+    led = (
+        Decimal(str(primary.debit or 0)) - Decimal(str(primary.credit or 0))
+        if primary
+        else Decimal("0")
+    )
+    date_mismatch = bool(
+        primary
+        and customer.joined_date
+        and primary.entry_date != customer.joined_date
+    )
+    if opening == led and len(rows) <= 1 and not date_mismatch:
+        return False
+    sync_party_opening_entry(
+        "customer",
+        customer.id,
+        opening,
+        entry_date=customer.joined_date or get_working_date(),
+        notes=_opening_notes(customer),
+    )
+    return True
+
+
+def _heal_customers_opening(customers):
+    changed = False
+    for customer in customers:
+        if _ensure_customer_opening(customer):
+            changed = True
+    if changed:
+        db.session.commit()
 
 
 def _parse_date(value):
@@ -72,6 +123,7 @@ def _customer_page(form=None, open_modal=False):
         query = query.filter(Customer.customer_type == ctype)
 
     customers = query.order_by(Customer.name).all()
+    _heal_customers_opening(customers)
 
     base = [Customer.is_deleted.is_(False)]
     if range_start:
@@ -149,20 +201,13 @@ def create():
             _apply_customer_photo(customer)
             db.session.add(customer)
             db.session.flush()
-            if opening:
-                opening_d = Decimal(str(opening))
-                debit = opening_d if opening_d > 0 else Decimal("0")
-                credit = abs(opening_d) if opening_d < 0 else Decimal("0")
-                post_ledger_entry(
-                    "customer",
-                    customer.id,
-                    "opening",
-                    debit=debit,
-                    credit=credit,
-                    entry_date=joined,
-                    notes="Old book balance"
-                    + (f" ({customer.old_book_no})" if customer.old_book_no else ""),
-                )
+            sync_party_opening_entry(
+                "customer",
+                customer.id,
+                opening,
+                entry_date=joined,
+                notes=_opening_notes(customer),
+            )
             log_audit("create", "customer", None, customer.name)
             db.session.commit()
             flash("Customer created.", "success")
@@ -238,7 +283,16 @@ def detail(customer_id):
         ledger_q = ledger_q.filter(LedgerEntry.entry_date <= range_end)
         recv_q = recv_q.filter(CustomerReceiving.receiving_date <= range_end)
 
-    ledger = ledger_q.order_by(LedgerEntry.entry_date, LedgerEntry.id).all()
+    # Heal: old account on profile must appear as Opening row; total = old + in/out
+    if _ensure_customer_opening(customer):
+        db.session.commit()
+        ledger_q = LedgerEntry.query.filter_by(party_type="customer", party_id=customer_id)
+        if range_start:
+            ledger_q = ledger_q.filter(LedgerEntry.entry_date >= range_start)
+        if range_end:
+            ledger_q = ledger_q.filter(LedgerEntry.entry_date <= range_end)
+
+    ledger = ledger_q.order_by(LedgerEntry.entry_date.desc(), LedgerEntry.id.desc()).all()
     receivings = recv_q.order_by(CustomerReceiving.receiving_date.desc()).all()
     return render_template(
         "customers/detail.html",
@@ -279,6 +333,13 @@ def edit(customer_id):
             Decimal("0") if opening in (None, "") else Decimal(str(opening))
         )
         _apply_customer_photo(customer)
+        sync_party_opening_entry(
+            "customer",
+            customer.id,
+            customer.opening_balance,
+            entry_date=customer.joined_date or get_working_date(),
+            notes=_opening_notes(customer),
+        )
         log_audit("update", "customer", customer.id, customer.name)
         db.session.commit()
         flash("Customer updated.", "success")

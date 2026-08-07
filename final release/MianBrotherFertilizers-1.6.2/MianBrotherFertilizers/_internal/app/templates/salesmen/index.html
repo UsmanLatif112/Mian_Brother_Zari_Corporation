@@ -1,0 +1,212 @@
+{% extends 'base.html' %}
+{% from 'partials/macros.html' import form_modal, photo_field, header_period_filter %}
+{% block title %}Salesmen{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='salesmen-period-form',
+  persist_key='salesmen-period',
+  clear_url=url_for('salesmen.index', period='all'),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='this.form.submit()'
+) }}
+{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
+    <div>
+      <h1 class="h3 mb-1">Salesmen</h1>
+      <p class="text-muted mb-0">Field officers who bring customers — optional on each sale</p>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#formModal">
+        <i class="fa-solid fa-plus me-1"></i> Add Salesman
+      </button>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Salesmen</p>
+            <h3 class="mb-0 fw-bold">{{ salesmen|length }}</h3>
+          </div>
+          <div class="stat-icon bg-success-subtle text-success"><i class="fa-solid fa-user-tie"></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Total Sales</p>
+            <h3 class="mb-0 fw-bold">{{ '%.2f'|format(total_sales_all|float) }}</h3>
+          </div>
+          <div class="stat-icon bg-primary-subtle text-primary"><i class="fa-solid fa-sack-dollar"></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Credit Outstanding</p>
+            <h3 class="mb-0 fw-bold">{{ '%.2f'|format(total_credit|float) }}</h3>
+          </div>
+          <div class="stat-icon bg-warning-subtle text-warning"><i class="fa-solid fa-hand-holding-dollar"></i></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Salesman List</strong>
+      <span class="text-muted small">{{ salesmen|length }} records</span>
+    </div>
+    <table class="table datatable mb-0 w-100" id="salesmen-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Phone</th>
+          <th>Company</th>
+          <th class="text-end">Total Sale</th>
+          <th class="text-end">Credit Bal.</th>
+          <th class="col-actions">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in salesmen %}
+        <tr>
+          <td class="fw-semibold">{{ s.name }}</td>
+          <td>{{ s.phone or '—' }}</td>
+          <td>{{ s.company or '—' }}</td>
+          <td class="text-end">{{ '%.2f'|format((s.total_sales or 0)|float) }}</td>
+          <td class="text-end {% if s.balance|float > 0 %}text-warning{% endif %}">
+            {{ '%.2f'|format(s.balance|float) }}
+          </td>
+          <td class="col-actions">
+            <div class="table-actions">
+            <button type="button" class="action-icon-btn action-edit btn-edit-salesman" title="Edit"
+                    data-id="{{ s.id }}"
+                    data-name="{{ s.name }}"
+                    data-phone="{{ s.phone or '' }}"
+                    data-company="{{ s.company or '' }}"
+                    data-address="{{ s.address or '' }}"
+                    data-opening="{{ s.opening_balance or 0 }}"
+                    data-notes="{{ s.notes or '' }}"
+                    data-photo="{{ s.photo_url or '' }}">
+              <i class="fa-solid fa-pen"></i>
+            </button>
+            <a href="{{ url_for('salesmen.detail', salesman_id=s.id) }}" class="action-icon-btn" title="Ledger">
+              <i class="fa-solid fa-book-open"></i>
+            </a>
+            <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
+                    data-action="{{ url_for('salesmen.delete', salesman_id=s.id) }}"
+                    data-title="Delete this salesman?"
+                    data-message="Past sales keep their history. This salesman will be hidden from new sales.">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% call form_modal('Add Salesman', 'Save Salesman') %}
+<form method="post" action="{{ url_for('salesmen.create') }}" id="entity-form" enctype="multipart/form-data">
+  {{ form.hidden_tag() }}
+  <div class="row g-2 align-items-end">
+    <div class="col-auto">{{ photo_field(icon='fa-user-tie', label='Photo') }}</div>
+    <div class="col-md-5">{{ form.name.label(class='form-label') }}{{ form.name(class='form-control') }}</div>
+    <div class="col-md-5">{{ form.phone.label(class='form-label') }}{{ form.phone(class='form-control') }}</div>
+    <div class="col-md-6">{{ form.company.label(class='form-label') }}{{ form.company(class='form-control', placeholder='Optional') }}</div>
+    <div class="col-md-6">
+      <label class="form-label">{{ form.opening_balance.label.text }} <span class="text-muted fw-normal">(optional)</span></label>
+      {{ form.opening_balance(class='form-control', placeholder='Leave blank if none') }}
+    </div>
+    <div class="col-12">{{ form.address.label(class='form-label') }}{{ form.address(class='form-control', rows=2) }}</div>
+    <div class="col-12">{{ form.notes.label(class='form-label') }}{{ form.notes(class='form-control', rows=2) }}</div>
+  </div>
+</form>
+{% endcall %}
+
+<div class="modal fade erp-form-modal" id="editSalesmanModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" id="edit-salesman-form" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Salesman</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-2 align-items-end">
+            <div class="col-auto">{{ photo_field(icon='fa-user-tie', label='Photo') }}</div>
+            <div class="col-md-5">
+              <label class="form-label">Name</label>
+              <input name="name" class="form-control" required>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label">Phone</label>
+              <input name="phone" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Company</label>
+              <input name="company" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Opening Balance <span class="text-muted fw-normal">(optional)</span></label>
+              <input type="number" step="0.01" name="opening_balance" class="form-control" placeholder="Leave blank if none">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Address</label>
+              <textarea name="address" class="form-control" rows="2"></textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notes</label>
+              <textarea name="notes" class="form-control" rows="2"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.btn-edit-salesman').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const form = document.getElementById('edit-salesman-form');
+    form.action = `/salesmen/${btn.dataset.id}/edit`;
+    form.querySelector('[name=name]').value = btn.dataset.name || '';
+    form.querySelector('[name=phone]').value = btn.dataset.phone || '';
+    form.querySelector('[name=company]').value = btn.dataset.company || '';
+    form.querySelector('[name=address]').value = btn.dataset.address || '';
+    form.querySelector('[name=opening_balance]').value = btn.dataset.opening || '';
+    form.querySelector('[name=notes]').value = btn.dataset.notes || '';
+    if (window.PhotoPicker) {
+      PhotoPicker.setPreview?.(form.querySelector('.photo-picker'), btn.dataset.photo || '');
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editSalesmanModal')).show();
+  });
+});
+{% if open_modal %}
+document.addEventListener('DOMContentLoaded', () => {
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('formModal')).show();
+});
+{% endif %}
+</script>
+{% endblock %}

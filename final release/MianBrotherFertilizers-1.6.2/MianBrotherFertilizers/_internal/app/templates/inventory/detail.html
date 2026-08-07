@@ -1,0 +1,699 @@
+{% extends 'base.html' %}
+{% from 'partials/macros.html' import photo_field, header_period_filter %}
+{% block title %}{{ product.name }}{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='product-filter-form',
+  persist_key='inventory-detail',
+  clear_url=url_for('inventory.detail', product_id=product.id, period='all'),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onProductPeriodChange()'
+) }}
+{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
+    <div class="d-flex align-items-start gap-3">
+      {% from 'partials/macros.html' import party_avatar %}
+      {{ party_avatar(product.photo_url, product.name, 'fa-box', 'lg') }}
+      <div>
+      <a href="{{ url_for('inventory.index') }}" class="text-muted small text-decoration-none">
+        <i class="fa-solid fa-arrow-left me-1"></i> Inventory
+      </a>
+      <h1 class="h3 mb-1 mt-1">{{ product.name }}</h1>
+      <p class="text-muted mb-0">
+        {{ product.sku }}
+        {% if product.category %} · {{ product.category.name }}{% endif %}
+        · Stock {{ product.stock_total_display }}
+      </p>
+      </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#repriceAllModal">
+        <i class="fa-solid fa-tags me-1"></i> Update Price
+      </button>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-3">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Total Stock</p>
+          <h3 class="mb-0">{{ product.stock_total_display }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Total Stock Value</p>
+          <h3 class="mb-0">{{ '%.2f'|format(total_stock_value|float) }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Open Batch</p>
+          <h3 class="mb-0">{{ open_batch_count }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Closed Batch</p>
+          <h3 class="mb-0">{{ closed_batch_count }}</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-header bg-white">
+      <strong>Stock Batches (FIFO)</strong>
+      <span class="text-muted small ms-2">Each batch keeps its own unit weight · Sealed bags and open kg are separate</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table mb-0 table-sm datatable inventory-batches-table" id="inventory-batches-table">
+        <thead>
+          <tr>
+            <th>Batch</th>
+            <th>Vendor</th>
+            <th>Invoice</th>
+            <th class="text-end">Unit Wt</th>
+            <th>Expiry</th>
+            <th>Received</th>
+            <th class="text-end">Purchased</th>
+            <th class="text-end">Sealed</th>
+            <th class="text-end">Open Wt</th>
+            <th class="text-end">Available</th>
+            <th class="text-end">Used</th>
+            <th class="text-end">Purchase</th>
+            <th class="text-end">Sale Price</th>
+            <th class="col-actions">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for L in layers %}
+          <tr class="{% if not L.has_stock() %}text-muted{% endif %}">
+            <td>{% if L.batch_number %}#{{ L.batch_number }}{% else %}#{{ L.id }}{% endif %}</td>
+            <td>{{ L.vendor.name if L.vendor else '—' }}</td>
+            <td>{{ L.invoice_no or '—' }}</td>
+            <td class="text-end">
+              {% if L.effective_unit_weight %}
+                {{ L.effective_unit_weight|clean_num }} {{ L.effective_weight_unit }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>
+              {% if L.expiry_date %}
+                {% if L.expiry_date < today %}
+                <span class="text-danger" title="Expired">{{ L.expiry_date.strftime('%Y-%m-%d') }}</span>
+                {% else %}
+                {{ L.expiry_date.strftime('%Y-%m-%d') }}
+                {% endif %}
+              {% else %}
+              —
+              {% endif %}
+            </td>
+            <td>{{ L.received_at.strftime('%Y-%m-%d') if L.received_at else '—' }}</td>
+            <td class="text-end">{{ L.quantity_purchased|qty_display(L) }}</td>
+            <td class="text-end">{{ (L.quantity_remaining or 0)|clean_num }}</td>
+            <td class="text-end">
+              {% if L.open_weight and L.open_weight > 0 %}
+                {{ L.open_weight|clean_num }} {{ L.effective_weight_unit }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td class="text-end fw-semibold">{{ L.quantity_remaining|qty_display(L) }}</td>
+            <td class="text-end text-muted">{{ L.quantity_used|qty_display(L) }}</td>
+            <td class="text-end">{{ '%.2f'|format(L.unit_cost|float) }}</td>
+            <td class="text-end">{{ '%.2f'|format((L.sale_price or product.sale_price or 0)|float) }}</td>
+            <td class="col-actions">
+              <div class="table-actions">
+                <button type="button" class="action-icon-btn action-edit btn-edit-entry" title="Edit"
+                        data-layer-id="{{ L.id }}"
+                        data-name="{{ product.name }}"
+                        data-sku="{{ product.sku }}"
+                        data-barcode="{{ product.barcode or '' }}"
+                        data-brand="{{ product.brand or '' }}"
+                        data-category-id="{{ product.category_id or '' }}"
+                        data-category-name="{{ product.category.name if product.category else '' }}"
+                        data-subcategory-id="{{ product.subcategory_id or '' }}"
+                        data-subcategory-name="{{ product.subcategory.name if product.subcategory else '' }}"
+                        data-vendor-id="{{ L.vendor_id or '' }}"
+                        data-vendor-name="{{ L.vendor.name if L.vendor else '' }}"
+                        data-invoice="{{ L.invoice_no or '' }}"
+                        data-purchase="{{ '%.2f'|format(L.unit_cost|float) }}"
+                        data-sale="{{ '%.2f'|format((L.sale_price or product.sale_price or 0)|float) }}"
+                        data-unit-weight="{{ L.effective_unit_weight|clean_num if L.effective_unit_weight else '' }}"
+                        data-weight-unit="{{ L.effective_weight_unit if L.effective_unit_weight else '' }}"
+                        data-qty="{{ (L.quantity_remaining or 0)|clean_num }}"
+                        data-open-weight="{{ L.open_weight|clean_num }}"
+                        data-purchased="{{ L.quantity_purchased|clean_num }}"
+                        data-used="{{ L.quantity_used|clean_num }}"
+                        data-min="{{ product.minimum_stock or 0 }}"
+                        data-batch-number="{{ L.batch_number or '' }}"
+                        data-expiry="{{ L.expiry_date.strftime('%Y-%m-%d') if L.expiry_date else '' }}"
+                        data-desc="{{ product.description or '' }}"
+                        data-photo="{{ product.photo_url or '' }}">
+                  <i class="fa-solid fa-pen"></i>
+                </button>
+                <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete batch"
+                        data-action="{{ url_for('inventory.delete_layer', layer_id=L.id) }}"
+                        data-title="Delete batch #{{ L.id }}?"
+                        data-message="This batch will be removed. Choose Yes only if you are sure."
+                        data-effects="Remove unsold stock from this batch|Reduce linked purchase &amp; vendor payable|Recalculate stock value and inventory totals|Sold qty on this batch stays on the purchase">
+                  <i class="fa-solid fa-trash"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="card-header bg-white"><strong>Recent Movements</strong></div>
+    <div class="table-responsive">
+      <table class="table mb-0">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Type</th>
+            <th class="text-end">Qty</th>
+            <th class="text-end">Cost</th>
+            <th class="text-end">Stock after</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in movements %}
+          <tr>
+            <td>{{ m.created_at.strftime('%Y-%m-%d %H:%M') if m.created_at else '—' }}</td>
+            <td>{{ m.movement_type }}</td>
+            <td class="text-end">{{ m|movement_qty_display(product) }}</td>
+            <td class="text-end">{{ '%.2f'|format((m.unit_cost or 0)|float) }}</td>
+            <td class="text-end">{{ m.balance_after|qty_display(product) }}</td>
+            <td class="small text-muted">{{ m.notes or '—' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-muted text-center py-3">No movements for this period</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{# Edit batch — purchased + available qty, batch details #}
+<div class="modal fade erp-form-modal" id="editEntryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Batch <span class="text-muted fw-normal small" id="ee-batch-label"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="edit-entry-form" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          <div class="row g-3 align-items-end mb-1">
+            <div class="col-auto">
+              {{ photo_field(icon='fa-box', label='Product photo', upload='ajax', folder='products', picker_id='ee-photo-picker') }}
+            </div>
+            <div class="col">
+              <label class="form-label">Product Name</label>
+              <input name="name" id="ee-name" class="form-control" required>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">SKU</label>
+              <input name="sku" id="ee-sku" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Barcode</label>
+              <input name="barcode" id="ee-barcode" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Category</label>
+              <div class="position-relative">
+                <input type="text" id="ee-cat-search" class="form-control" placeholder="Type category…" autocomplete="off">
+                <input type="hidden" name="category_id" id="ee-category" value="">
+                <div class="lookup-results d-none" id="ee-cat-results"></div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Subcategory <span class="text-muted fw-normal">(optional)</span></label>
+              <div class="position-relative">
+                <input type="text" id="ee-subcat-search" class="form-control" placeholder="Type subcategory…" autocomplete="off">
+                <input type="hidden" name="subcategory_id" id="ee-subcategory" value="">
+                <div class="lookup-results d-none" id="ee-subcat-results"></div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Brand</label>
+              <input name="brand" id="ee-brand" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Vendor <span class="text-danger">*</span></label>
+              <div class="position-relative">
+                <div class="input-group erp-input-group-quick">
+                  <input type="text" id="ee-vendor-search" class="form-control" placeholder="Search vendor…" autocomplete="off">
+                  <button type="button" class="btn erp-btn-quick-add" id="ee-btn-add-vendor" title="Add vendor">
+                    <i class="fa-solid fa-plus"></i>
+                  </button>
+                </div>
+                <input type="hidden" name="vendor_id" id="ee-vendor-id" value="">
+                <div class="lookup-results d-none" id="ee-vendor-results"></div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Invoice No. <span class="text-muted fw-normal">(optional)</span></label>
+              <input name="invoice_no" id="ee-invoice" class="form-control" placeholder="Vendor invoice / bill no">
+            </div>
+          </div>
+
+          <hr class="my-3">
+          <p class="small text-muted mb-2">Particulars for this batch only · Sealed bags and open weight stay separate</p>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">Purchased Qty <span class="text-danger">*</span></label>
+              <input type="number" step="0.001" min="0" name="quantity_received" id="ee-purchased" class="form-control" required>
+              <div class="form-text">Total bags bought in this batch</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Sealed Bags <span class="text-danger">*</span></label>
+              <input type="number" step="0.001" min="0" name="opening_stock" id="ee-qty" class="form-control" required>
+              <div class="form-text">Whole bags still sealed</div>
+              <div class="text-danger small d-none" id="ee-qty-error">Sealed bags cannot be more than purchased qty.</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Open Weight</label>
+              <div class="input-group">
+                <input type="number" step="0.001" min="0" name="open_weight_remaining" id="ee-open-weight" class="form-control" placeholder="0">
+                <span class="input-group-text" id="ee-open-weight-unit">kg</span>
+              </div>
+              <div class="form-text">Leftover kg from opened bags (this batch only)</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Used / Sold</label>
+              <input type="text" id="ee-used" class="form-control bg-light" readonly tabindex="-1">
+              <div class="form-text">Purchased − sealed − open</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Purchase Price</label>
+              <input type="number" step="0.01" name="purchase_price" id="ee-purchase" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Sale Price</label>
+              <input type="number" step="0.01" name="sale_price" id="ee-sale" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Unit Weight <span class="text-muted fw-normal">(product)</span></label>
+              <input type="number" step="0.001" min="0" name="unit_weight" id="ee-unit-weight" class="form-control" placeholder="e.g. 50">
+              <div class="form-text">One weight for this product — applies to all batches</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Weight Unit</label>
+              <select name="weight_unit" id="ee-weight-unit" class="form-select">
+                <option value="">—</option>
+                <option value="kg">kg</option>
+                <option value="g">g</option>
+                <option value="L">L</option>
+                <option value="ml">ml</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Minimum Stock</label>
+              <input type="number" step="0.001" name="minimum_stock" id="ee-min" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Batch</label>
+              <input type="text" id="ee-batch" class="form-control bg-light" readonly tabindex="-1">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Expiry Date <span class="text-muted fw-normal">(optional)</span></label>
+              <input type="date" name="expiry_date" id="ee-expiry" class="form-control">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notes <span class="text-muted fw-normal">(optional)</span></label>
+              <input type="text" name="adjustment_notes" id="ee-adj-notes" class="form-control" placeholder="Why stock changed">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Description</label>
+              <textarea name="description" id="ee-desc" class="form-control" rows="2"></textarea>
+            </div>
+          </div>
+          <div class="text-danger small mt-2 d-none" id="ee-form-error"></div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" form="edit-entry-form" class="btn btn-success">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade erp-form-modal" id="repriceAllModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('inventory.reprice_product_remaining', product_id=product.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Update Price</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-muted">Applies to every open batch. Sold quantities are not changed.</p>
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Purchase / cost (optional)</label>
+              <input type="number" step="0.01" name="unit_cost" class="form-control" placeholder="Leave blank to skip">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Sale price (optional)</label>
+              <input type="number" step="0.01" name="sale_price" class="form-control" placeholder="Leave blank to skip">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Remarks</label>
+              <input type="text" name="notes" class="form-control">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-success">Apply</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# Nested quick-add vendor #}
+<div class="modal fade erp-form-modal" id="quickVendorModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Add Vendor</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2 align-items-end">
+          <div class="col-auto">
+            {{ photo_field(icon='fa-truck-field', label='Vendor photo', upload='ajax', folder='vendors', picker_id='qv-photo-picker') }}
+          </div>
+          <div class="col-md-5">
+            <label class="form-label">Name</label>
+            <input id="qv-name" class="form-control" placeholder="Vendor name">
+          </div>
+          <div class="col-md-5">
+            <label class="form-label">Phone</label>
+            <input id="qv-phone" class="form-control" placeholder="Phone">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Address</label>
+            <textarea id="qv-address" class="form-control" rows="2" placeholder="Address"></textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Opening Balance <span class="text-muted fw-normal">(optional)</span></label>
+            <input type="number" step="0.01" id="qv-balance" class="form-control" placeholder="Leave blank if none">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Notes</label>
+            <input id="qv-notes" class="form-control" placeholder="Optional">
+          </div>
+        </div>
+        <div class="text-danger small mt-2 d-none" id="qv-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="qv-save">Save Vendor</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/category-lookup.js') }}"></script>
+<script src="{{ url_for('static', filename='js/vendor-lookup.js') }}"></script>
+<script>
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onProductPeriodChange() {
+  const period = document.getElementById('period-filter')?.value;
+  toggleCustomDates();
+  if (period !== 'custom') {
+    document.getElementById('product-filter-form')?.submit();
+  }
+}
+toggleCustomDates();
+
+(function () {
+  if (window.CategoryLookup) {
+    CategoryLookup.bind({
+      searchId: 'ee-cat-search',
+      idId: 'ee-category',
+      resultsId: 'ee-cat-results',
+      label: 'category',
+      onChange: () => {
+        const subId = document.getElementById('ee-subcategory');
+        const subSearch = document.getElementById('ee-subcat-search');
+        if (subId) subId.value = '';
+        if (subSearch) subSearch.value = '';
+      },
+    });
+    CategoryLookup.bind({
+      searchId: 'ee-subcat-search',
+      idId: 'ee-subcategory',
+      resultsId: 'ee-subcat-results',
+      label: 'subcategory',
+      requireParent: true,
+      parentIdGetter: () => document.getElementById('ee-category')?.value || '',
+    });
+  }
+  if (window.VendorLookup) {
+    VendorLookup.bind({
+      searchId: 'ee-vendor-search',
+      idId: 'ee-vendor-id',
+      resultsId: 'ee-vendor-results',
+      addBtnId: 'ee-btn-add-vendor',
+      modalId: 'quickVendorModal',
+      required: true,
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-edit-entry');
+    if (!btn) return;
+    const form = document.getElementById('edit-entry-form');
+    form.action = `/inventory/batches/${btn.dataset.layerId}/edit`;
+    document.getElementById('ee-name').value = btn.dataset.name || '';
+    document.getElementById('ee-sku').value = btn.dataset.sku || '';
+    document.getElementById('ee-barcode').value = btn.dataset.barcode || '';
+    document.getElementById('ee-brand').value = btn.dataset.brand || '';
+    document.getElementById('ee-category').value = btn.dataset.categoryId || '';
+    document.getElementById('ee-cat-search').value = btn.dataset.categoryName || '';
+    document.getElementById('ee-subcategory').value = btn.dataset.subcategoryId || '';
+    document.getElementById('ee-subcat-search').value = btn.dataset.subcategoryName || '';
+    document.getElementById('ee-vendor-id').value = btn.dataset.vendorId || '';
+    document.getElementById('ee-vendor-search').value = btn.dataset.vendorName || '';
+    document.getElementById('ee-invoice').value = btn.dataset.invoice || '';
+    document.getElementById('ee-purchase').value = btn.dataset.purchase || '0';
+    document.getElementById('ee-sale').value = btn.dataset.sale || '0';
+    const eeUw = document.getElementById('ee-unit-weight');
+    if (eeUw) eeUw.value = btn.dataset.unitWeight || '';
+    const eeWu = document.getElementById('ee-weight-unit');
+    if (eeWu) eeWu.value = btn.dataset.weightUnit || '';
+    document.getElementById('ee-qty').value = btn.dataset.qty || '0';
+    const eeOpen = document.getElementById('ee-open-weight');
+    if (eeOpen) eeOpen.value = btn.dataset.openWeight || '0';
+    const eeOpenUnit = document.getElementById('ee-open-weight-unit');
+    if (eeOpenUnit) eeOpenUnit.textContent = btn.dataset.weightUnit || 'kg';
+    document.getElementById('ee-purchased').value = btn.dataset.purchased || btn.dataset.qty || '0';
+    document.getElementById('ee-used').value = btn.dataset.used || '0';
+    document.getElementById('ee-min').value = btn.dataset.min || '0';
+    const batchLabel = document.getElementById('ee-batch-label');
+    const batchNo = btn.dataset.batchNumber || btn.dataset.layerId || '';
+    if (batchLabel) batchLabel.textContent = batchNo ? `· #${batchNo}` : '';
+    const qtyEl = document.getElementById('ee-qty');
+    const purchasedEl = document.getElementById('ee-purchased');
+    const openEl = document.getElementById('ee-open-weight');
+    const usedEl = document.getElementById('ee-used');
+    const qtyErr = document.getElementById('ee-qty-error');
+    const showQtyError = (show) => {
+      if (!qtyErr) return;
+      qtyErr.classList.toggle('d-none', !show);
+      qtyEl?.classList.toggle('is-invalid', show);
+    };
+    const syncUsed = () => {
+      const bought = Number(purchasedEl?.value || 0);
+      const sealed = Number(qtyEl?.value || 0);
+      const openW = Number(openEl?.value || 0);
+      const uw = Number(eeUw?.value || 0);
+      const openBags = uw > 0 ? openW / uw : 0;
+      if (usedEl) usedEl.value = Math.max(0, +(bought - sealed - openBags).toFixed(3));
+    };
+    const clampAvailable = () => {
+      const bought = Number(purchasedEl?.value || 0);
+      let avail = Number(qtyEl?.value || 0);
+      if (avail > bought) {
+        qtyEl.value = (+bought.toFixed(3));
+        showQtyError(true);
+        syncUsed();
+        return false;
+      }
+      showQtyError(false);
+      syncUsed();
+      return true;
+    };
+    // When purchased is corrected, move sealed by the same amount (keeps used/sold stable).
+    const onPurchasedInput = () => {
+      const bought = Number(purchasedEl?.value || 0);
+      const prev = Number(purchasedEl._lastPurchased ?? bought);
+      const delta = +(bought - prev).toFixed(3);
+      if (qtyEl && delta !== 0) {
+        let avail = Number(qtyEl.value || 0) + delta;
+        if (avail < 0) avail = 0;
+        if (avail > bought) avail = bought;
+        qtyEl.value = (+avail.toFixed(3));
+      }
+      purchasedEl._lastPurchased = bought;
+      clampAvailable();
+    };
+    const onQtyInput = () => {
+      clampAvailable();
+    };
+    const onOpenInput = () => {
+      syncUsed();
+    };
+    qtyEl?.removeEventListener('input', qtyEl._onQtyInput);
+    purchasedEl?.removeEventListener('input', purchasedEl._onPurchased);
+    openEl?.removeEventListener('input', openEl._onOpenInput);
+    qtyEl._onQtyInput = onQtyInput;
+    purchasedEl._onPurchased = onPurchasedInput;
+    if (openEl) openEl._onOpenInput = onOpenInput;
+    purchasedEl._lastPurchased = Number(purchasedEl.value || 0);
+    qtyEl?.addEventListener('input', onQtyInput);
+    purchasedEl?.addEventListener('input', onPurchasedInput);
+    openEl?.addEventListener('input', onOpenInput);
+    eeUw?.addEventListener('input', syncUsed);
+    showQtyError(false);
+    syncUsed();
+    const eeBatch = document.getElementById('ee-batch');
+    if (eeBatch) {
+      const batchNo = btn.dataset.batchNumber || btn.dataset.layerId || '';
+      eeBatch.value = batchNo ? `#${batchNo}` : '';
+    }
+    document.getElementById('ee-expiry').value = btn.dataset.expiry || '';
+    document.getElementById('ee-desc').value = btn.dataset.desc || '';
+    const adjNotes = document.getElementById('ee-adj-notes');
+    if (adjNotes) adjNotes.value = '';
+
+    const picker = document.getElementById('ee-photo-picker');
+    if (picker) {
+      const pathEl = picker.querySelector('.photo-path');
+      const clearFlag = picker.querySelector('.photo-clear-flag');
+      if (pathEl) pathEl.value = '';
+      if (clearFlag) clearFlag.value = '';
+      picker.dataset.current = btn.dataset.photo || '';
+      window.PhotoPicker?.setPreview?.(picker, btn.dataset.photo || null);
+    }
+
+    const err = document.getElementById('ee-form-error');
+    if (err) {
+      err.classList.add('d-none');
+      err.textContent = '';
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editEntryModal')).show();
+  });
+
+  document.getElementById('edit-entry-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = document.getElementById('ee-form-error');
+    if (err) {
+      err.classList.add('d-none');
+      err.textContent = '';
+    }
+    if (window.CategoryLookup) {
+      const cat = await CategoryLookup.ensureSelected('ee-cat-search', 'ee-category', null);
+      if (!cat.ok) {
+        if (err) {
+          err.textContent = cat.error || 'Category is required';
+          err.classList.remove('d-none');
+        }
+        return;
+      }
+      const subName = document.getElementById('ee-subcat-search')?.value?.trim();
+      if (subName) {
+        const sub = await CategoryLookup.ensureSelected('ee-subcat-search', 'ee-subcategory', cat.id);
+        if (!sub.ok) {
+          if (err) {
+            err.textContent = sub.error || 'Could not save subcategory';
+            err.classList.remove('d-none');
+          }
+          return;
+        }
+      } else {
+        const subEl = document.getElementById('ee-subcategory');
+        if (subEl) subEl.value = '';
+      }
+    }
+    if (window.VendorLookup) {
+      const vendor = VendorLookup.ensureSelected('ee-vendor-id', true);
+      if (!vendor.ok) {
+        if (err) {
+          err.textContent = vendor.error || 'Vendor is required';
+          err.classList.remove('d-none');
+        }
+        return;
+      }
+    }
+    const purchased = Number(document.getElementById('ee-purchased')?.value || 0);
+    const available = Number(document.getElementById('ee-qty')?.value || 0);
+    if (available > purchased) {
+      const qtyErr = document.getElementById('ee-qty-error');
+      document.getElementById('ee-qty')?.classList.add('is-invalid');
+      if (qtyErr) qtyErr.classList.remove('d-none');
+      if (err) {
+        err.textContent = 'Available qty cannot be more than purchased qty.';
+        err.classList.remove('d-none');
+      }
+      document.getElementById('ee-qty')?.focus();
+      return;
+    }
+    e.target.submit();
+  });
+
+  ['quickVendorModal'].forEach((id) => {
+    const el = document.getElementById(id);
+    el?.addEventListener('show.bs.modal', () => {
+      document.getElementById('editEntryModal')?.classList.add('modal-nested-open');
+    });
+    el?.addEventListener('hidden.bs.modal', () => {
+      const parent = document.getElementById('editEntryModal');
+      parent?.classList.remove('modal-nested-open');
+      if (parent && !parent.classList.contains('show')) {
+        bootstrap.Modal.getOrCreateInstance(parent).show();
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

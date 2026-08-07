@@ -1,0 +1,335 @@
+{% extends 'base.html' %}
+{% from 'partials/macros.html' import header_period_filter %}
+{% block title %}{{ customer.name }}{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='customer-detail-period-form',
+  persist_key='customer-detail-' ~ customer.id,
+  clear_url=url_for('customers.detail', customer_id=customer.id, period='all'),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onCustomerDetailPeriodChange()'
+) }}
+{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
+    <div class="party-hero">
+      {% from 'partials/macros.html' import party_avatar %}
+      {{ party_avatar(customer.photo_url, customer.name, 'fa-user', 'lg') }}
+      <div>
+        <a href="{{ url_for('customers.index') }}" class="text-muted small text-decoration-none">
+          <i class="fa-solid fa-arrow-left me-1"></i> Customers
+        </a>
+        <h1 class="h3 mb-1 mt-1 d-flex flex-wrap align-items-center gap-2">
+          {{ customer.name }}
+          {% set st = customer.customer_type or 'good' %}
+          <span class="badge customer-status-badge status-{{ st }}">{{ customer.customer_type_label }}</span>
+        </h1>
+        <p class="text-muted mb-0">
+          {% if customer.phone %}{{ customer.phone }} · {% endif %}
+          {% if customer.old_book_no %}Book {{ customer.old_book_no }} · {% endif %}
+          Added {{ customer.joined_date or (customer.created_at.date() if customer.created_at else '—') }}
+        </p>
+      </div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#paymentModal">
+        <i class="fa-solid fa-money-bill-transfer me-1"></i> Record Payment
+      </button>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Current Balance</p>
+          <h3 class="mb-0 fw-bold {% if customer.balance|float > 0 %}text-warning{% elif customer.balance|float < 0 %}text-success{% endif %}">
+            {{ '%.2f'|format(customer.balance|float) }}
+          </h3>
+          <div class="small text-muted mt-1">
+            {% if customer.balance|float > 0 %}Customer owes (credit)
+            {% elif customer.balance|float < 0 %}Advance with us
+            {% else %}Settled{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Old Account Balance</p>
+          <h3 class="mb-0 fw-bold">{{ '%.2f'|format((customer.opening_balance or 0)|float) }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Address</p>
+          <div class="fw-semibold" style="font-size:0.85rem">{{ customer.address or '—' }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <strong>Ledger</strong>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-print-ledger" title="Print filtered rows">
+        <i class="fa-solid fa-print me-1"></i> Print
+      </button>
+    </div>
+    <table class="table datatable mb-0 w-100" id="customer-ledger-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Notes</th>
+          <th class="text-end">Debit</th>
+          <th class="text-end">Credit</th>
+          <th class="text-end">Balance</th>
+          <th class="col-actions">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in ledger %}
+        <tr>
+          <td>{{ l.entry_date }}</td>
+          <td>{{ l.entry_type.replace('_', ' ')|title }}</td>
+          <td>
+            <span class="badge {{ l.status_badge_class }}">{{ l.status_label }}</span>
+          </td>
+          <td class="small text-muted">{{ l.notes or '—' }}</td>
+          <td class="text-end">{{ '%.2f'|format(l.debit|float) }}</td>
+          <td class="text-end">{{ '%.2f'|format(l.credit|float) }}</td>
+          <td class="text-end">{{ '%.2f'|format(l.balance_after|float) }}</td>
+          <td class="col-actions">
+            <div class="table-actions">
+            <button type="button" class="action-icon-btn action-edit btn-edit-ledger" title="Edit"
+                    data-id="{{ l.id }}"
+                    data-date="{{ l.entry_date.isoformat() if l.entry_date else '' }}"
+                    data-type="{{ l.entry_type }}"
+                    data-debit="{{ '%.2f'|format(l.debit|float) }}"
+                    data-credit="{{ '%.2f'|format(l.credit|float) }}"
+                    data-notes="{{ l.notes or '' }}">
+              <i class="fa-solid fa-pen"></i>
+            </button>
+            <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
+                    data-action="{{ url_for('customers.delete_ledger', entry_id=l.id) }}"
+                    data-title="Delete this ledger entry?"
+                    data-message="Linked documents may also be reversed. Choose Yes only if you are sure."
+                    data-effects="Reverse linked sale or payment if this row came from one|Restore stock / cash when required|Recalculate customer balance|Update related totals everywhere">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal fade erp-form-modal" id="paymentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('customers.payment') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="customer_id" value="{{ customer.id }}">
+        <input type="hidden" name="return_detail" value="1">
+        <div class="modal-header">
+          <h5 class="modal-title">Record Payment — {{ customer.name }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label">Type</label>
+              <select name="payment_type" id="pay-type" class="form-select" required>
+                <option value="account_settle">Account Settle</option>
+                <option value="advance">Advance</option>
+                <option value="loan">Loan (cash to customer)</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Date</label>
+              <input type="date" name="payment_date" class="form-control" value="{{ today }}" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Amount</label>
+              <input type="number" step="0.01" min="0.01" name="amount" class="form-control" required placeholder="0.00">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Remarks</label>
+              <textarea name="remarks" class="form-control" rows="2" placeholder="Optional"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Save Payment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade erp-form-modal" id="editCustomerModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('customers.edit', customer_id=customer.id) }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="return_detail" value="1">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Customer</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-2 align-items-end">
+            <div class="col-auto">
+              {% from 'partials/macros.html' import photo_field %}
+              {{ photo_field(current_url=customer.photo_url, icon='fa-user', label='Customer photo') }}
+            </div>
+            <div class="col-md-5">
+              <label class="form-label">Name</label>
+              <input name="name" class="form-control" value="{{ customer.name }}" required>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label">Phone</label>
+              <input name="phone" class="form-control" value="{{ customer.phone or '' }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Address</label>
+              <textarea name="address" class="form-control" rows="2">{{ customer.address or '' }}</textarea>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Old Book No</label>
+              <input name="old_book_no" class="form-control" value="{{ customer.old_book_no or '' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Old Account Balance <span class="text-muted fw-normal">(optional)</span></label>
+              <input type="number" step="0.01" name="opening_balance" class="form-control"
+                     placeholder="Leave blank if none"
+                     value="{% if customer.opening_balance is not none %}{{ customer.opening_balance }}{% endif %}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Date Added</label>
+              <input type="date" name="joined_date" class="form-control" value="{{ customer.joined_date.isoformat() if customer.joined_date else '' }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Customer Type</label>
+              <select name="customer_type" class="form-select">
+                {% for val, label in [('good','Good'),('bad','Bad'),('1_year','1 Year'),('6_month','6 Month'),('late_pay','Late Pay')] %}
+                <option value="{{ val }}" {% if customer.customer_type == val %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade erp-form-modal" id="editLedgerModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" id="edit-ledger-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Ledger Entry</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label">Date</label>
+              <input type="date" name="entry_date" id="led-date" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Type</label>
+              <input name="entry_type" id="led-type" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Debit</label>
+              <input type="number" step="0.01" name="debit" id="led-debit" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Credit</label>
+              <input type="number" step="0.01" name="credit" id="led-credit" class="form-control">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notes</label>
+              <textarea name="notes" id="led-notes" class="form-control" rows="2"></textarea>
+            </div>
+          </div>
+          <p class="small text-muted mt-2 mb-0">Balance will be recalculated for all entries after this change.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onCustomerDetailPeriodChange() {
+  const period = document.getElementById('period-filter')?.value;
+  toggleCustomDates();
+  if (period !== 'custom') {
+    document.getElementById('customer-detail-period-form')?.submit();
+  }
+}
+toggleCustomDates();
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btn-edit-ledger');
+  if (!btn) return;
+  const form = document.getElementById('edit-ledger-form');
+  form.action = `/customers/ledger/${btn.dataset.id}/edit`;
+  document.getElementById('led-date').value = btn.dataset.date || '';
+  document.getElementById('led-type').value = btn.dataset.type || '';
+  document.getElementById('led-debit').value = btn.dataset.debit || '0';
+  document.getElementById('led-credit').value = btn.dataset.credit || '0';
+  document.getElementById('led-notes').value = btn.dataset.notes || '';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('editLedgerModal')).show();
+});
+
+document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
+  const phone = {{ (customer.phone or '')|tojson }};
+  const address = {{ (customer.address or '')|tojson }};
+  const partyFields = [];
+  if (phone && String(phone).trim()) partyFields.push({ label: 'Phone', value: phone });
+  if (address && String(address).trim()) partyFields.push({ label: 'Address', value: address });
+  window.PrintFiltered?.print({
+    table: '#customer-ledger-table',
+    title: {{ customer.name|tojson }},
+    hideDocTitle: true,
+    partyLabel: 'Customer',
+    partyName: {{ customer.name|tojson }},
+    partyFields,
+    partyBalance: {{ '%.2f'|format(customer.balance|float)|tojson }},
+    partyBalanceLabel: 'Current Balance',
+    sumColumns: [4, 5],
+  });
+});
+</script>
+{% endblock %}

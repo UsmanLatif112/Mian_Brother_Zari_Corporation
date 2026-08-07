@@ -63,11 +63,35 @@ class Vendor(SoftDeleteMixin, TimestampMixin, db.Model):
         return f"/static/uploads/{self.photo}"
 
 
+class Salesman(SoftDeleteMixin, TimestampMixin, db.Model):
+    """Field officer / referral person (not a login user). Optional on each sale."""
+
+    __tablename__ = "salesmen"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False, index=True)
+    phone = db.Column(db.String(30), nullable=True, index=True)
+    company = db.Column(db.String(200), nullable=True)
+    address = db.Column(db.Text, nullable=True)
+    opening_balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
+    notes = db.Column(db.Text, nullable=True)
+    # Outstanding credit attributable to this salesman (debit − credit on ledger)
+    balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
+    remote_id = db.Column(db.Integer, nullable=True, index=True)
+    photo = db.Column(db.String(255), nullable=True)
+
+    @property
+    def photo_url(self):
+        if not self.photo:
+            return None
+        return f"/static/uploads/{self.photo}"
+
+
 class LedgerEntry(db.Model):
     __tablename__ = "ledger_entries"
 
     id = db.Column(db.Integer, primary_key=True)
-    party_type = db.Column(db.String(20), nullable=False, index=True)  # customer / vendor
+    party_type = db.Column(db.String(20), nullable=False, index=True)  # customer / vendor / salesman
     party_id = db.Column(db.Integer, nullable=False, index=True)
     entry_date = db.Column(db.Date, default=default_entry_date, nullable=False, index=True)
     entry_type = db.Column(db.String(30), nullable=False)

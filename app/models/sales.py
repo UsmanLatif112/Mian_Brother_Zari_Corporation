@@ -25,6 +25,7 @@ class Sale(TimestampMixin, db.Model):
     invoice_no = db.Column(db.String(50), unique=True, nullable=False, index=True)
     sale_date = db.Column(db.Date, default=default_entry_date, nullable=False, index=True)
     customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=True)
+    salesman_id = db.Column(db.Integer, db.ForeignKey("salesmen.id"), nullable=True)
     subtotal = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     discount = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     tax_amount = db.Column(db.Numeric(14, 2), default=Decimal("0"))
@@ -37,6 +38,7 @@ class Sale(TimestampMixin, db.Model):
     remote_id = db.Column(db.Integer, nullable=True, index=True)
 
     customer = db.relationship("Customer", backref="sales")
+    salesman = db.relationship("Salesman", backref="sales")
     created_by = db.relationship("User")
     items = db.relationship("SaleItem", backref="sale", cascade="all, delete-orphan")
 
@@ -48,7 +50,7 @@ class SaleItem(db.Model):
     sale_id = db.Column(db.Integer, db.ForeignKey("sales.id"), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
     # Stock units depleted (fractional when selling by weight)
-    quantity = db.Column(db.Numeric(14, 3), nullable=False)
+    quantity = db.Column(db.Numeric(18, 6), nullable=False)
     # Catalog / full-unit list price snapshot (not overwritten by row override)
     list_unit_price = db.Column(db.Numeric(14, 2), nullable=True)
     # Effective per-stock-unit price (line_total / quantity), or list price for piece sales

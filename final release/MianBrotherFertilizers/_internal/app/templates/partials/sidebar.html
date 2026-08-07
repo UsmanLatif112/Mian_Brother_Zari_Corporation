@@ -24,6 +24,7 @@
     <a href="{{ url_for('journal.index') }}" class="nav-link"{% if current_user.is_authenticated and not current_user.is_registration_complete() %} data-requires-registration="1"{% endif %}><i class="fa-solid fa-book"></i> General Journal</a>
     <a href="{{ url_for('account.index') }}" class="nav-link"{% if current_user.is_authenticated and not current_user.is_registration_complete() %} data-requires-registration="1"{% endif %}><i class="fa-solid fa-wallet"></i> Account</a>
     <a href="{{ url_for('customers.index') }}" class="nav-link"{% if current_user.is_authenticated and not current_user.is_registration_complete() %} data-requires-registration="1"{% endif %}><i class="fa-solid fa-users"></i> Customers</a>
+    <a href="{{ url_for('salesmen.index') }}" class="nav-link"{% if current_user.is_authenticated and not current_user.is_registration_complete() %} data-requires-registration="1"{% endif %}><i class="fa-solid fa-user-tie"></i> Salesmen</a>
     <a href="{{ url_for('vendors.index') }}" class="nav-link"{% if current_user.is_authenticated and not current_user.is_registration_complete() %} data-requires-registration="1"{% endif %}><i class="fa-solid fa-building"></i> Vendors</a>
     <a href="{{ url_for('maintenance.index') }}" class="nav-link"{% if current_user.is_authenticated and not current_user.is_registration_complete() %} data-requires-registration="1"{% endif %}><i class="fa-solid fa-cloud"></i> Backup &amp; Cloud</a>
     {% if current_user.is_super_admin() %}

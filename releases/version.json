@@ -1,8 +1,8 @@
 {
-  "version": "1.6.0",
-  "build": 160,
-  "released_at": "2026-08-06",
-  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.6.0.zip",
-  "sha256": "d4e5ec9333cc09bc07b50226a4cc700455eb598b7bf47bab8bf3657e83844758",
-  "release_notes": "- Inventory Add Product: each row creates its own purchase + vendor ledger line\n- Vendor ledger Particulars: product / qty \u00d7 unit weight @ rate\n- Sale: choose bag weight when product has multiple sizes (FIFO per weight)\n- Each weight keeps its own stock queue and sale price\n- Unit Wt dropdown UI fixed on sale lines\n- Sealed bags + open kg stock display; unit weight stored per batch\n- Multi-product inventory add from one vendor invoice"
+  "version": "1.6.3",
+  "build": 163,
+  "released_at": "2026-08-07",
+  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.6.3.zip",
+  "sha256": "77058ceed47adc001b10e7b0683bd30d1a78c40f89adf614a65883cb383567a7",
+  "release_notes": "- Customer list: Old Balance + Total Balance (old + sales/payments)\n- Customer ledger: Opening entry with date when old account is set\n- Editing old account balance syncs Opening ledger row and total balance\n- Customer ledger sorted newest first\n- Salesmen (field officers): optional on each sale \u2014 name, phone, company, photo, opening balance\n- Salesman list + ledger: invoice, particulars, Paid/Partial/Unpaid, debit/credit/balance\n- One product = one fixed unit weight; open leftover kg first"
 }

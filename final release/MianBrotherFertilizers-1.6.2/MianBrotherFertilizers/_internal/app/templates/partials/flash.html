@@ -1,0 +1,5 @@
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<script type="application/json" id="erp-flash-data">{{ messages|tojson }}</script>
+{% endif %}
+{% endwith %}

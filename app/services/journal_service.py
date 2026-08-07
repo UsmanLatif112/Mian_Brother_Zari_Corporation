@@ -44,11 +44,7 @@ def _sale_line_particular(it) -> str:
 
     if sale_weight is not None and _d(sale_weight) > 0:
         unit = weight_unit or "kg"
-        units = qty if qty is not None and _d(qty) > 0 else None
-        if units is None and unit_weight is not None and _d(unit_weight) > 0:
-            units = _d(sale_weight) / _d(unit_weight)
-        if units is not None and _d(units) > 0:
-            return _fmt_particular(name, _fmt_qty(units), f"{_fmt_qty(sale_weight)} {unit}")
+        # Open sale: show sold weight only (avoid confusing 0.333 bag fraction)
         return _fmt_particular(name, f"{_fmt_qty(sale_weight)} {unit}")
 
     if unit_weight is not None and _d(unit_weight) > 0 and qty is not None and _d(qty) > 0:

@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}Daily Closing{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Daily Closing — {{ today }}</h1>
+<ul class="list-group">
+  <li class="list-group-item d-flex justify-content-between"><span>Cash Sales</span><strong>{{ cash_sales }}</strong></li>
+  <li class="list-group-item d-flex justify-content-between"><span>Customer Receivings</span><strong>{{ receivings }}</strong></li>
+  <li class="list-group-item d-flex justify-content-between"><span>Settled Expenses</span><strong>{{ expenses }}</strong></li>
+</ul>
+{% endblock %}

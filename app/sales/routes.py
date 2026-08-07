@@ -134,14 +134,12 @@ def _parse_sale_request(data):
         line_discount = Decimal(str(line.get("discount") or 0))
         sale_weight = None
         weight_unit = None
-        line_unit_weight = parse_unit_weight(line.get("unit_weight"))
+        deduct_unit_weight = None
 
-        fifo_uw, fifo_wu = next_fifo_packaging(product, unit_weight=line_unit_weight)
+        fifo_uw, fifo_wu = next_fifo_packaging(product)
         has_weight = (fifo_uw is not None and fifo_uw > 0) or product_has_weight(product)
         if has_weight:
             uw = fifo_uw if fifo_uw is not None else Decimal(str(product.unit_weight))
-            if line_unit_weight and line_unit_weight > 0:
-                uw = line_unit_weight
             weight_unit = (
                 fifo_wu
                 or product.weight_unit
@@ -150,7 +148,6 @@ def _parse_sale_request(data):
             )
             mode = (line.get("sale_mode") or "full").strip().lower()
             if mode not in ("full", "open"):
-                # Legacy payloads: weight provided without mode → open; else full
                 raw_w = line.get("sale_weight")
                 mode = "open" if raw_w not in (None, "") else "full"
 
@@ -166,15 +163,18 @@ def _parse_sale_request(data):
                         400,
                     )
                 try:
-                    qty = weight_to_stock_qty_fifo(product, sale_weight, unit_weight=uw)
+                    qty = weight_to_stock_qty_fifo(product, sale_weight)
                 except ValueError as exc:
                     return None, (jsonify({"ok": False, "error": str(exc)}), 400)
-                # Price suggestion uses selected packaging
-                suggested = proportional_sale_amount(list_price, uw, sale_weight)
+                from app.services.fifo_service import next_fifo_sale_price
+
+                list_for_open = next_fifo_sale_price(product)
+                if line.get("list_unit_price") is not None and str(line.get("list_unit_price")) != "":
+                    list_for_open = Decimal(str(line.get("list_unit_price")))
+                suggested = proportional_sale_amount(list_for_open, uw, sale_weight)
                 if line.get("line_total") is not None and str(line.get("line_total")) != "":
                     line_total = Decimal(str(line.get("line_total")))
                 elif line.get("unit_price") is not None and str(line.get("unit_price")) != "":
-                    # unit_price from UI for open rows = charged sale amount
                     line_total = Decimal(str(line.get("unit_price")))
                 else:
                     line_total = suggested
@@ -186,9 +186,10 @@ def _parse_sale_request(data):
                 line_total = line_total - line_discount
                 if line_total < 0:
                     line_total = Decimal("0")
-                unit_price = (line_total / qty) if qty else list_price
+                unit_price = (line_total / qty) if qty else list_for_open
+                list_price = list_for_open
+                deduct_unit_weight = None
             else:
-                # Full bags / units — FIFO only within this packaging weight
                 qty = Decimal(str(line.get("quantity") or 0))
                 if qty <= 0:
                     return None, (
@@ -196,7 +197,7 @@ def _parse_sale_request(data):
                         400,
                     )
                 try:
-                    sale_weight = fifo_weight_for_qty(product, qty, unit_weight=uw)
+                    sale_weight = fifo_weight_for_qty(product, qty)
                 except ValueError as exc:
                     return None, (jsonify({"ok": False, "error": str(exc)}), 400)
                 if sale_weight is None:
@@ -210,6 +211,7 @@ def _parse_sale_request(data):
                     line_total = qty * unit_price - line_discount
                 if line_total < 0:
                     line_total = Decimal("0")
+                deduct_unit_weight = None
         else:
             qty = Decimal(str(line.get("quantity") or 0))
             if qty <= 0:
@@ -224,6 +226,8 @@ def _parse_sale_request(data):
                 line_total = qty * unit_price - line_discount
             if line_total < 0:
                 line_total = Decimal("0")
+            deduct_unit_weight = None
+            mode = "qty"
 
         items.append(
             {
@@ -234,7 +238,7 @@ def _parse_sale_request(data):
                 "line_total": line_total,
                 "sale_weight": sale_weight,
                 "weight_unit": weight_unit,
-                "unit_weight": uw if has_weight else None,
+                "unit_weight": deduct_unit_weight,
                 "sale_mode": mode if has_weight else "qty",
                 "discount": line_discount,
                 "tax_rate": line.get("tax_rate", product.tax_rate or 0),
@@ -276,6 +280,10 @@ def _parse_sale_request(data):
     if customer_id:
         customer_id = int(customer_id)
 
+    salesman_id = data.get("salesman_id") or None
+    if salesman_id:
+        salesman_id = int(salesman_id)
+
     if needs_customer and not customer_id:
         msg = (
             "Select a customer for overpayment (advance)."
@@ -286,6 +294,7 @@ def _parse_sale_request(data):
 
     payload = {
         "customer_id": customer_id,
+        "salesman_id": salesman_id,
         "sale_date": sale_date,
         "discount": discount,
         "tax_amount": data.get("tax_amount", 0),
@@ -350,6 +359,7 @@ def index():
 
     query = Sale.query.options(
         joinedload(Sale.customer),
+        joinedload(Sale.salesman),
         joinedload(Sale.items).joinedload(SaleItem.product),
     )
     if range_start:
@@ -486,11 +496,10 @@ def _item_unit_weight(it):
 @permission_required("sales.view")
 def get_sale(sale_id):
     """JSON payload to load a sale into the Add Sale modal for editing."""
-    from app.services.fifo_service import list_packaging_options
-
     sale = (
         Sale.query.options(
             joinedload(Sale.customer),
+            joinedload(Sale.salesman),
             joinedload(Sale.items).joinedload(SaleItem.product),
         )
         .filter_by(id=sale_id)
@@ -511,6 +520,8 @@ def get_sale(sale_id):
                 "sale_date": sale.sale_date.isoformat() if sale.sale_date else None,
                 "customer_id": sale.customer_id,
                 "customer_name": sale.customer.name if sale.customer else "Walk-in",
+                "salesman_id": sale.salesman_id,
+                "salesman_name": sale.salesman.name if sale.salesman else "",
                 "payment_status": status,
                 "amount_paid": amount_paid,
                 "discount": float(sale.discount or 0),
@@ -531,7 +542,6 @@ def get_sale(sale_id):
                         "weight_unit": it.weight_unit
                         or (it.product.weight_unit if it.product else None),
                         "unit_weight": _item_unit_weight(it),
-                        "packagings": list_packaging_options(it.product) if it.product else [],
                         "sale_mode": _infer_item_sale_mode(it),
                         "photo_url": it.product.photo_url if it.product else None,
                     }

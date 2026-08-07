@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}Add Expense{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 dash-hero">
+    <div>
+      <h1 class="h3 mb-1">Add Expense</h1>
+      <p class="text-muted mb-0">Record a new business expense</p>
+    </div>
+    <a href="{{ url_for('expenses.index') }}" class="redirect-icon-btn" title="Back to Expenses">
+      <i class="fa-solid fa-arrow-left"></i>
+    </a>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="card-header bg-white">
+      <strong>Expense Details</strong>
+    </div>
+    <div class="card-body p-4">
+      <form method="post">
+        {{ form.hidden_tag() }}
+        <div class="row g-3">
+          <div class="col-md-6">
+            {{ form.name.label(class='form-label fw-semibold') }}
+            {{ form.name(class='form-control', placeholder='e.g. Transport charges') }}
+          </div>
+          <div class="col-md-3">
+            {{ form.amount.label(class='form-label fw-semibold') }}
+            {{ form.amount(class='form-control', placeholder='0.00') }}
+          </div>
+          <div class="col-md-3">
+            {{ form.expense_date.label(class='form-label fw-semibold') }}
+            {{ form.expense_date(class='form-control') }}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">{{ form.category_id.label.text }}</label>
+            <div class="input-group erp-input-group-quick">
+              {{ form.category_id(class='form-select expense-category-select') }}
+              <button type="button" class="btn erp-btn-quick-add btn-quick-expense-category" title="Add category">
+                <i class="fa-solid fa-plus"></i>
+              </button>
+            </div>
+          </div>
+          <div class="col-12">
+            {{ form.description.label(class='form-label fw-semibold') }}
+            {{ form.description(class='form-control', rows=3, placeholder='Optional notes') }}
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-4">
+          {{ form.submit(class='btn btn-success px-4') }}
+          <a href="{{ url_for('expenses.index') }}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade erp-form-modal" id="quickExpenseCategoryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">New expense category</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label" for="qec-name">Category name</label>
+        <input type="text" id="qec-name" class="form-control" placeholder="e.g. Marketing" autocomplete="off">
+        <div class="text-danger small mt-2 d-none" id="qec-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="qec-save">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/expense-category-quick.js') }}"></script>
+{% endblock %}

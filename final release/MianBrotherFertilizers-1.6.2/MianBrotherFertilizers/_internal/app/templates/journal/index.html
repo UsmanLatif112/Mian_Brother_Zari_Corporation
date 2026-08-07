@@ -1,0 +1,182 @@
+{% extends 'base.html' %}
+{% from 'partials/macros.html' import header_period_filter %}
+{% block title %}General Journal{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='journal-filter-form',
+  persist_key='journal',
+  clear_url=url_for('journal.index', period='all'),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onJournalPeriodChange()'
+) }}
+{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
+    <div>
+      <h1 class="h3 mb-1">General Journal</h1>
+      <p class="text-muted mb-0">Cash in &amp; out for the period. Expenses: out when spent, in when you replenish the till on settle.</p>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Total In</p>
+            <h3 class="mb-0 fw-bold text-success">{{ '%.2f'|format(total_in|float) }}</h3>
+          </div>
+          <div class="stat-icon bg-success-subtle text-success"><i class="fa-solid fa-arrow-down"></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Total Out</p>
+            <h3 class="mb-0 fw-bold text-danger">{{ '%.2f'|format(total_out|float) }}</h3>
+          </div>
+          <div class="stat-icon bg-danger-subtle text-danger"><i class="fa-solid fa-arrow-up"></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Net</p>
+            <h3 class="mb-0 fw-bold {% if net|float >= 0 %}text-success{% else %}text-danger{% endif %}">
+              {{ '%.2f'|format(net|float) }}
+            </h3>
+          </div>
+          <div class="stat-icon bg-primary-subtle text-primary"><i class="fa-solid fa-scale-balanced"></i></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <strong>Journal Entries</strong>
+      <div class="d-flex align-items-center gap-2">
+        <span class="text-muted small">{{ count }} entries</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-print-journal" title="Print filtered rows">
+          <i class="fa-solid fa-print me-1"></i> Print
+        </button>
+      </div>
+    </div>
+    <table class="table datatable mb-0 w-100" id="journal-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Reference</th>
+          <th>Particulars</th>
+          <th>Party</th>
+          <th>Status</th>
+          <th class="text-end">Total Paid</th>
+          <th class="text-end">In</th>
+          <th class="text-end">Out</th>
+          <th class="col-actions"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.date }}</td>
+          <td><span class="badge bg-light text-dark border">{{ r.type }}</span></td>
+          <td>{{ r.reference }}</td>
+          <td class="journal-particulars" title="{{ r.particulars }}">
+            <span class="journal-particulars-text">{{ r.particulars }}</span>
+          </td>
+          <td>{{ r.party }}</td>
+          <td>{{ r.status or '—' }}</td>
+          <td class="text-end">
+            {% if r.total_paid is defined and r.total_paid|float > 0 %}
+            {{ '%.2f'|format(r.total_paid|float) }}
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-end {% if r.amount_in|float > 0 %}text-success{% endif %}">
+            {% if r.amount_in|float > 0 %}{{ '%.2f'|format(r.amount_in|float) }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end {% if r.amount_out|float > 0 %}text-danger{% endif %}">
+            {% if r.amount_out|float > 0 %}{{ '%.2f'|format(r.amount_out|float) }}{% else %}—{% endif %}
+          </td>
+          <td class="col-actions text-end">
+            {% if r.link %}
+            <a href="{{ r.link }}" class="redirect-icon-btn" title="Open">
+              <i class="fa-solid fa-up-right-from-square"></i>
+            </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onJournalPeriodChange() {
+  const period = document.getElementById('period-filter')?.value;
+  toggleCustomDates();
+  if (period !== 'custom') {
+    document.getElementById('journal-filter-form')?.submit();
+  }
+}
+toggleCustomDates();
+
+function printJournal() {
+  const periodEl = document.getElementById('period-filter');
+  const period = periodEl?.value || 'all';
+  const periodLabel = periodEl?.options?.[periodEl.selectedIndex]?.text || 'All';
+
+  const doPrint = () => {
+    // Printed: Date, Type, Reference, Particulars, Party, Status, Total Paid, In, Out
+    // Sum Total Paid / In / Out = 6, 7, 8
+    window.PrintFiltered?.print({
+      table: '#journal-table',
+      title: 'General Journal',
+      subtitle: 'Period: ' + periodLabel,
+      sectionTitle: 'Journal Entries',
+      sumColumns: [6, 7, 8],
+    });
+  };
+
+  if (period === 'all') {
+    window.showErpConfirm?.({
+      title: 'Print all periods?',
+      message:
+        'Period is set to All. This can be a very large print. Prefer Today, This week, This month, or a custom date range.',
+      effects: [
+        'Recommended: select a date interval first',
+        'If you continue with All, that choice is on you',
+      ],
+      icon: 'fa-solid fa-print',
+      iconClass: 'erp-confirm-icon--warning',
+      cancelLabel: 'Go back',
+      confirmLabel: 'Print All anyway',
+      confirmClass: 'btn-warning',
+      onConfirm: doPrint,
+    });
+    return;
+  }
+
+  doPrint();
+}
+
+document.getElementById('btn-print-journal')?.addEventListener('click', printJournal);
+</script>
+{% endblock %}

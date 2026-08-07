@@ -9,7 +9,7 @@ from app.models.inventory import (
     Unit,
     UnitType,
 )
-from app.models.party import Customer, LedgerEntry, Vendor
+from app.models.party import Customer, LedgerEntry, Salesman, Vendor
 from app.models.purchases import Purchase, PurchaseItem, VendorPayment
 from app.models.sales import CustomerReceiving, Sale, SaleItem
 from app.models.sync import SyncLog, SyncQueue
@@ -40,6 +40,7 @@ __all__ = [
     "InventoryAdjustment",
     "Customer",
     "Vendor",
+    "Salesman",
     "LedgerEntry",
     "Sale",
     "SaleItem",
