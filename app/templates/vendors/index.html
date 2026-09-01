@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% from 'partials/macros.html' import form_modal, photo_field, header_period_filter, header_status_filter %}
+{% from 'partials/macros.html' import form_modal, customer_photos_field, header_period_filter, header_status_filter, party_active_badge %}
 {% block title %}Vendors{% endblock %}
 {% block page_filters %}
 {{ header_period_filter(
@@ -8,7 +8,8 @@
   clear_url=url_for(
     'vendors.index',
     period='all',
-    status=selected_status if selected_status != 'all' else None
+    status=selected_status if selected_status != 'all' else None,
+    active=selected_active if selected_active != 'all' else None
   ),
   selected_period=selected_period,
   start_date=start_date,
@@ -25,7 +26,8 @@
     'vendors.index',
     period=selected_period or 'all',
     start_date=start_date if selected_period == 'custom' else None,
-    end_date=end_date if selected_period == 'custom' else None
+    end_date=end_date if selected_period == 'custom' else None,
+    active=selected_active if selected_active != 'all' else None
   ),
   selected=selected_status,
   label='Balance',
@@ -41,6 +43,34 @@
     'period': selected_period or 'all',
     'start_date': start_date if selected_period == 'custom' else '',
     'end_date': end_date if selected_period == 'custom' else '',
+    'active': selected_active if selected_active != 'all' else '',
+  }
+) }}
+{{ header_status_filter(
+  form_id='vendors-active-form',
+  persist_key='vendors-active',
+  clear_url=url_for(
+    'vendors.index',
+    period=selected_period or 'all',
+    start_date=start_date if selected_period == 'custom' else None,
+    end_date=end_date if selected_period == 'custom' else None,
+    status=selected_status if selected_status != 'all' else None
+  ),
+  selected=selected_active,
+  label='Status',
+  field_name='active',
+  icon='fa-circle-check',
+  default='all',
+  options=[
+    ('all', 'All'),
+    ('active', 'Active'),
+    ('inactive', 'Inactive'),
+  ],
+  preserve={
+    'period': selected_period or 'all',
+    'start_date': start_date if selected_period == 'custom' else '',
+    'end_date': end_date if selected_period == 'custom' else '',
+    'status': selected_status if selected_status != 'all' else '',
   }
 ) }}
 {% endblock %}
@@ -97,6 +127,17 @@
     </div>
   </div>
 
+  <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Total Purchase · Paid · Payable</strong>
+    </div>
+    <div class="card-body pt-3 pb-2">
+      <div class="dash-chart-wrap">
+        <canvas id="vendorListChart"></canvas>
+      </div>
+    </div>
+  </div>
+
   <div class="card dash-panel border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
       <strong>Vendor List</strong>
@@ -108,6 +149,7 @@
           <th>Name</th>
           <th>Phone</th>
           <th>Address</th>
+          <th>Status</th>
           <th class="text-end">Balance</th>
           <th class="col-actions">Action</th>
         </tr>
@@ -118,6 +160,7 @@
           <td class="fw-semibold">{{ v.name }}</td>
           <td>{{ v.phone or '—' }}</td>
           <td class="text-truncate" style="max-width:160px" title="{{ v.address or '' }}">{{ v.address or '—' }}</td>
+          <td>{{ party_active_badge(v) }}</td>
           <td class="text-end {% if v.balance|float > 0 %}text-warning{% elif v.balance|float < 0 %}text-success{% endif %}">
             {{ '%.2f'|format(v.balance|float) }}
           </td>
@@ -131,10 +174,12 @@
                     data-id="{{ v.id }}"
                     data-name="{{ v.name }}"
                     data-phone="{{ v.phone or '' }}"
+                    data-cnic="{{ v.cnic or '' }}"
                     data-address="{{ v.address or '' }}"
                     data-opening="{{ v.opening_balance or 0 }}"
                     data-notes="{{ v.notes or '' }}"
-                    data-photo="{{ v.photo_url or '' }}">
+                    data-active="{{ '1' if v.is_active else '0' }}"
+                    data-photos='{{ v.photos_data|tojson }}'>
               <i class="fa-solid fa-pen"></i>
             </button>
             <a href="{{ url_for('vendors.detail', vendor_id=v.id) }}" class="action-icon-btn" title="Ledger">
@@ -153,9 +198,15 @@
 <form method="post" action="{{ url_for('vendors.create') }}" id="entity-form" enctype="multipart/form-data">
   {{ form.hidden_tag() }}
   <div class="row g-2 align-items-end">
-    <div class="col-auto">{{ photo_field(icon='fa-truck-field', label='Vendor photo') }}</div>
+    <div class="col-12">
+      {{ customer_photos_field(icon='fa-truck-field', label='Vendor photos', folder='vendors') }}
+    </div>
     <div class="col-md-5">{{ form.name.label(class='form-label') }}{{ form.name(class='form-control') }}</div>
     <div class="col-md-5">{{ form.phone.label(class='form-label') }}{{ form.phone(class='form-control') }}</div>
+    <div class="col-md-4">
+      <label class="form-label">{{ form.cnic.label.text }} <span class="text-muted fw-normal">(optional)</span></label>
+      {{ form.cnic(class='form-control', placeholder='CNIC') }}
+    </div>
     <div class="col-md-6">
       <label class="form-label">{{ form.opening_balance.label.text }} <span class="text-muted fw-normal">(optional)</span></label>
       {{ form.opening_balance(class='form-control', placeholder='Leave blank if none') }}
@@ -177,7 +228,9 @@
         </div>
         <div class="modal-body">
           <div class="row g-2 align-items-end">
-            <div class="col-auto">{{ photo_field(icon='fa-truck-field', label='Vendor photo') }}</div>
+            <div class="col-12">
+              {{ customer_photos_field(icon='fa-truck-field', label='Vendor photos', folder='vendors') }}
+            </div>
             <div class="col-md-5">
               <label class="form-label">Name</label>
               <input name="name" class="form-control" required>
@@ -185,6 +238,10 @@
             <div class="col-md-5">
               <label class="form-label">Phone</label>
               <input name="phone" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">CNIC <span class="text-muted fw-normal">(optional)</span></label>
+              <input name="cnic" class="form-control" placeholder="CNIC">
             </div>
             <div class="col-md-6">
               <label class="form-label">Opening Balance <span class="text-muted fw-normal">(optional)</span></label>
@@ -197,6 +254,13 @@
             <div class="col-12">
               <label class="form-label">Notes</label>
               <textarea name="notes" class="form-control" rows="2"></textarea>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Status</label>
+              <select name="is_active" class="form-select">
+                <option value="1">Active</option>
+                <option value="0">Inactive</option>
+              </select>
             </div>
           </div>
         </div>
@@ -265,6 +329,10 @@
 
 {% block extra_js %}
 <script>
+window.vendorListChart = {{ vendor_chart|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/list-page-charts.js') }}?v=2"></script>
+<script>
 window.OPEN_FORM_MODAL = {{ 'true' if open_modal else 'false' }};
 
 function toggleCustomDates() {
@@ -306,20 +374,15 @@ document.addEventListener('click', (e) => {
   form.action = `/vendors/${btn.dataset.id}/edit`;
   form.querySelector('[name=name]').value = btn.dataset.name || '';
   form.querySelector('[name=phone]').value = btn.dataset.phone || '';
+  form.querySelector('[name=cnic]').value = btn.dataset.cnic || '';
   form.querySelector('[name=address]').value = btn.dataset.address || '';
   form.querySelector('[name=opening_balance]').value =
     btn.dataset.opening && Number(btn.dataset.opening) !== 0 ? btn.dataset.opening : '';
   form.querySelector('[name=notes]').value = btn.dataset.notes || '';
-  const picker = form.querySelector('.photo-picker');
-  if (picker && window.PhotoPicker) {
-    picker.dataset.current = btn.dataset.photo || '';
-    const clearFlag = picker.querySelector('.photo-clear-flag');
-    if (clearFlag) clearFlag.value = '';
-    const fileInput = picker.querySelector('.photo-file-input');
-    if (fileInput) fileInput.value = '';
-    window.PhotoPicker.setPreview(picker, btn.dataset.photo || null);
-  }
+  form.querySelector('[name=is_active]').value = btn.dataset.active === '0' ? '0' : '1';
+  window.CustomerPhotos?.loadExisting(form, JSON.parse(btn.dataset.photos || '[]'));
   bootstrap.Modal.getOrCreateInstance(document.getElementById('editVendorModal')).show();
 });
 </script>
+<script src="{{ url_for('static', filename='js/customer-photos.js') }}"></script>
 {% endblock %}

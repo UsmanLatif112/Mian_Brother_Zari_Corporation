@@ -129,10 +129,11 @@
   options=None,
   field_name='status',
   preserve=None,
-  icon='fa-sliders'
+  icon='fa-sliders',
+  default='all'
 ) %}
 {% set options = options or [('all', 'All'), ('with_products', 'With products'), ('empty', 'No products')] %}
-{% set active = selected and selected != 'all' %}
+{% set active = selected and selected != default %}
 {{ header_filters_start(active=active, title=label ~ ' filter', icon=icon) }}
     <form method="get"
           class="header-filter-form"
@@ -214,4 +215,22 @@
      title="{{ name }}">
   {% if not url %}<i class="fa-solid {{ icon }}"></i>{% endif %}
 </div>
+{% endmacro %}
+
+
+{% macro customer_photos_field(photos=[], icon='fa-user', label='Customer photos', folder='customers') %}
+<div class="customer-photos-field" data-icon="{{ icon }}" data-folder="{{ folder }}" data-existing='{{ photos|tojson }}'>
+  <label class="form-label d-block">{{ label }} <span class="text-muted fw-normal">(optional)</span></label>
+  <div class="customer-photos-grid mb-2"></div>
+  <button type="button" class="btn btn-sm btn-outline-secondary btn-add-customer-photo">
+    <i class="fa-solid fa-camera me-1"></i> Add photo
+  </button>
+  <div class="customer-photos-new-paths d-none"></div>
+  <div class="customer-photos-remove-ids d-none"></div>
+</div>
+{% endmacro %}
+
+
+{% macro party_active_badge(party) %}
+<span class="party-active-badge {% if party.is_active %}party-active{% else %}party-inactive{% endif %}">{{ party.active_label }}</span>
 {% endmacro %}

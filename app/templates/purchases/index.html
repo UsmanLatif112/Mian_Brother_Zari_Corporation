@@ -22,26 +22,54 @@
   </div>
 
   <div class="row g-3 mb-3">
-    <div class="col-md-6">
+    <div class="col-md-4">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body d-flex justify-content-between align-items-start">
           <div>
-            <p class="text-muted small mb-1">Total Purchasing</p>
+            <p class="text-muted small mb-1">Total Purchasing{% if selected_period != 'all' %} <span class="fw-normal">(period)</span>{% endif %}</p>
             <h3 class="mb-0 fw-bold">{{ '%.2f'|format(total_purchasing|float) }}</h3>
+            <div class="small text-muted mt-1">{{ purchase_count }} purchase record{{ 's' if purchase_count != 1 else '' }}</div>
           </div>
-          <div class="stat-icon bg-success-subtle text-success"><i class="fa-solid fa-truck"></i></div>
+          <div class="stat-icon bg-primary-subtle text-primary"><i class="fa-solid fa-truck"></i></div>
         </div>
       </div>
     </div>
-    <div class="col-md-6">
+    <div class="col-md-4">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body d-flex justify-content-between align-items-start">
           <div>
-            <p class="text-muted small mb-1">Purchase Records</p>
-            <h3 class="mb-0 fw-bold">{{ purchase_count }}</h3>
+            <p class="text-muted small mb-1">Paid{% if selected_period != 'all' %} <span class="fw-normal">(period)</span>{% endif %}</p>
+            <h3 class="mb-0 fw-bold text-success">{{ '%.2f'|format(total_paid|float) }}</h3>
+            <div class="small text-muted mt-1">Cash paid to vendors</div>
           </div>
-          <div class="stat-icon bg-primary-subtle text-primary"><i class="fa-solid fa-file-invoice"></i></div>
+          <div class="stat-icon bg-success-subtle text-success"><i class="fa-solid fa-circle-check"></i></div>
         </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Payable{% if selected_period != 'all' %} <span class="fw-normal">(period)</span>{% endif %}</p>
+            <h3 class="mb-0 fw-bold text-warning">{{ '%.2f'|format(total_payable|float) }}</h3>
+            <div class="small text-muted mt-1">Still owed on purchases</div>
+          </div>
+          <div class="stat-icon bg-warning-subtle text-warning"><i class="fa-solid fa-hand-holding-dollar"></i></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Total Purchasing · Paid · Payable</strong>
+      <a href="{{ url_for('vendors.index') }}" class="redirect-icon-btn" title="Open Vendors">
+        <i class="fa-solid fa-up-right-from-square"></i>
+      </a>
+    </div>
+    <div class="card-body pt-3 pb-2">
+      <div class="dash-chart-wrap">
+        <canvas id="purchasesPerformanceChart"></canvas>
       </div>
     </div>
   </div>
@@ -82,6 +110,10 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+window.purchasesPerformanceChart = {{ purchases_chart|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/purchases-page-chart.js') }}?v=2"></script>
 <script>
 function toggleCustomDates() {
   const isCustom = document.getElementById('period-filter')?.value === 'custom';

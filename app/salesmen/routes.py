@@ -101,6 +101,14 @@ def _salesman_page(form=None, open_modal=False):
         )
         period_as_of = None
 
+    from app.services.salesman_list_analytics_service import salesman_list_chart_metrics
+
+    salesman_chart = salesman_list_chart_metrics(
+        period=period,
+        start_date=period_start,
+        end_date=period_end,
+    )["chart"]
+
     return render_template(
         "salesmen/index.html",
         salesmen=salesmen,
@@ -110,6 +118,7 @@ def _salesman_page(form=None, open_modal=False):
         total_sales_all=total_sales_all,
         total_credit=total_credit,
         period_as_of=period_as_of,
+        salesman_chart=salesman_chart,
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
         end_date=period_end.isoformat() if period_end else "",
@@ -333,6 +342,14 @@ def detail(salesman_id):
     total_sales = totals.get(salesman.id, Decimal("0"))
 
     from app.services.ledger_service import party_balance_as_of
+    from app.services.salesman_analytics_service import salesman_performance_metrics
+
+    performance = salesman_performance_metrics(
+        salesman.id,
+        period=period,
+        start=range_start,
+        end=range_end,
+    )
 
     if range_end:
         display_balance = party_balance_as_of("salesman", salesman.id, range_end)
@@ -346,6 +363,7 @@ def detail(salesman_id):
         salesman=salesman,
         ledger=ledger,
         total_sales=total_sales,
+        performance=performance,
         display_balance=display_balance,
         balance_as_of=balance_as_of,
         today=get_working_date().isoformat(),

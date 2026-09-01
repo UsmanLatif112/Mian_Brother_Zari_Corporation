@@ -9,7 +9,7 @@ from app.services.fifo_service import fifo_deduct, fifo_deduct_open_weight, fifo
 from app.services.inventory_loss_service import create_sale_backorder
 from app.services.ledger_service import delete_ledger_by_reference, post_ledger_entry, rebuild_party_balances
 from app.services.sync_service import enqueue_sync
-from app.utils.working_date import get_working_date
+from app.utils.working_date import get_working_date, get_working_datetime
 
 
 def _sale_particulars_notes(sale) -> str:
@@ -77,7 +77,7 @@ def generate_invoice_no():
     return f"INV-{num:06d}"
 
 
-def create_sale(data, items, user_id):
+def create_sale(data, items, user_id, prefer_layer_ids=None):
     """Create sale and update customer credit/advance from payment vs total."""
     from datetime import date as date_cls
 
@@ -137,6 +137,7 @@ def create_sale(data, items, user_id):
                 entry_at=sale_date,
                 unit_weight=unit_weight,
                 allow_negative=allow_neg,
+                prefer_layer_ids=prefer_layer_ids,
             )
             if qty > 0:
                 unit_price = line_total / qty
@@ -151,6 +152,7 @@ def create_sale(data, items, user_id):
                 entry_at=sale_date,
                 unit_weight=unit_weight,
                 allow_negative=allow_neg,
+                prefer_layer_ids=prefer_layer_ids,
             )
         item = SaleItem(
             sale_id=sale.id,
@@ -379,6 +381,8 @@ def void_sale(sale_id, user_id=None):
             "This sale has returns. Delete or reverse those returns before voiding the sale."
         )
 
+    restored_layer_ids = []
+
     for item in list(sale.items):
         product = item.product
         qty = Decimal(str(item.quantity or 0))
@@ -402,17 +406,19 @@ def void_sale(sale_id, user_id=None):
         if restore_qty > 0:
             cogs = Decimal(str(item.cost_of_goods or 0))
             unit_cost = (cogs / qty) if qty else Decimal("0")
-            fifo_receive(
+            layer = fifo_receive(
                 product,
                 restore_qty,
                 unit_cost,
-                "sale_return",
+                "sale_void",
                 sale.id,
                 user_id,
                 notes=f"Void sale {sale.invoice_no}",
                 sale_price=item.unit_price,
-                entry_at=sale.sale_date,
+                entry_at=get_working_datetime(),
             )
+            if layer is not None:
+                restored_layer_ids.append(layer.id)
         else:
             sync_product_stock(product)
 
@@ -437,7 +443,7 @@ def void_sale(sale_id, user_id=None):
 
     log_audit("delete", "sale", sale_id, invoice)
     enqueue_sync("sales", sale_id, "delete")
-    return True
+    return restored_layer_ids
 
 
 def replace_sale(sale_id, data, items, user_id):
@@ -446,7 +452,7 @@ def replace_sale(sale_id, data, items, user_id):
     if not sale:
         raise ValueError("Sale not found.")
     invoice_no = sale.invoice_no
-    void_sale(sale_id, user_id)
+    restored_layers = void_sale(sale_id, user_id)
     payload = dict(data or {})
     payload["invoice_no"] = invoice_no
-    return create_sale(payload, items, user_id)
+    return create_sale(payload, items, user_id, prefer_layer_ids=restored_layers or None)

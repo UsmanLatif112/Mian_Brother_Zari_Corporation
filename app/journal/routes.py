@@ -27,6 +27,10 @@ def index():
 
     data = get_general_journal(period=period, start_date=start_date, end_date=end_date)
 
+    from app.services.journal_analytics_service import journal_chart_metrics
+
+    journal_chart = journal_chart_metrics(period=period, start_date=start_date, end_date=end_date, journal_data=data)["chart"]
+
     return render_template(
         "journal/index.html",
         rows=data["rows"],
@@ -34,6 +38,7 @@ def index():
         total_out=data["total_out"],
         net=data["net"],
         count=data["count"],
+        journal_chart=journal_chart,
         selected_period=period,
         start_date=start_raw,
         end_date=end_raw,

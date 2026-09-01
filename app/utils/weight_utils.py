@@ -233,7 +233,7 @@ def format_movement_qty_display(movement, product) -> str:
     if (
         product is not None
         and product_has_weight(product)
-        and getattr(movement, "movement_type", None) == "sale_return_in"
+        and getattr(movement, "movement_type", None) in ("sale_return_in", "sale_void_in")
         and getattr(movement, "reference_type", None) == "sale_return"
         and getattr(movement, "reference_id", None)
     ):

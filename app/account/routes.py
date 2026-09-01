@@ -70,6 +70,14 @@ def index():
     prev_bal = cash_snap["previous_balance"]
     cash_hand = cash_snap["cash_in_hand"]
 
+    from app.services.account_analytics_service import account_page_chart_metrics
+
+    account_metrics = account_page_chart_metrics(
+        period=period,
+        start_date=period_start,
+        end_date=period_end,
+    )
+
     return render_template(
         "account/index.html",
         rows=rows,
@@ -78,6 +86,7 @@ def index():
         cash_in_hand=cash_hand,
         total_taken=total_taken,
         filtered_total=filtered_total,
+        account_chart=account_metrics["chart"],
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
         end_date=period_end.isoformat() if period_end else "",

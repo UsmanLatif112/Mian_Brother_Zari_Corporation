@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload
 
 from app.extensions import db
 from app.forms import CustomerForm
-from app.models import Customer, CustomerReceiving, LedgerEntry
+from app.models import Customer, CustomerPhoto, CustomerReceiving, LedgerEntry
 from app.services.audit_service import log_audit
 from app.services.customer_payment_service import (
     PAYMENT_TYPES,
@@ -21,25 +21,63 @@ from app.services.ledger_service import (
     update_ledger_entry,
 )
 from app.utils.decorators import permission_required
-from app.utils.uploads import delete_image, save_image
+from app.utils.party_filters import apply_party_active_filter, parse_party_active
+from app.utils.uploads import accept_uploaded_path, delete_image, save_image
 from app.utils.working_date import get_working_date
 
 customers_bp = Blueprint("customers", __name__)
 
 
-def _apply_customer_photo(customer):
-    """Handle optional photo upload / clear from multipart form."""
-    if request.form.get("clear_photo") == "1":
-        delete_image(customer.photo)
+def _sync_customer_primary_photo(customer):
+    """Keep legacy photo column aligned with first gallery image."""
+    if customer.photos:
+        customer.photo = customer.photos[0].path
+    else:
         customer.photo = None
-        return
-    try:
-        path = save_image(request.files.get("photo"), "customers")
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
-    if path:
-        delete_image(customer.photo)
-        customer.photo = path
+
+
+def _apply_customer_photos(customer):
+    """Add/remove gallery photos from multipart form."""
+    remove_ids = request.form.getlist("remove_photo_id")
+    for raw_id in remove_ids:
+        try:
+            photo_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        photo = db.session.get(CustomerPhoto, photo_id)
+        if not photo or photo.customer_id != customer.id:
+            continue
+        delete_image(photo.path)
+        db.session.delete(photo)
+
+    for path in request.form.getlist("new_photo_paths"):
+        clean = accept_uploaded_path(path, "customers")
+        if not clean:
+            continue
+        sort_order = len(customer.photos or [])
+        db.session.add(
+            CustomerPhoto(customer_id=customer.id, path=clean, sort_order=sort_order)
+        )
+
+    files = request.files.getlist("customer_photos")
+    single = request.files.get("photo")
+    if single and getattr(single, "filename", None):
+        files = list(files) + [single]
+
+    for f in files:
+        if not f or not getattr(f, "filename", None):
+            continue
+        try:
+            path = save_image(f, "customers")
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        if path:
+            sort_order = len(customer.photos or [])
+            db.session.add(
+                CustomerPhoto(customer_id=customer.id, path=path, sort_order=sort_order)
+            )
+
+    _sync_customer_primary_photo(customer)
 
 
 def _opening_notes(customer):
@@ -216,8 +254,10 @@ def _customer_page(form=None, open_modal=False):
     period_end = _parse_date(request.args.get("end_date"))
     range_start, range_end = _range_for_filter(period, period_start, period_end)
     ctype = (request.args.get("type") or "all").strip().lower()
+    active_filter = parse_party_active(request.args.get("active"), default="all")
 
-    query = Customer.query.filter_by(is_deleted=False)
+    query = Customer.query.options(joinedload(Customer.photos)).filter_by(is_deleted=False)
+    query = apply_party_active_filter(query, Customer, active_filter)
     if range_start:
         query = query.filter(Customer.joined_date >= range_start)
     if range_end:
@@ -264,6 +304,21 @@ def _customer_page(form=None, open_modal=False):
     if not open_modal:
         open_modal = bool(session.pop("open_customer_modal", False))
 
+    chart_party_ids = type_ids if range_end else (
+        [c.id for c in Customer.query.filter_by(is_deleted=False, customer_type=ctype).all()]
+        if ctype and ctype != "all"
+        else None
+    )
+
+    from app.services.customer_list_analytics_service import customer_list_chart_metrics
+
+    customer_chart = customer_list_chart_metrics(
+        period=period,
+        start_date=period_start,
+        end_date=period_end,
+        party_ids=chart_party_ids,
+    )["chart"]
+
     return render_template(
         "customers/index.html",
         customers=customers,
@@ -271,6 +326,7 @@ def _customer_page(form=None, open_modal=False):
         total_credit=total_credit,
         total_advance=total_advance,
         period_as_of=period_as_of,
+        customer_chart=customer_chart,
         open_modal=open_modal,
         today=get_working_date().isoformat(),
         payment_types=PAYMENT_TYPES,
@@ -278,6 +334,7 @@ def _customer_page(form=None, open_modal=False):
         start_date=period_start.isoformat() if period_start else "",
         end_date=period_end.isoformat() if period_end else "",
         selected_type=ctype if ctype != "all" else "all",
+        selected_active=active_filter,
     )
 
 
@@ -314,10 +371,11 @@ def create():
                 credit_limit=form.credit_limit.data or 0,
                 balance=opening,
                 notes=form.notes.data,
+                is_active=True,
             )
-            _apply_customer_photo(customer)
             db.session.add(customer)
             db.session.flush()
+            _apply_customer_photos(customer)
             sync_party_opening_entry(
                 "customer",
                 customer.id,
@@ -381,8 +439,12 @@ def payment():
 def detail(customer_id):
     from app.services.dashboard_service import _range_for_filter
 
-    customer = db.session.get(Customer, customer_id)
-    if not customer or customer.is_deleted:
+    customer = (
+        Customer.query.options(joinedload(Customer.photos))
+        .filter_by(id=customer_id, is_deleted=False)
+        .first()
+    )
+    if not customer:
         flash("Customer not found.", "danger")
         return redirect(url_for("customers.index"))
 
@@ -414,6 +476,7 @@ def detail(customer_id):
     _attach_customer_ledger_particulars(ledger)
 
     from app.services.ledger_service import party_balance_as_of
+    from app.services.party_analytics_service import customer_account_pie
 
     if range_end:
         display_balance = party_balance_as_of("customer", customer_id, range_end)
@@ -422,6 +485,13 @@ def detail(customer_id):
         display_balance = Decimal(str(customer.balance or 0))
         balance_as_of = None
 
+    account_pie = customer_account_pie(
+        customer_id,
+        range_start=range_start,
+        range_end=range_end,
+        display_balance=display_balance,
+    )
+
     return render_template(
         "customers/detail.html",
         customer=customer,
@@ -429,6 +499,7 @@ def detail(customer_id):
         receivings=receivings,
         display_balance=display_balance,
         balance_as_of=balance_as_of,
+        account_pie=account_pie,
         today=get_working_date().isoformat(),
         payment_types=PAYMENT_TYPES,
         selected_period=period,
@@ -441,8 +512,12 @@ def detail(customer_id):
 @login_required
 @permission_required("customers.*")
 def edit(customer_id):
-    customer = db.session.get(Customer, customer_id)
-    if not customer or customer.is_deleted:
+    customer = (
+        Customer.query.options(joinedload(Customer.photos))
+        .filter_by(id=customer_id, is_deleted=False)
+        .first()
+    )
+    if not customer:
         flash("Customer not found.", "danger")
         return redirect(url_for("customers.index"))
     name = (request.form.get("name") or "").strip()
@@ -452,6 +527,7 @@ def edit(customer_id):
     try:
         customer.name = name
         customer.phone = (request.form.get("phone") or "").strip() or None
+        customer.cnic = (request.form.get("cnic") or "").strip() or None
         customer.address = (request.form.get("address") or "").strip() or None
         customer.old_book_no = (request.form.get("old_book_no") or "").strip() or None
         customer.customer_type = request.form.get("customer_type") or "good"
@@ -462,7 +538,8 @@ def edit(customer_id):
         customer.opening_balance = (
             Decimal("0") if opening in (None, "") else Decimal(str(opening))
         )
-        _apply_customer_photo(customer)
+        customer.is_active = request.form.get("is_active", "1") == "1"
+        _apply_customer_photos(customer)
         sync_party_opening_entry(
             "customer",
             customer.id,
@@ -485,8 +562,12 @@ def edit(customer_id):
 @login_required
 @permission_required("customers.*")
 def delete(customer_id):
-    customer = db.session.get(Customer, customer_id)
-    if not customer or customer.is_deleted:
+    customer = (
+        Customer.query.options(joinedload(Customer.photos))
+        .filter_by(id=customer_id, is_deleted=False)
+        .first()
+    )
+    if not customer:
         flash("Customer not found.", "danger")
         return redirect(url_for("customers.index"))
     customer.is_deleted = True

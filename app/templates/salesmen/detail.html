@@ -67,6 +67,20 @@
   </div>
 
   <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Sales · Paid · Credit</strong>
+      <a href="{{ url_for('sales.index') }}" class="redirect-icon-btn" title="Open Sales">
+        <i class="fa-solid fa-up-right-from-square"></i>
+      </a>
+    </div>
+    <div class="card-body pt-3 pb-2">
+      <div class="dash-chart-wrap">
+        <canvas id="salesmanPerformanceChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
       <strong>Salesman Ledger</strong>
       <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-print-ledger" title="Print filtered rows">
@@ -167,7 +181,11 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
+<script>
+window.salesmanPerformanceChart = {{ performance.chart|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/salesman-detail.js') }}?v=2"></script>
 <script>
 document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
   window.PrintFiltered?.printTable?.('salesman-ledger-table', '{{ salesman.name }} — Ledger');

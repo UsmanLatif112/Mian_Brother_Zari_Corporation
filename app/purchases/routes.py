@@ -1,12 +1,9 @@
 from datetime import date
-from decimal import Decimal
 
 from flask import Blueprint, redirect, render_template, request, url_for
 from flask_login import login_required
-from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
-from app.extensions import db
 from app.models import Purchase, PurchaseItem
 from app.utils.decorators import permission_required
 from app.utils.working_date import get_working_date
@@ -43,27 +40,25 @@ def index():
     purchases = query.order_by(Purchase.purchase_date.desc(), Purchase.id.desc()).all()
 
     from app.services.journal_service import items_particulars
+    from app.services.purchase_analytics_service import purchase_page_chart_metrics
 
     for p in purchases:
         p.particulars = items_particulars(p.items, fallback="—", kind="purchase")
 
-    totals_q = db.session.query(
-        func.coalesce(func.sum(Purchase.grand_total), 0),
-        func.count(Purchase.id),
+    purchase_metrics = purchase_page_chart_metrics(
+        period=period,
+        start_date=period_start,
+        end_date=period_end,
     )
-    if range_start:
-        totals_q = totals_q.filter(Purchase.purchase_date >= range_start)
-    if range_end:
-        totals_q = totals_q.filter(Purchase.purchase_date <= range_end)
-    total_purchasing, purchase_count = totals_q.one()
-    total_purchasing = total_purchasing or Decimal("0")
-    purchase_count = purchase_count or 0
 
     return render_template(
         "purchases/index.html",
         purchases=purchases,
-        total_purchasing=total_purchasing,
-        purchase_count=purchase_count,
+        total_purchasing=purchase_metrics["total_purchasing"],
+        total_paid=purchase_metrics["total_paid"],
+        total_payable=purchase_metrics["total_payable"],
+        purchase_count=purchase_metrics["purchase_count"],
+        purchases_chart=purchase_metrics["chart"],
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
         end_date=period_end.isoformat() if period_end else "",

@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from 'partials/macros.html' import header_period_filter %}
+{% from 'partials/party_detail_summary.html' import party_detail_summary_card %}
 {% block title %}{{ customer.name }}{% endblock %}
 {% block page_filters %}
 {{ header_period_filter(
@@ -16,67 +17,47 @@
 <div class="dashboard-page">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
     <div class="party-hero">
-      {% from 'partials/macros.html' import party_avatar %}
-      {{ party_avatar(customer.photo_url, customer.name, 'fa-user', 'lg') }}
+      {% from 'partials/macros.html' import party_avatar, customer_photos_field, party_active_badge %}
+      <div class="party-hero-avatar-wrap">
+        {{ party_avatar(customer.photo_url, customer.name, 'fa-user', 'lg') }}
+        {% if customer.photo_urls|length > 0 %}
+        <button type="button" class="btn btn-sm btn-light border party-photos-btn"
+                data-bs-toggle="modal" data-bs-target="#customerGalleryModal"
+                title="View all photos">
+          <i class="fa-solid fa-images"></i>
+          <span>{{ customer.photo_urls|length }}</span>
+        </button>
+        {% endif %}
+      </div>
       <div>
         <a href="{{ url_for('customers.index') }}" class="text-muted small text-decoration-none">
           <i class="fa-solid fa-arrow-left me-1"></i> Customers
         </a>
         <h1 class="h3 mb-1 mt-1 d-flex flex-wrap align-items-center gap-2">
           {{ customer.name }}
+          {{ party_active_badge(customer) }}
           {% set st = customer.customer_type or 'good' %}
           <span class="badge customer-status-badge status-{{ st }}">{{ customer.customer_type_label }}</span>
         </h1>
         <p class="text-muted mb-0">
           {% if customer.phone %}{{ customer.phone }} · {% endif %}
+          {% if customer.cnic %}CNIC {{ customer.cnic }} · {% endif %}
           {% if customer.old_book_no %}Book {{ customer.old_book_no }} · {% endif %}
           Added {{ customer.joined_date or (customer.created_at.date() if customer.created_at else '—') }}
         </p>
       </div>
     </div>
     <div class="d-flex align-items-center gap-2">
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editCustomerModal">
+        <i class="fa-solid fa-pen me-1"></i> Edit
+      </button>
       <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#paymentModal">
         <i class="fa-solid fa-money-bill-transfer me-1"></i> Record Payment
       </button>
     </div>
   </div>
 
-  <div class="row g-3 mb-3">
-    <div class="col-md-4">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">{% if balance_as_of %}Balance as of {{ balance_as_of }}{% else %}Current Balance{% endif %}</p>
-          <h3 class="mb-0 fw-bold {% if display_balance|float > 0 %}text-warning{% elif display_balance|float < 0 %}text-success{% endif %}">
-            {{ '%.2f'|format(display_balance|float) }}
-          </h3>
-          <div class="small text-muted mt-1">
-            {% if balance_as_of %}Through selected period
-            {% else %}Old account + sales &amp; payments{% endif %}
-            ·
-            {% if display_balance|float > 0 %}Customer owes (credit)
-            {% elif display_balance|float < 0 %}Advance with us
-            {% else %}Settled{% endif %}
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-4">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">Old Account Balance</p>
-          <h3 class="mb-0 fw-bold">{{ '%.2f'|format((customer.opening_balance or 0)|float) }}</h3>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-4">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">Address</p>
-          <div class="fw-semibold" style="font-size:0.85rem">{{ customer.address or '—' }}</div>
-        </div>
-      </div>
-    </div>
-  </div>
+  {{ party_detail_summary_card(customer, 'customer', account_pie, display_balance, balance_as_of) }}
 
   <div class="card dash-panel border-0 shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -197,17 +178,20 @@
         </div>
         <div class="modal-body">
           <div class="row g-2 align-items-end">
-            <div class="col-auto">
-              {% from 'partials/macros.html' import photo_field %}
-              {{ photo_field(current_url=customer.photo_url, icon='fa-user', label='Customer photo') }}
+            <div class="col-12">
+              {{ customer_photos_field(customer.photos_data) }}
             </div>
-            <div class="col-md-5">
+            <div class="col-12">
               <label class="form-label">Name</label>
               <input name="name" class="form-control" value="{{ customer.name }}" required>
             </div>
-            <div class="col-md-5">
+            <div class="col-md-6">
               <label class="form-label">Phone</label>
               <input name="phone" class="form-control" value="{{ customer.phone or '' }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">CNIC <span class="text-muted fw-normal">(optional)</span></label>
+              <input name="cnic" class="form-control" value="{{ customer.cnic or '' }}" placeholder="CNIC">
             </div>
             <div class="col-12">
               <label class="form-label">Address</label>
@@ -235,6 +219,13 @@
                 {% endfor %}
               </select>
             </div>
+            <div class="col-md-6">
+              <label class="form-label">Status</label>
+              <select name="is_active" class="form-select">
+                <option value="1" {% if customer.is_active %}selected{% endif %}>Active</option>
+                <option value="0" {% if not customer.is_active %}selected{% endif %}>Inactive</option>
+              </select>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -245,6 +236,30 @@
     </div>
   </div>
 </div>
+
+{% if customer.photo_urls %}
+<div class="modal fade erp-form-modal" id="customerGalleryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fa-solid fa-images me-2"></i>{{ customer.name }} — Photos</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3 customer-gallery-grid">
+          {% for url in customer.photo_urls %}
+          <div class="col-6 col-md-4">
+            <a href="{{ url }}" target="_blank" rel="noopener" class="customer-gallery-item">
+              <img src="{{ url }}" alt="{{ customer.name }} photo {{ loop.index }}">
+            </a>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <div class="modal fade erp-form-modal" id="editLedgerModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -291,6 +306,10 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+window.partyAccountPie = {{ account_pie.pie|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/party-detail.js') }}?v=2"></script>
 <script>
 function toggleCustomDates() {
   const isCustom = document.getElementById('period-filter')?.value === 'custom';
@@ -339,4 +358,5 @@ document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
   });
 });
 </script>
+<script src="{{ url_for('static', filename='js/customer-photos.js') }}"></script>
 {% endblock %}

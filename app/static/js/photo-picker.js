@@ -415,6 +415,7 @@
         if (pathEl) pathEl.value = data.path;
         setPreview(wrap, data.url);
         wrap.dataset.current = data.url;
+        document.dispatchEvent(new CustomEvent('photo-picker-applied', { detail: { wrap } }));
       } catch (_) {
         alert('Upload failed');
         setPreview(wrap, wrap.dataset.current || null);

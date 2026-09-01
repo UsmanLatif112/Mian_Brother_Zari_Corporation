@@ -47,10 +47,11 @@
       const payload = {
         name: document.getElementById('qv-name')?.value.trim() || '',
         phone: document.getElementById('qv-phone')?.value.trim() || '',
+        cnic: document.getElementById('qv-cnic')?.value.trim() || '',
         address: document.getElementById('qv-address')?.value.trim() || '',
         opening_balance: document.getElementById('qv-balance')?.value || 0,
         notes: document.getElementById('qv-notes')?.value.trim() || '',
-        photo: document.querySelector('#qv-photo-picker .photo-path')?.value || '',
+        photo_paths: window.CustomerPhotos?.collectNewPaths?.(document.getElementById(modalId)) || [],
       };
       if (!payload.name) {
         if (err) {
@@ -99,14 +100,17 @@
 
   function openQuickModal(modalId, prefill, applyFn) {
     activeApply = applyFn;
+    const modal = document.getElementById(modalId);
     const nameEl = document.getElementById('qv-name');
     const phoneEl = document.getElementById('qv-phone');
+    const cnicEl = document.getElementById('qv-cnic');
     const addrEl = document.getElementById('qv-address');
     const balEl = document.getElementById('qv-balance');
     const notesEl = document.getElementById('qv-notes');
     const err = document.getElementById('qv-error');
     if (nameEl) nameEl.value = prefill || '';
     if (phoneEl) phoneEl.value = '';
+    if (cnicEl) cnicEl.value = '';
     if (addrEl) addrEl.value = '';
     if (balEl) balEl.value = '0';
     if (notesEl) notesEl.value = '';
@@ -114,8 +118,8 @@
       err.classList.add('d-none');
       err.textContent = '';
     }
-    global.PhotoPicker?.clear?.(document.getElementById('qv-photo-picker'));
-    bootstrap.Modal.getOrCreateInstance(document.getElementById(modalId)).show();
+    global.CustomerPhotos?.resetField?.(modal);
+    bootstrap.Modal.getOrCreateInstance(modal).show();
   }
 
   function bind(opts) {

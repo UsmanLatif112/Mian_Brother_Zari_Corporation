@@ -96,12 +96,20 @@ def normalize_unit_weight(unit_weight):
     return value.quantize(Decimal("0.001"))
 
 
-def _ordered_stock_layers(product):
-    return (
+def _ordered_stock_layers(product, prefer_layer_ids=None):
+    layers = (
         StockLayer.query.filter_by(product_id=product.id)
         .order_by(StockLayer.received_at.asc(), StockLayer.id.asc())
         .all()
     )
+    if not prefer_layer_ids:
+        return layers
+    prefer = [int(x) for x in prefer_layer_ids]
+    by_id = {layer.id: layer for layer in layers}
+    head = [by_id[i] for i in prefer if i in by_id]
+    skip = set(prefer)
+    tail = [layer for layer in layers if layer.id not in skip]
+    return head + tail
 
 
 def list_packaging_options(product):
@@ -261,6 +269,7 @@ def fifo_deduct_open_weight(
     entry_at=None,
     unit_weight=None,
     allow_negative=False,
+    prefer_layer_ids=None,
 ):
     """
     Deduct an open (by-weight) sale for a single product weight.
@@ -276,7 +285,7 @@ def fifo_deduct_open_weight(
         raise ValueError(f"Unit weight missing for {product.name}.")
     bag_equiv = Decimal("0")
     total_cost = Decimal("0")
-    layers = _ordered_stock_layers(product)
+    layers = _ordered_stock_layers(product, prefer_layer_ids)
     backorder_qty = Decimal("0")
     backorder_weight = Decimal("0")
 
@@ -366,6 +375,8 @@ def add_stock_layer(
     received_at=None,
     unit_weight=None,
     weight_unit=None,
+    sealed_qty=None,
+    open_weight=None,
 ):
     uw = None
     if unit_weight is not None and str(unit_weight).strip() != "":
@@ -378,15 +389,22 @@ def add_stock_layer(
     wu = (str(weight_unit).strip() or None) if uw and weight_unit else None
     if uw and not wu:
         wu = "kg"
+    total = Decimal(str(quantity))
+    if sealed_qty is not None:
+        sealed = Decimal(str(sealed_qty))
+        open_w = Decimal(str(open_weight or 0))
+    else:
+        sealed = total
+        open_w = Decimal("0")
     layer = StockLayer(
         product_id=product_id,
-        quantity_received=Decimal(str(quantity)),
-        quantity_remaining=Decimal(str(quantity)),
+        quantity_received=total,
+        quantity_remaining=sealed,
         unit_cost=Decimal(str(unit_cost)),
         sale_price=Decimal(str(sale_price)) if sale_price is not None else None,
         unit_weight=uw,
         weight_unit=wu,
-        open_weight_remaining=Decimal("0"),
+        open_weight_remaining=open_w,
         source_type=source_type,
         source_id=source_id,
         batch_number=(str(batch_number).strip() or None) if batch_number else None,
@@ -397,6 +415,7 @@ def add_stock_layer(
         notes=notes,
     )
     db.session.add(layer)
+    db.session.flush()
     return layer
 
 def fifo_deduct(
@@ -410,13 +429,14 @@ def fifo_deduct(
     entry_at=None,
     unit_weight=None,
     allow_negative=False,
+    prefer_layer_ids=None,
 ):
     """Deduct sealed bag/unit quantity. Returns (total_cost, backorder_qty)."""
     qty_needed = Decimal(str(quantity))
     requested = qty_needed
     total_cost = Decimal("0")
     when = as_working_datetime(entry_at) if entry_at is not None else get_working_datetime()
-    for layer in _ordered_stock_layers(product):
+    for layer in _ordered_stock_layers(product, prefer_layer_ids):
         if qty_needed <= 0:
             break
         sealed = Decimal(str(layer.quantity_remaining or 0))
@@ -471,6 +491,8 @@ def fifo_receive(
     entry_at=None,
     unit_weight=None,
     weight_unit=None,
+    sealed_qty=None,
+    open_weight=None,
 ):
     qty = Decimal(str(quantity))
     when = as_working_datetime(entry_at) if entry_at is not None else get_working_datetime()
@@ -496,7 +518,7 @@ def fifo_receive(
     layer_wu = product.weight_unit
 
     layer_sale = sale_price if sale_price is not None else product.sale_price
-    add_stock_layer(
+    layer = add_stock_layer(
         product.id,
         qty,
         unit_cost,
@@ -511,6 +533,8 @@ def fifo_receive(
         received_at=when,
         unit_weight=layer_uw,
         weight_unit=layer_wu,
+        sealed_qty=sealed_qty,
+        open_weight=open_weight,
     )
     try:
         from app.services.inventory_loss_service import fulfill_backorders_for_product
@@ -519,13 +543,24 @@ def fifo_receive(
     except Exception:
         pass
     sync_product_stock(product)
-    # Label stock movements clearly (returns must not look like purchases)
     if source_type == "sale_return":
         mv_type = "sale_return_in"
     elif source_type in ("sale_void", "sale_return_void"):
-        mv_type = "sale_return_in"
+        mv_type = "sale_void_in"
     else:
         mv_type = "purchase_in"
+
+    mv_notes = notes
+    if source_type == "purchase":
+        from app.utils.movement_labels import format_purchase_movement_notes
+
+        if sealed_qty is not None:
+            mv_notes = format_purchase_movement_notes(
+                sealed_qty, open_weight, layer_uw, layer_wu, notes
+            )
+        elif notes and not str(notes).lower().startswith("purchase"):
+            mv_notes = f"Purchase: {notes}" if notes else "Purchase in"
+
     movement = StockMovement(
         product_id=product.id,
         movement_type=mv_type,
@@ -534,11 +569,12 @@ def fifo_receive(
         balance_after=product.current_stock,
         reference_type=source_type,
         reference_id=source_id,
-        notes=notes,
+        notes=mv_notes,
         created_by_id=user_id,
         created_at=when,
     )
     db.session.add(movement)
+    return layer
 
 
 def _sync_all_layer_weights(product):
@@ -588,12 +624,19 @@ def adjust_batch(layer, new_qty, user_id, notes=None, entry_at=None):
     sync_product_stock(product)
 
     adj_type = "increase" if delta > 0 else "decrease"
+    uw = layer.effective_unit_weight
+    wu = layer.effective_weight_unit or "kg"
+    if uw and uw > 0:
+        qty_note = f"sealed {old_qty.normalize()}→{new_qty.normalize()} bags"
+    else:
+        qty_note = f"qty {old_qty.normalize()}→{new_qty.normalize()}"
+    default_notes = f"Qty adjust: {qty_note}"
     db.session.add(
         InventoryAdjustment(
             product_id=product.id,
             adjustment_type=adj_type,
             quantity=abs(delta),
-            notes=notes or f"Batch #{layer.id} adjust {old_qty} → {new_qty}",
+            notes=notes or default_notes,
             created_by_id=user_id,
             created_at=when,
         )
@@ -607,7 +650,7 @@ def adjust_batch(layer, new_qty, user_id, notes=None, entry_at=None):
             balance_after=product.current_stock,
             reference_type="stock_layer",
             reference_id=layer.id,
-            notes=notes,
+            notes=notes or default_notes,
             created_by_id=user_id,
             created_at=when,
         )

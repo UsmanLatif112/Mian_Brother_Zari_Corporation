@@ -1,0 +1,19 @@
+{
+  "next_id": 73,
+  "items": [
+    {
+      "id": 71,
+      "message": "Auto backup created: sqlite_backup_20260827_213957",
+      "category": "success",
+      "source": "backup",
+      "created_at": "2026-08-27T21:39:57"
+    },
+    {
+      "id": 72,
+      "message": "Backup queued (connect Google Drive to upload): sqlite_backup_20260827_213957",
+      "category": "warning",
+      "source": "drive",
+      "created_at": "2026-08-27T21:39:57"
+    }
+  ]
+}

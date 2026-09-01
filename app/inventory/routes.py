@@ -20,6 +20,7 @@ from app.services.purchase_service import (
     record_purchase,
     reverse_purchase_for_layer,
 )
+from app.utils.party_filters import apply_party_active_filter, parse_party_active
 from app.utils.working_date import get_working_date
 from app.utils.decorators import permission_required
 from app.utils.uploads import accept_uploaded_path, delete_image, save_image
@@ -84,6 +85,44 @@ def _parse_optional_text(raw):
     return raw or None
 
 
+def _parse_purchase_quantities(item):
+    """
+    Parse purchase qty from line dict.
+    Weighted products: sealed_bags + loose_weight_kg (preferred).
+    Fallback: opening_stock / quantity decimal.
+    Returns (total_qty, sealed_qty_or_none, open_weight_or_none).
+    """
+    uw_raw = item.get("unit_weight")
+    loose_raw = item.get("loose_weight_kg")
+    sealed_raw = item.get("sealed_bags")
+
+    has_split = sealed_raw is not None and str(sealed_raw).strip() != ""
+    if not has_split and loose_raw is not None and str(loose_raw).strip() != "":
+        has_split = True
+
+    if has_split:
+        sealed = Decimal(str(sealed_raw or 0))
+        loose = Decimal(str(loose_raw or 0))
+        uw = parse_unit_weight(uw_raw) if uw_raw not in (None, "") else None
+        if uw and uw > 0:
+            total = sealed + (loose / uw)
+        else:
+            total = sealed
+        if total <= 0:
+            name = (item.get("name") or "product").strip()
+            raise ValueError(f"Purchase quantity is required for {name}.")
+        return total, sealed, loose
+
+    try:
+        qty = Decimal(str(item.get("opening_stock") or item.get("quantity") or 0))
+    except Exception as exc:
+        raise ValueError(f"Invalid purchase quantity for {item.get('name') or 'product'}.") from exc
+    if qty <= 0:
+        name = (item.get("name") or "product").strip()
+        raise ValueError(f"Purchase quantity is required for {name}.")
+    return qty, None, None
+
+
 def _upsert_product_line(item):
     """
     Create or update one product from an inventory line dict.
@@ -97,11 +136,11 @@ def _upsert_product_line(item):
         raise ValueError("Product name is required on every row.")
 
     try:
-        qty = Decimal(str(item.get("opening_stock") or item.get("quantity") or 0))
+        qty, sealed_qty, open_weight = _parse_purchase_quantities(item)
+    except ValueError as exc:
+        raise exc
     except Exception as exc:
         raise ValueError(f"Invalid purchase quantity for {name}.") from exc
-    if qty <= 0:
-        raise ValueError(f"Purchase quantity is required for {name}.")
 
     try:
         category_id = int(item.get("category_id") or 0)
@@ -184,6 +223,7 @@ def _upsert_product_line(item):
             current_stock=Decimal("0"),
             minimum_stock=minimum_stock,
             description=description,
+            is_active=True,
         )
         _apply_product_weight(product, item.get("unit_weight"), item.get("weight_unit"))
         db.session.add(product)
@@ -201,6 +241,9 @@ def _upsert_product_line(item):
         "unit_weight": item.get("unit_weight"),
         "weight_unit": item.get("weight_unit"),
     }
+    if sealed_qty is not None:
+        purchase_line["sealed_qty"] = sealed_qty
+        purchase_line["open_weight"] = open_weight or Decimal("0")
     return product, qty, purchase_line, action
 
 
@@ -297,6 +340,22 @@ def _create_inventory_products(data, *, as_json=True):
 
     if as_json:
         flash(msg, "success")
+        products_payload = []
+        for p in created + restocked:
+            products_payload.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "sku": p.sku,
+                    "sale_price": float(p.sale_price or 0),
+                    "list_price": float(p.sale_price or 0),
+                    "unit_weight": float(p.unit_weight) if p.unit_weight is not None else None,
+                    "weight_unit": p.weight_unit or "",
+                    "photo_url": p.photo_url,
+                    "stock_display": p.stock_display,
+                }
+            )
+        first_product = (created or restocked)[0] if total else None
         return jsonify(
             {
                 "ok": True,
@@ -306,6 +365,18 @@ def _create_inventory_products(data, *, as_json=True):
                 "purchase_ids": [p.id for p in purchases],
                 "count": total,
                 "redirect": redirect_url,
+                "products": products_payload,
+                "id": first_product.id if first_product else None,
+                "name": first_product.name if first_product else None,
+                "sale_price": float(first_product.sale_price or 0) if first_product else None,
+                "list_price": float(first_product.sale_price or 0) if first_product else None,
+                "unit_weight": (
+                    float(first_product.unit_weight)
+                    if first_product and first_product.unit_weight is not None
+                    else None
+                ),
+                "weight_unit": first_product.weight_unit or "" if first_product else "",
+                "photo_url": first_product.photo_url if first_product else None,
             }
         )
 
@@ -322,6 +393,7 @@ def _inventory_page(form=None, open_modal=False):
     )
 
     category_id = request.args.get("category_id", type=int)
+    active_filter = parse_party_active(request.args.get("active"), default="all")
     period = request.args.get("period", "all")
     start_raw = request.args.get("start_date") or ""
     end_raw = request.args.get("end_date") or ""
@@ -336,6 +408,7 @@ def _inventory_page(form=None, open_modal=False):
     range_start, range_end = _range_for_filter(period, period_start, period_end)
 
     q = Product.query.filter_by(is_deleted=False)
+    q = apply_party_active_filter(q, Product, active_filter)
     if category_id:
         q = q.filter(
             db.or_(Product.category_id == category_id, Product.subcategory_id == category_id)
@@ -359,6 +432,15 @@ def _inventory_page(form=None, open_modal=False):
         stock_value = stock_valuation()
         stock_as_of = None
 
+    from app.services.inventory_list_analytics_service import inventory_list_chart_metrics
+
+    inventory_metrics = inventory_list_chart_metrics(
+        period=period,
+        start_date=period_start,
+        end_date=period_end,
+        product_ids=product_ids or None,
+    )
+
     return render_template(
         "inventory/index.html",
         products=products,
@@ -366,13 +448,19 @@ def _inventory_page(form=None, open_modal=False):
         open_modal=open_modal,
         categories=categories,
         selected_category=category_id or "",
+        selected_active=active_filter,
         selected_period=period,
         start_date=start_raw,
         end_date=end_raw,
         stock_value=stock_value,
+        total_purchases=inventory_metrics["total_purchases"],
+        total_sales=inventory_metrics["total_sales"],
+        purchase_count=inventory_metrics["purchase_count"],
+        sale_count=inventory_metrics["sale_count"],
         product_count=len(products),
         stock_as_of=stock_as_of,
         period_as_of=range_end,
+        inventory_chart=inventory_metrics["chart"],
     )
 
 
@@ -475,6 +563,7 @@ def edit_product(product_id):
             request.form.get("weight_unit"),
         )
         _apply_product_photo(product)
+        product.is_active = request.form.get("is_active", "1") == "1"
         log_audit("update", "product", product.id, product.name)
         db.session.commit()
         flash("Product updated.", "success")
@@ -527,6 +616,7 @@ def detail(product_id):
 
     from app.services.fifo_service import product_stock_as_of, stock_valuation_as_of
     from app.services.inventory_loss_service import list_open_backorders, open_backorder_qty
+    from app.services.product_analytics_service import product_performance_metrics
     from app.utils.weight_utils import format_qty_display
 
     pending_backorder_qty = open_backorder_qty(product.id)
@@ -548,6 +638,13 @@ def detail(product_id):
             Decimal("0"),
         )
         stock_display = product.stock_total_display
+
+    performance = product_performance_metrics(
+        product.id,
+        period=period,
+        start=range_start,
+        end=range_end,
+    )
 
     form = ProductForm(obj=product)
     form.category_id.data = product.category_id
@@ -571,6 +668,7 @@ def detail(product_id):
         start_date=start_raw,
         end_date=end_raw,
         period_as_of=range_end,
+        performance=performance,
         categories=Category.query.filter_by(is_deleted=False, parent_id=None).order_by(Category.name).all(),
     )
 
@@ -696,7 +794,7 @@ def edit_layer_entry(layer_id):
         layer.quantity_received = new_purchased
         current_qty = Decimal(str(layer.quantity_remaining or 0))
         if new_qty != current_qty:
-            adj_notes = (request.form.get("adjustment_notes") or "").strip() or "Edited batch quantity"
+            adj_notes = (request.form.get("adjustment_notes") or "").strip() or None
             adjust_batch(
                 layer,
                 new_qty,

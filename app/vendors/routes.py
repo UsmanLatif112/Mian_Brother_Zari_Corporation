@@ -5,9 +5,11 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func
 
+from sqlalchemy.orm import joinedload
+
 from app.extensions import db
 from app.forms import VendorForm
-from app.models import LedgerEntry, Vendor, VendorPayment
+from app.models import LedgerEntry, Vendor, VendorPayment, VendorPhoto
 from app.services.audit_service import log_audit
 from app.services.vendor_payment_service import (
     PAYMENT_TYPES,
@@ -16,24 +18,61 @@ from app.services.vendor_payment_service import (
 )
 from app.services.ledger_service import delete_ledger_entry_cascading
 from app.utils.decorators import permission_required
-from app.utils.uploads import delete_image, save_image
+from app.utils.party_filters import apply_party_active_filter, parse_party_active
+from app.utils.uploads import accept_uploaded_path, delete_image, save_image
 from app.utils.working_date import get_working_date
 
 vendors_bp = Blueprint("vendors", __name__)
 
 
-def _apply_vendor_photo(vendor):
-    if request.form.get("clear_photo") == "1":
-        delete_image(vendor.photo)
+def _sync_vendor_primary_photo(vendor):
+    if vendor.photos:
+        vendor.photo = vendor.photos[0].path
+    else:
         vendor.photo = None
-        return
-    try:
-        path = save_image(request.files.get("photo"), "vendors")
-    except ValueError:
-        raise
-    if path:
-        delete_image(vendor.photo)
-        vendor.photo = path
+
+
+def _apply_vendor_photos(vendor):
+    remove_ids = request.form.getlist("remove_photo_id")
+    for raw_id in remove_ids:
+        try:
+            photo_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        photo = db.session.get(VendorPhoto, photo_id)
+        if not photo or photo.vendor_id != vendor.id:
+            continue
+        delete_image(photo.path)
+        db.session.delete(photo)
+
+    for path in request.form.getlist("new_photo_paths"):
+        clean = accept_uploaded_path(path, "vendors")
+        if not clean:
+            continue
+        sort_order = len(vendor.photos or [])
+        db.session.add(
+            VendorPhoto(vendor_id=vendor.id, path=clean, sort_order=sort_order)
+        )
+
+    files = request.files.getlist("customer_photos")
+    single = request.files.get("photo")
+    if single and getattr(single, "filename", None):
+        files = list(files) + [single]
+
+    for f in files:
+        if not f or not getattr(f, "filename", None):
+            continue
+        try:
+            path = save_image(f, "vendors")
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        if path:
+            sort_order = len(vendor.photos or [])
+            db.session.add(
+                VendorPhoto(vendor_id=vendor.id, path=path, sort_order=sort_order)
+            )
+
+    _sync_vendor_primary_photo(vendor)
 
 
 def _parse_date(value):
@@ -57,8 +96,10 @@ def _vendor_page(form=None, open_modal=False):
     status = (request.args.get("status") or "all").strip().lower()
     if status not in ("all", "payable", "prepaid", "settled"):
         status = "all"
+    active_filter = parse_party_active(request.args.get("active"), default="all")
 
     query = Vendor.query.filter_by(is_deleted=False)
+    query = apply_party_active_filter(query, Vendor, active_filter)
     if range_start and range_end:
         start_dt = datetime.combine(range_start, time.min)
         end_dt = datetime.combine(range_end, time.max)
@@ -70,7 +111,7 @@ def _vendor_page(form=None, open_modal=False):
     elif status == "settled":
         query = query.filter(Vendor.balance == 0)
 
-    vendors = query.order_by(Vendor.name).all()
+    vendors = query.options(joinedload(Vendor.photos)).order_by(Vendor.name).all()
 
     from app.services.ledger_service import sum_party_balances_as_of
 
@@ -92,6 +133,14 @@ def _vendor_page(form=None, open_modal=False):
         )
         period_as_of = None
 
+    from app.services.vendor_list_analytics_service import vendor_list_chart_metrics
+
+    vendor_chart = vendor_list_chart_metrics(
+        period=period,
+        start_date=period_start,
+        end_date=period_end,
+    )["chart"]
+
     return render_template(
         "vendors/index.html",
         vendors=vendors,
@@ -102,10 +151,12 @@ def _vendor_page(form=None, open_modal=False):
         total_payable=total_payable,
         total_prepaid=total_prepaid,
         period_as_of=period_as_of,
+        vendor_chart=vendor_chart,
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
         end_date=period_end.isoformat() if period_end else "",
         selected_status=status,
+        selected_active=active_filter,
     )
 
 
@@ -130,14 +181,16 @@ def create():
             vendor = Vendor(
                 name=form.name.data,
                 phone=form.phone.data,
+                cnic=(form.cnic.data or "").strip() or None,
                 address=form.address.data,
                 opening_balance=opening,
                 balance=opening,
                 notes=form.notes.data,
+                is_active=True,
             )
-            _apply_vendor_photo(vendor)
             db.session.add(vendor)
             db.session.flush()
+            _apply_vendor_photos(vendor)
             if opening:
                 from app.services.ledger_service import post_ledger_entry
 
@@ -180,13 +233,15 @@ def edit(vendor_id):
     try:
         vendor.name = name
         vendor.phone = (request.form.get("phone") or "").strip() or None
+        vendor.cnic = (request.form.get("cnic") or "").strip() or None
         vendor.address = (request.form.get("address") or "").strip() or None
         vendor.notes = (request.form.get("notes") or "").strip() or None
         opening = request.form.get("opening_balance")
         vendor.opening_balance = (
             Decimal("0") if opening in (None, "") else Decimal(str(opening))
         )
-        _apply_vendor_photo(vendor)
+        vendor.is_active = request.form.get("is_active", "1") == "1"
+        _apply_vendor_photos(vendor)
         log_audit("update", "vendor", vendor.id, vendor.name)
         db.session.commit()
         flash("Vendor updated.", "success")
@@ -288,8 +343,12 @@ def delete_ledger(entry_id):
 def detail(vendor_id):
     from app.services.dashboard_service import _range_for_filter
 
-    vendor = db.session.get(Vendor, vendor_id)
-    if not vendor or vendor.is_deleted:
+    vendor = (
+        Vendor.query.options(joinedload(Vendor.photos))
+        .filter_by(id=vendor_id, is_deleted=False)
+        .first()
+    )
+    if not vendor:
         flash("Vendor not found.", "danger")
         return redirect(url_for("vendors.index"))
 
@@ -339,6 +398,7 @@ def detail(vendor_id):
     payments = pay_q.order_by(VendorPayment.payment_date.desc()).all()
 
     from app.services.ledger_service import party_balance_as_of
+    from app.services.party_analytics_service import vendor_account_pie
 
     if range_end:
         display_balance = party_balance_as_of("vendor", vendor_id, range_end)
@@ -347,6 +407,13 @@ def detail(vendor_id):
         display_balance = Decimal(str(vendor.balance or 0))
         balance_as_of = None
 
+    account_pie = vendor_account_pie(
+        vendor_id,
+        range_start=range_start,
+        range_end=range_end,
+        display_balance=display_balance,
+    )
+
     return render_template(
         "vendors/detail.html",
         vendor=vendor,
@@ -354,6 +421,7 @@ def detail(vendor_id):
         payments=payments,
         display_balance=display_balance,
         balance_as_of=balance_as_of,
+        account_pie=account_pie,
         today=get_working_date().isoformat(),
         payment_types=PAYMENT_TYPES,
         selected_period=period,

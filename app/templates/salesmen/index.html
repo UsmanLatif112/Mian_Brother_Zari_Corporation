@@ -62,6 +62,17 @@
     </div>
   </div>
 
+  <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Total Sales · Paid · Credit Outstanding</strong>
+    </div>
+    <div class="card-body pt-3 pb-2">
+      <div class="dash-chart-wrap">
+        <canvas id="salesmanListChart"></canvas>
+      </div>
+    </div>
+  </div>
+
   <div class="card dash-panel border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
       <strong>Salesman List</strong>
@@ -185,7 +196,11 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
+<script>
+window.salesmanListChart = {{ salesman_chart|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/list-page-charts.js') }}?v=2"></script>
 <script>
 document.querySelectorAll('.btn-edit-salesman').forEach((btn) => {
   btn.addEventListener('click', () => {

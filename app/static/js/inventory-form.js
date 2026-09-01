@@ -3,6 +3,9 @@
 
   const linesEl = document.getElementById('inventory-lines');
   const form = document.getElementById('entity-form');
+  const isSalesContext = Boolean(document.getElementById('quickProductModal'));
+  const hostModalId = isSalesContext ? 'quickProductModal' : 'formModal';
+  const saveUrl = isSalesContext ? '/api/products/batch' : '/inventory/products/create';
   let rowSeq = 0;
   let productNameTimer = null;
   /** Pending next batch seq per product id (or '_new') within this form. */
@@ -123,7 +126,7 @@
     const uw = row.querySelector('.inv-unit-weight');
     if (uw) uw.value = p.unit_weight != null && p.unit_weight !== '' ? p.unit_weight : '';
     const wu = row.querySelector('.inv-weight-unit');
-    if (wu) wu.value = p.weight_unit || '';
+    if (wu) wu.value = p.weight_unit || 'kg';
     const desc = row.querySelector('.inv-description');
     if (desc) desc.value = p.description || '';
 
@@ -139,6 +142,7 @@
       window.PhotoPicker?.setPreview?.(picker, p.photo_url || null);
     }
     refreshAllBatchPreviews();
+    syncLooseUnitLabel(row);
   }
 
   function bindProductNameLookup(row) {
@@ -249,6 +253,31 @@
     });
   }
 
+  function weightUnitLabel(row) {
+    const wu = row.querySelector('.inv-weight-unit')?.value || 'kg';
+    return wu || 'kg';
+  }
+
+  function syncLooseUnitLabel(row) {
+    const unit = weightUnitLabel(row);
+    row.querySelectorAll('.inv-loose-unit').forEach((el) => {
+      el.textContent = unit;
+    });
+  }
+
+  function bindWeightFields(row) {
+    const uwEl = row.querySelector('.inv-unit-weight');
+    const wuEl = row.querySelector('.inv-weight-unit');
+    uwEl?.addEventListener('input', () => {
+      if (Number(uwEl.value || 0) > 0 && wuEl && !wuEl.value) {
+        wuEl.value = 'kg';
+      }
+      syncLooseUnitLabel(row);
+    });
+    wuEl?.addEventListener('change', () => syncLooseUnitLabel(row));
+    syncLooseUnitLabel(row);
+  }
+
   function rowTemplate() {
     rowSeq += 1;
     const uid = rowSeq;
@@ -316,48 +345,48 @@
           <input type="text" class="form-control inv-brand" placeholder="Optional">
         </div>
 
+        <div class="col-md-2">
+          <label class="form-label">Full Item <span class="text-danger">*</span></label>
+          <input type="number" step="1" min="0" class="form-control inv-sealed-bags" value="">
+        </div>
         <div class="col-md-3">
+          <label class="form-label">Loose Item</label>
+          <div class="input-group">
+            <input type="number" step="0.001" min="0" class="form-control inv-loose-weight" value="0">
+            <span class="input-group-text inv-loose-unit">kg</span>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Unit Weight</label>
+          <div class="input-group">
+            <input type="number" step="0.001" min="0" class="form-control inv-unit-weight" placeholder="50">
+            <select class="form-select inv-weight-unit" style="max-width:5.5rem">
+              <option value="kg">kg</option>
+              <option value="g">g</option>
+              <option value="L">L</option>
+              <option value="ml">ml</option>
+            </select>
+          </div>
+        </div>
+        <div class="col-md-2">
           <label class="form-label">Purchase Price</label>
           <input type="number" step="0.01" min="0" class="form-control inv-purchase" value="0">
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
           <label class="form-label">Sale Price</label>
           <input type="number" step="0.01" min="0" class="form-control inv-sale" value="0">
         </div>
-        <div class="col-md-3">
-          <label class="form-label">Purchase Qty <span class="text-danger">*</span></label>
-          <input type="number" step="0.001" min="0.001" class="form-control inv-qty" value="">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Minimum Stock</label>
-          <input type="number" step="0.001" min="0" class="form-control inv-min" value="0">
-        </div>
-
-        <div class="col-md-3">
-          <label class="form-label">Unit Weight <span class="text-muted fw-normal">(optional)</span></label>
-          <input type="number" step="0.001" min="0" class="form-control inv-unit-weight" placeholder="e.g. 50">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Weight Unit</label>
-          <select class="form-select inv-weight-unit">
-            <option value="">—</option>
-            <option value="kg">kg</option>
-            <option value="g">g</option>
-            <option value="L">L</option>
-            <option value="ml">ml</option>
-          </select>
-        </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
           <label class="form-label">Batch</label>
-          <input type="text" class="form-control bg-light inv-batch" readonly tabindex="-1" placeholder="Auto on save">
+          <input type="text" class="form-control bg-light inv-batch" readonly tabindex="-1" placeholder="#1">
         </div>
-        <div class="col-md-3">
-          <label class="form-label">Expiry Date <span class="text-muted fw-normal">(optional)</span></label>
+        <div class="col-md-2">
+          <label class="form-label">Expiry Date</label>
           <input type="date" class="form-control inv-expiry">
         </div>
         <div class="col-12">
           <label class="form-label">Description</label>
-          <textarea class="form-control inv-description" rows="2" placeholder="Optional"></textarea>
+          <textarea class="form-control inv-description" rows="2"></textarea>
         </div>
       </div>
     `;
@@ -371,6 +400,7 @@
     linesEl.appendChild(row);
     bindCategoryLookups(row);
     bindProductNameLookup(row);
+    bindWeightFields(row);
     window.PhotoPicker?.bindAll?.(row);
     fillSuggestedCodes(row, { force: true });
     row.querySelector('.btn-remove-inv-row')?.addEventListener('click', () => {
@@ -417,12 +447,31 @@
         if (subId) subId.value = '';
       }
 
-      const qty = Number(row.querySelector('.inv-qty')?.value || 0);
-      if (!(qty > 0)) {
-        return { ok: false, error: `Purchase quantity is required for “${name}”.` };
+      const uw = Number(row.querySelector('.inv-unit-weight')?.value || 0);
+      const sealedBags = Number(row.querySelector('.inv-sealed-bags')?.value || 0);
+      const looseKg = Number(row.querySelector('.inv-loose-weight')?.value || 0);
+
+      if (looseKg > 0 && !(uw > 0)) {
+        return {
+          ok: false,
+          error: `Set unit weight for “${name}” when entering loose item.`,
+        };
       }
 
-      items.push({
+      let openingStock = 0;
+      if (uw > 0) {
+        openingStock = sealedBags + looseKg / uw;
+      } else {
+        openingStock = sealedBags;
+      }
+      if (!(openingStock > 0)) {
+        return {
+          ok: false,
+          error: `Enter full item and/or loose item for “${name}”.`,
+        };
+      }
+
+      const lineItem = {
         name,
         existing_product_id: row.querySelector('.inv-existing-id')?.value || '',
         sku: row.querySelector('.inv-sku')?.value?.trim() || '',
@@ -432,7 +481,7 @@
         subcategory_id: row.querySelector('.inv-subcategory-id')?.value || '',
         purchase_price: row.querySelector('.inv-purchase')?.value || 0,
         sale_price: row.querySelector('.inv-sale')?.value || 0,
-        opening_stock: row.querySelector('.inv-qty')?.value || 0,
+        opening_stock: openingStock,
         minimum_stock: row.querySelector('.inv-min')?.value || 0,
         unit_weight: row.querySelector('.inv-unit-weight')?.value || '',
         weight_unit: row.querySelector('.inv-weight-unit')?.value || '',
@@ -440,12 +489,35 @@
         expiry_date: row.querySelector('.inv-expiry')?.value || '',
         description: row.querySelector('.inv-description')?.value?.trim() || '',
         photo: row.querySelector('.photo-path')?.value || '',
-      });
+        sealed_bags: sealedBags,
+        loose_weight_kg: looseKg,
+      };
+      items.push(lineItem);
     }
     if (!items.length) {
       return { ok: false, error: 'Add at least one product row.' };
     }
     return { ok: true, items };
+  }
+
+  function resetForm() {
+    showError('');
+    if (linesEl) linesEl.innerHTML = '';
+    Object.keys(pendingBatchByKey).forEach((k) => delete pendingBatchByKey[k]);
+    const vendorSearch = document.getElementById('vendor-search');
+    const vendorId = document.getElementById('vendor_id');
+    const invoiceNo = document.getElementById('invoice_no');
+    if (vendorSearch) vendorSearch.value = '';
+    if (vendorId) vendorId.value = '';
+    if (invoiceNo) invoiceNo.value = '';
+    addRow();
+    const pendingName = window._pendingSaleProductName;
+    if (pendingName) {
+      const firstRow = linesEl?.querySelector('.inv-line-row');
+      const nameEl = firstRow?.querySelector('.inv-name-search');
+      if (nameEl) nameEl.value = pendingName;
+      window._pendingSaleProductName = '';
+    }
   }
 
   if (window.VendorLookup) {
@@ -493,7 +565,7 @@
     if (submitBtn) submitBtn.disabled = true;
 
     try {
-      const res = await fetch('/inventory/products/create', {
+      const res = await fetch(saveUrl, {
         method: 'POST',
         headers: headers(),
         body: JSON.stringify(payload),
@@ -501,6 +573,10 @@
       const data = await res.json();
       if (!data.ok) {
         showError(data.error || 'Could not save products');
+        return;
+      }
+      if (isSalesContext && typeof window.onInventoryProductSaved === 'function') {
+        window.onInventoryProductSaved(data);
         return;
       }
       window.location.href = data.redirect || '/inventory/';
@@ -511,14 +587,8 @@
     }
   });
 
-  document.getElementById('formModal')?.addEventListener('show.bs.modal', async () => {
-    showError('');
-    if (linesEl) linesEl.innerHTML = '';
-    Object.keys(pendingBatchByKey).forEach((k) => delete pendingBatchByKey[k]);
-    document.getElementById('vendor-search') && (document.getElementById('vendor-search').value = '');
-    document.getElementById('vendor_id') && (document.getElementById('vendor_id').value = '');
-    document.getElementById('invoice_no') && (document.getElementById('invoice_no').value = '');
-    addRow();
+  document.getElementById(hostModalId)?.addEventListener('show.bs.modal', () => {
+    resetForm();
   });
 
   document.addEventListener('click', (e) => {
@@ -537,11 +607,11 @@
     }
   });
 
-  // Nested vendor modal stacking (same pattern as sales)
+  // Nested vendor modal stacking
   document.getElementById('quickVendorModal')?.addEventListener('show.bs.modal', () => {
-    document.getElementById('formModal')?.classList.add('modal-nested-open');
+    document.getElementById(hostModalId)?.classList.add('modal-nested-open');
   });
   document.getElementById('quickVendorModal')?.addEventListener('hidden.bs.modal', () => {
-    document.getElementById('formModal')?.classList.remove('modal-nested-open');
+    document.getElementById(hostModalId)?.classList.remove('modal-nested-open');
   });
 })();

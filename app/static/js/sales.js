@@ -16,6 +16,42 @@
     };
   }
 
+  function openQuickProductModal(productName) {
+    window._pendingSaleProductName = productName || '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('quickProductModal')).show();
+  }
+
+  window.onInventoryProductSaved = function (data) {
+    const products = data.products || [];
+    const product =
+      products[0] ||
+      (data.id
+        ? {
+            id: data.id,
+            name: data.name,
+            sale_price: data.sale_price,
+            list_price: data.list_price,
+            unit_weight: data.unit_weight,
+            weight_unit: data.weight_unit,
+            photo_url: data.photo_url,
+          }
+        : null);
+    if (product && activeRow) {
+      fillProductOnRow(activeRow, {
+        id: product.id,
+        name: product.name,
+        sale_price: product.sale_price,
+        list_price: product.list_price ?? product.sale_price,
+        unit_weight: product.unit_weight || '',
+        weight_unit: product.weight_unit || '',
+        photo_url: product.photo_url || null,
+      });
+      activeRow.querySelector('.product-results')?.classList.add('d-none');
+      recalc();
+    }
+    bootstrap.Modal.getInstance(document.getElementById('quickProductModal'))?.hide();
+  };
+
   function setProductThumb(tr, url) {
     const preview = tr.querySelector('.product-line-thumb .line-photo-preview');
     const wrap = tr.querySelector('.product-line-thumb');
@@ -414,10 +450,7 @@
     });
     tr.querySelector('.btn-quick-product')?.addEventListener('click', () => {
       activeRow = tr;
-      const q = tr.querySelector('.product-search')?.value?.trim();
-      if (q) document.getElementById('qp-name').value = q;
-      window.PhotoPicker?.clear?.(document.getElementById('qp-photo-picker'));
-      bootstrap.Modal.getOrCreateInstance(document.getElementById('quickProductModal')).show();
+      openQuickProductModal(tr.querySelector('.product-search')?.value?.trim() || '');
     });
 
     const search = tr.querySelector('.product-search');
@@ -437,7 +470,7 @@
       }
       productTimer = setTimeout(async () => {
         try {
-          const res = await fetch('/api/products/lookup?q=' + encodeURIComponent(q));
+          const res = await fetch('/api/products/lookup?q=' + encodeURIComponent(q) + '&active=active');
           const data = await res.json();
           const rows = data.results || [];
           if (!rows.length) {
@@ -472,10 +505,8 @@
       if (!btn) return;
       if (btn.classList.contains('lookup-create')) {
         activeRow = tr;
-        document.getElementById('qp-name').value = btn.dataset.name || '';
         results.classList.add('d-none');
-        window.PhotoPicker?.clear?.(document.getElementById('qp-photo-picker'));
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('quickProductModal')).show();
+        openQuickProductModal(btn.dataset.name || '');
         return;
       }
       const productPayload = {
@@ -718,8 +749,10 @@
   });
 
   function openQuickCustomer(prefillName) {
+    const modal = document.getElementById('quickCustomerModal');
     document.getElementById('qc-name').value = prefillName || '';
     document.getElementById('qc-phone').value = '';
+    document.getElementById('qc-cnic').value = '';
     document.getElementById('qc-address').value = '';
     document.getElementById('qc-book').value = '';
     document.getElementById('qc-balance').value = '';
@@ -728,8 +761,8 @@
       err.classList.add('d-none');
       err.textContent = '';
     }
-    window.PhotoPicker?.clear?.(document.getElementById('qc-photo-picker'));
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('quickCustomerModal')).show();
+    window.CustomerPhotos?.resetField?.(modal);
+    bootstrap.Modal.getOrCreateInstance(modal).show();
   }
 
   document.getElementById('btn-add-customer')?.addEventListener('click', () => {
@@ -851,15 +884,17 @@
   document.getElementById('qc-save')?.addEventListener('click', async () => {
     const err = document.getElementById('qc-error');
     err.classList.add('d-none');
+    const qcModal = document.getElementById('quickCustomerModal');
     const payload = {
       name: document.getElementById('qc-name').value.trim(),
       phone: document.getElementById('qc-phone').value.trim(),
+      cnic: document.getElementById('qc-cnic')?.value.trim() || '',
       address: document.getElementById('qc-address').value.trim(),
       old_book_no: document.getElementById('qc-book').value.trim(),
       opening_balance: document.getElementById('qc-balance').value || 0,
       joined_date: document.getElementById('qc-date').value,
       customer_type: document.getElementById('qc-type')?.value || 'good',
-      photo: document.querySelector('#qc-photo-picker .photo-path')?.value || '',
+      photo_paths: window.CustomerPhotos?.collectNewPaths?.(qcModal) || [],
     };
     if (!payload.name) {
       err.textContent = 'Customer name is required.';
@@ -882,248 +917,6 @@
     custSearch.value = data.name;
     bootstrap.Modal.getInstance(document.getElementById('quickCustomerModal'))?.hide();
   });
-
-  let qpNameTimer = null;
-  function fillQuickProductFromExisting(p) {
-    const idEl = document.getElementById('qp-existing-id');
-    if (idEl) idEl.value = p.id || '';
-    const nameEl = document.getElementById('qp-name');
-    if (nameEl) nameEl.value = p.name || '';
-    const sku = document.getElementById('qp-sku');
-    if (sku) {
-      sku.value = p.sku || '';
-      sku.readOnly = !!p.id;
-    }
-    const barcode = document.getElementById('qp-barcode');
-    if (barcode) barcode.value = p.barcode || '';
-    const brand = document.getElementById('qp-brand');
-    if (brand) brand.value = p.brand || '';
-    const catId = document.getElementById('qp-category');
-    const catSearch = document.getElementById('qp-cat-search');
-    if (catId) catId.value = p.category_id || '';
-    if (catSearch) catSearch.value = p.category_name || '';
-    const subId = document.getElementById('qp-subcategory');
-    const subSearch = document.getElementById('qp-subcat-search');
-    if (subId) subId.value = p.subcategory_id || '';
-    if (subSearch) subSearch.value = p.subcategory_name || '';
-    const purchase = document.getElementById('qp-purchase');
-    if (purchase) purchase.value = money(p.purchase_price || 0);
-    const sale = document.getElementById('qp-price');
-    if (sale) sale.value = money(p.list_price != null ? p.list_price : p.sale_price || 0);
-    const min = document.getElementById('qp-min-stock');
-    if (min) min.value = p.minimum_stock != null ? p.minimum_stock : 0;
-    const uw = document.getElementById('qp-unit-weight');
-    if (uw) uw.value = p.unit_weight != null && p.unit_weight !== '' ? p.unit_weight : '';
-    const wu = document.getElementById('qp-weight-unit');
-    if (wu) wu.value = p.weight_unit || '';
-    const desc = document.getElementById('qp-description');
-    if (desc) desc.value = p.description || '';
-    const batch = document.getElementById('qp-batch');
-    if (batch) batch.value = `#${p.next_batch || 1}`;
-  }
-
-  document.getElementById('qp-name')?.addEventListener('input', () => {
-    clearTimeout(qpNameTimer);
-    const results = document.getElementById('qp-name-results');
-    const idEl = document.getElementById('qp-existing-id');
-    const q = document.getElementById('qp-name')?.value?.trim() || '';
-    if (idEl) idEl.value = '';
-    const sku = document.getElementById('qp-sku');
-    if (sku) sku.readOnly = false;
-    const batch = document.getElementById('qp-batch');
-    if (batch) batch.value = '#1';
-    if (!results) return;
-    if (q.length < 1) {
-      results.classList.add('d-none');
-      return;
-    }
-    qpNameTimer = setTimeout(async () => {
-      try {
-        const res = await fetch('/api/products/lookup?q=' + encodeURIComponent(q));
-        const data = await res.json();
-        const rows = data.results || [];
-        if (!rows.length) {
-          results.innerHTML = '<div class="p-2 text-muted small">New product — will be created on save</div>';
-        } else {
-          results.innerHTML = rows
-            .map(
-              (p) =>
-                `<button type="button" class="lookup-item" data-id="${p.id}"
-                  data-name="${p.name || ''}" data-sku="${p.sku || ''}" data-barcode="${p.barcode || ''}"
-                  data-brand="${p.brand || ''}" data-category-id="${p.category_id || ''}"
-                  data-category-name="${p.category_name || ''}" data-subcategory-id="${p.subcategory_id || ''}"
-                  data-subcategory-name="${p.subcategory_name || ''}" data-purchase="${p.purchase_price || 0}"
-                  data-sale="${p.list_price != null ? p.list_price : p.sale_price || 0}" data-min="${p.minimum_stock || 0}"
-                  data-unit-weight="${p.unit_weight || ''}" data-weight-unit="${p.weight_unit || ''}"
-                  data-next-batch="${p.next_batch || 1}">
-                  Restock: ${p.label}</button>`
-            )
-            .join('');
-        }
-        results.classList.remove('d-none');
-      } catch (_) {
-        results.classList.add('d-none');
-      }
-    }, 200);
-  });
-
-  document.getElementById('qp-name-results')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('.lookup-item');
-    if (!btn) return;
-    fillQuickProductFromExisting({
-      id: btn.dataset.id,
-      name: btn.dataset.name,
-      sku: btn.dataset.sku,
-      barcode: btn.dataset.barcode,
-      brand: btn.dataset.brand,
-      category_id: btn.dataset.categoryId,
-      category_name: btn.dataset.categoryName,
-      subcategory_id: btn.dataset.subcategoryId,
-      subcategory_name: btn.dataset.subcategoryName,
-      purchase_price: btn.dataset.purchase,
-      sale_price: btn.dataset.sale,
-      list_price: btn.dataset.sale,
-      minimum_stock: btn.dataset.min,
-      unit_weight: btn.dataset.unitWeight,
-      weight_unit: btn.dataset.weightUnit,
-      next_batch: Number(btn.dataset.nextBatch || 1),
-    });
-    document.getElementById('qp-name-results')?.classList.add('d-none');
-  });
-
-  document.getElementById('quickProductModal')?.addEventListener('show.bs.modal', () => {
-    const idEl = document.getElementById('qp-existing-id');
-    if (idEl) idEl.value = '';
-    const sku = document.getElementById('qp-sku');
-    if (sku) sku.readOnly = false;
-  });
-
-  document.getElementById('qp-save')?.addEventListener('click', async () => {
-    const err = document.getElementById('qp-error');
-    err.classList.add('d-none');
-
-    if (window.VendorLookup) {
-      const vendor = VendorLookup.ensureSelected('qp-vendor-id', true);
-      if (!vendor.ok) {
-        err.textContent = vendor.error || 'Vendor is required';
-        err.classList.remove('d-none');
-        return;
-      }
-    } else if (!document.getElementById('qp-vendor-id')?.value) {
-      err.textContent = 'Vendor is required';
-      err.classList.remove('d-none');
-      return;
-    }
-
-    const stockVal = Number(document.getElementById('qp-stock').value || 0);
-    if (!(stockVal > 0)) {
-      err.textContent = 'Purchase quantity is required.';
-      err.classList.remove('d-none');
-      return;
-    }
-
-    if (window.CategoryLookup) {
-      const cat = await CategoryLookup.ensureSelected('qp-cat-search', 'qp-category', null);
-      if (!cat.ok) {
-        err.textContent = cat.error || 'Category is required';
-        err.classList.remove('d-none');
-        return;
-      }
-      const subName = document.getElementById('qp-subcat-search')?.value?.trim();
-      if (subName) {
-        const sub = await CategoryLookup.ensureSelected('qp-subcat-search', 'qp-subcategory', cat.id);
-        if (!sub.ok) {
-          err.textContent = sub.error || 'Could not save subcategory';
-          err.classList.remove('d-none');
-          return;
-        }
-      } else {
-        const subEl = document.getElementById('qp-subcategory');
-        if (subEl) subEl.value = '';
-      }
-    }
-
-    const payload = {
-      name: document.getElementById('qp-name').value.trim(),
-      sku: document.getElementById('qp-sku').value.trim(),
-      barcode: document.getElementById('qp-barcode')?.value.trim() || '',
-      category_id: document.getElementById('qp-category')?.value || '',
-      subcategory_id: document.getElementById('qp-subcategory')?.value || 0,
-      brand: document.getElementById('qp-brand')?.value.trim() || '',
-      vendor_id: document.getElementById('qp-vendor-id')?.value || '',
-      invoice_no: document.getElementById('qp-invoice')?.value.trim() || '',
-      sale_price: document.getElementById('qp-price').value,
-      purchase_price: document.getElementById('qp-purchase').value,
-      opening_stock: document.getElementById('qp-stock').value,
-      minimum_stock: document.getElementById('qp-min-stock')?.value || 0,
-      unit_weight: document.getElementById('qp-unit-weight')?.value || '',
-      weight_unit: document.getElementById('qp-weight-unit')?.value || '',
-      existing_product_id: document.getElementById('qp-existing-id')?.value || '',
-      batch_number: '',
-      expiry_date: document.getElementById('qp-expiry')?.value || '',
-      description: document.getElementById('qp-description')?.value.trim() || '',
-      photo: document.querySelector('#qp-photo-picker .photo-path')?.value || '',
-    };
-    const res = await fetch('/api/products/quick', {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!data.ok) {
-      err.textContent = data.error || 'Could not save product';
-      err.classList.remove('d-none');
-      return;
-    }
-    if (activeRow) {
-      fillProductOnRow(activeRow, {
-        id: data.id,
-        name: data.name,
-        sale_price: data.sale_price,
-        list_price: data.list_price ?? data.sale_price,
-        unit_weight: data.unit_weight || '',
-        weight_unit: data.weight_unit || '',
-        photo_url: data.photo_url || null,
-      });
-      activeRow.querySelector('.product-results')?.classList.add('d-none');
-      recalc();
-    }
-    bootstrap.Modal.getInstance(document.getElementById('quickProductModal'))?.hide();
-  });
-
-  if (window.VendorLookup) {
-    VendorLookup.bind({
-      searchId: 'qp-vendor-search',
-      idId: 'qp-vendor-id',
-      resultsId: 'qp-vendor-results',
-      addBtnId: 'qp-btn-add-vendor',
-      modalId: 'quickVendorModal',
-      required: true,
-    });
-  }
-
-  if (window.CategoryLookup) {
-    CategoryLookup.bind({
-      searchId: 'qp-cat-search',
-      idId: 'qp-category',
-      resultsId: 'qp-cat-results',
-      label: 'category',
-      onChange: () => {
-        const subId = document.getElementById('qp-subcategory');
-        const subSearch = document.getElementById('qp-subcat-search');
-        if (subId) subId.value = '';
-        if (subSearch) subSearch.value = '';
-      },
-    });
-    CategoryLookup.bind({
-      searchId: 'qp-subcat-search',
-      idId: 'qp-subcategory',
-      resultsId: 'qp-subcat-results',
-      label: 'subcategory',
-      requireParent: true,
-      parentIdGetter: () => document.getElementById('qp-category')?.value || '',
-    });
-  }
 
   document.getElementById('btn-save-sale')?.addEventListener('click', async () => {
     const err = document.getElementById('sale-error');
@@ -1192,24 +985,8 @@
 
   ['quickCustomerModal', 'quickProductModal', 'quickVendorModal'].forEach((id) => {
     const el = document.getElementById(id);
-    el?.addEventListener('show.bs.modal', async () => {
+    el?.addEventListener('show.bs.modal', () => {
       document.getElementById('saleModal')?.classList.add('modal-nested-open');
-      if (id === 'quickProductModal') {
-        try {
-          const res = await fetch('/api/products/next-codes');
-          const data = await res.json();
-          if (data.ok) {
-            const sku = document.getElementById('qp-sku');
-            const barcode = document.getElementById('qp-barcode');
-            const batch = document.getElementById('qp-batch');
-            if (sku) sku.value = data.sku || '';
-            if (barcode) barcode.value = data.barcode || '';
-            if (batch && data.next_batch_id != null) batch.value = `#${data.next_batch_id}`;
-          }
-        } catch (_) {
-          /* server will auto-fill on save if left empty */
-        }
-      }
     });
     el?.addEventListener('hidden.bs.modal', () => {
       const saleModal = document.getElementById('saleModal');
@@ -1573,9 +1350,6 @@
     }
     pendingZeroStock = null;
     bootstrap.Modal.getInstance(document.getElementById('zeroStockWarningModal'))?.hide();
-    const nameInput = document.getElementById('qp-name');
-    if (nameInput) nameInput.value = name;
-    window.PhotoPicker?.clear?.(document.getElementById('qp-photo-picker'));
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('quickProductModal')).show();
+    openQuickProductModal(name);
   });
 })();

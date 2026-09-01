@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from 'partials/macros.html' import header_period_filter %}
+{% from 'partials/party_detail_summary.html' import party_detail_summary_card %}
 {% block title %}{{ vendor.name }}{% endblock %}
 {% block page_filters %}
 {{ header_period_filter(
@@ -16,15 +17,26 @@
 <div class="dashboard-page">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
     <div class="party-hero">
-      {% from 'partials/macros.html' import party_avatar, photo_field %}
-      {{ party_avatar(vendor.photo_url, vendor.name, 'fa-truck-field', 'lg') }}
+      {% from 'partials/macros.html' import party_avatar, customer_photos_field, party_active_badge %}
+      <div class="party-hero-avatar-wrap">
+        {{ party_avatar(vendor.photo_url, vendor.name, 'fa-truck-field', 'lg') }}
+        {% if vendor.photo_urls|length > 0 %}
+        <button type="button" class="btn btn-sm btn-light border party-photos-btn"
+                data-bs-toggle="modal" data-bs-target="#vendorGalleryModal"
+                title="View all photos">
+          <i class="fa-solid fa-images"></i>
+          <span>{{ vendor.photo_urls|length }}</span>
+        </button>
+        {% endif %}
+      </div>
       <div>
         <a href="{{ url_for('vendors.index') }}" class="text-muted small text-decoration-none">
           <i class="fa-solid fa-arrow-left me-1"></i> Vendors
         </a>
-        <h1 class="h3 mb-1 mt-1">{{ vendor.name }}</h1>
+        <h1 class="h3 mb-1 mt-1">{{ vendor.name }} {{ party_active_badge(vendor) }}</h1>
         <p class="text-muted mb-0">
           {% if vendor.phone %}{{ vendor.phone }} · {% endif %}
+          {% if vendor.cnic %}CNIC {{ vendor.cnic }} · {% endif %}
           {{ vendor.address or 'No address' }}
         </p>
       </div>
@@ -39,40 +51,7 @@
     </div>
   </div>
 
-  <div class="row g-3 mb-3">
-    <div class="col-md-4">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">{% if balance_as_of %}Balance as of {{ balance_as_of }}{% else %}Current Balance{% endif %}</p>
-          <h3 class="mb-0 fw-bold {% if display_balance|float > 0 %}text-warning{% elif display_balance|float < 0 %}text-success{% endif %}">
-            {{ '%.2f'|format(display_balance|float) }}
-          </h3>
-          <div class="small text-muted mt-1">
-            {% if balance_as_of %}Through selected period · {% endif %}
-            {% if display_balance|float > 0 %}We owe vendor (payable)
-            {% elif display_balance|float < 0 %}Advance / prepaid
-            {% else %}Settled{% endif %}
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-4">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">Opening Balance</p>
-          <h3 class="mb-0 fw-bold">{{ '%.2f'|format((vendor.opening_balance or 0)|float) }}</h3>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-4">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">Notes</p>
-          <div class="fw-semibold" style="font-size:0.85rem">{{ vendor.notes or '—' }}</div>
-        </div>
-      </div>
-    </div>
-  </div>
+  {{ party_detail_summary_card(vendor, 'vendor', account_pie, display_balance, balance_as_of) }}
 
   <div class="card dash-panel border-0 shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -181,8 +160,8 @@
         </div>
         <div class="modal-body">
           <div class="row g-2 align-items-end">
-            <div class="col-auto">
-              {{ photo_field(current_url=vendor.photo_url, icon='fa-truck-field', label='Vendor photo') }}
+            <div class="col-12">
+              {{ customer_photos_field(vendor.photos_data, icon='fa-truck-field', label='Vendor photos', folder='vendors') }}
             </div>
             <div class="col-md-5">
               <label class="form-label">Name</label>
@@ -191,6 +170,10 @@
             <div class="col-md-5">
               <label class="form-label">Phone</label>
               <input name="phone" class="form-control" value="{{ vendor.phone or '' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">CNIC <span class="text-muted fw-normal">(optional)</span></label>
+              <input name="cnic" class="form-control" value="{{ vendor.cnic or '' }}" placeholder="CNIC">
             </div>
             <div class="col-md-6">
               <label class="form-label">Opening Balance <span class="text-muted fw-normal">(optional)</span></label>
@@ -206,6 +189,13 @@
               <label class="form-label">Notes</label>
               <textarea name="notes" class="form-control" rows="2">{{ vendor.notes or '' }}</textarea>
             </div>
+            <div class="col-md-6">
+              <label class="form-label">Status</label>
+              <select name="is_active" class="form-select">
+                <option value="1" {% if vendor.is_active %}selected{% endif %}>Active</option>
+                <option value="0" {% if not vendor.is_active %}selected{% endif %}>Inactive</option>
+              </select>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -216,9 +206,37 @@
     </div>
   </div>
 </div>
+
+{% if vendor.photo_urls %}
+<div class="modal fade erp-form-modal" id="vendorGalleryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fa-solid fa-images me-2"></i>{{ vendor.name }} — Photos</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3 customer-gallery-grid">
+          {% for url in vendor.photo_urls %}
+          <div class="col-6 col-md-4">
+            <a href="{{ url }}" target="_blank" rel="noopener" class="customer-gallery-item">
+              <img src="{{ url }}" alt="{{ vendor.name }} photo {{ loop.index }}">
+            </a>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
+<script>
+window.partyAccountPie = {{ account_pie.pie|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/party-detail.js') }}?v=2"></script>
 <script>
 function toggleCustomDates() {
   const isCustom = document.getElementById('period-filter')?.value === 'custom';
@@ -262,4 +280,5 @@ document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
   });
 });
 </script>
+<script src="{{ url_for('static', filename='js/customer-photos.js') }}"></script>
 {% endblock %}

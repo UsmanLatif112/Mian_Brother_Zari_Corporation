@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% from 'partials/macros.html' import form_modal, photo_field, header_period_filter, header_status_filter %}
+{% from 'partials/macros.html' import form_modal, customer_photos_field, header_period_filter, header_status_filter, party_active_badge %}
 {% block title %}Customers{% endblock %}
 {% block page_filters %}
 {{ header_period_filter(
@@ -8,7 +8,8 @@
   clear_url=url_for(
     'customers.index',
     period='all',
-    type=selected_type if selected_type != 'all' else None
+    type=selected_type if selected_type != 'all' else None,
+    active=selected_active if selected_active != 'all' else None
   ),
   selected_period=selected_period,
   start_date=start_date,
@@ -25,7 +26,8 @@
     'customers.index',
     period=selected_period or 'all',
     start_date=start_date if selected_period == 'custom' else None,
-    end_date=end_date if selected_period == 'custom' else None
+    end_date=end_date if selected_period == 'custom' else None,
+    active=selected_active if selected_active != 'all' else None
   ),
   selected=selected_type,
   label='Type',
@@ -43,6 +45,34 @@
     'period': selected_period or 'all',
     'start_date': start_date if selected_period == 'custom' else '',
     'end_date': end_date if selected_period == 'custom' else '',
+    'active': selected_active if selected_active != 'all' else '',
+  }
+) }}
+{{ header_status_filter(
+  form_id='customers-active-form',
+  persist_key='customers-active',
+  clear_url=url_for(
+    'customers.index',
+    period=selected_period or 'all',
+    start_date=start_date if selected_period == 'custom' else None,
+    end_date=end_date if selected_period == 'custom' else None,
+    type=selected_type if selected_type != 'all' else None
+  ),
+  selected=selected_active,
+  label='Status',
+  field_name='active',
+  icon='fa-circle-check',
+  default='all',
+  options=[
+    ('all', 'All'),
+    ('active', 'Active'),
+    ('inactive', 'Inactive'),
+  ],
+  preserve={
+    'period': selected_period or 'all',
+    'start_date': start_date if selected_period == 'custom' else '',
+    'end_date': end_date if selected_period == 'custom' else '',
+    'type': selected_type if selected_type != 'all' else '',
   }
 ) }}
 {% endblock %}
@@ -99,6 +129,17 @@
     </div>
   </div>
 
+  <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Total Sale · Total Paid · Total Credit</strong>
+    </div>
+    <div class="card-body pt-3 pb-2">
+      <div class="dash-chart-wrap">
+        <canvas id="customerListChart"></canvas>
+      </div>
+    </div>
+  </div>
+
   <div class="card dash-panel border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
       <strong>Customer List</strong>
@@ -113,6 +154,7 @@
           <th>Old Book</th>
           <th>Date Added</th>
           <th>Type</th>
+          <th>Status</th>
           <th class="text-end">Old Balance</th>
           <th class="text-end">Total Balance</th>
           <th class="col-actions">Action</th>
@@ -127,6 +169,7 @@
           <td>{{ c.old_book_no or '—' }}</td>
           <td>{{ c.joined_date or (c.created_at.date() if c.created_at else '—') }}</td>
           <td><span class="badge bg-light text-dark border">{{ c.customer_type_label }}</span></td>
+          <td>{{ party_active_badge(c) }}</td>
           <td class="text-end">{{ '%.2f'|format((c.opening_balance or 0)|float) }}</td>
           <td class="text-end {% if c.balance|float > 0 %}text-warning{% elif c.balance|float < 0 %}text-success{% endif %}">
             {{ '%.2f'|format(c.balance|float) }}
@@ -141,12 +184,14 @@
                     data-id="{{ c.id }}"
                     data-name="{{ c.name }}"
                     data-phone="{{ c.phone or '' }}"
+                    data-cnic="{{ c.cnic or '' }}"
                     data-address="{{ c.address or '' }}"
                     data-old-book="{{ c.old_book_no or '' }}"
                     data-opening="{{ c.opening_balance or 0 }}"
                     data-joined="{{ c.joined_date.isoformat() if c.joined_date else '' }}"
                     data-type="{{ c.customer_type or 'good' }}"
-                    data-photo="{{ c.photo_url or '' }}">
+                    data-active="{{ '1' if c.is_active else '0' }}"
+                    data-photos='{{ c.photos_data|tojson }}'>
               <i class="fa-solid fa-pen"></i>
             </button>
             <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
@@ -172,16 +217,20 @@
 <form method="post" action="{{ url_for('customers.create') }}" id="entity-form" enctype="multipart/form-data">
   {{ form.hidden_tag() }}
   <div class="row g-2 align-items-end">
-    <div class="col-auto">
-      {{ photo_field(icon='fa-user', label='Customer photo') }}
+    <div class="col-12">
+      {{ customer_photos_field() }}
     </div>
-    <div class="col-md-5">
+    <div class="col-12">
       <label class="form-label">{{ form.name.label.text }}</label>
       {{ form.name(class='form-control', placeholder='Customer name') }}
     </div>
-    <div class="col-md-5">
+    <div class="col-md-6">
       <label class="form-label">{{ form.phone.label.text }}</label>
       {{ form.phone(class='form-control', placeholder='Phone') }}
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">{{ form.cnic.label.text }} <span class="text-muted fw-normal">(optional)</span></label>
+      {{ form.cnic(class='form-control', placeholder='CNIC') }}
     </div>
     <div class="col-12">
       <label class="form-label">{{ form.address.label.text }}</label>
@@ -274,16 +323,20 @@
         </div>
         <div class="modal-body">
           <div class="row g-2 align-items-end">
-            <div class="col-auto" id="edit-customer-photo-wrap">
-              {{ photo_field(icon='fa-user', label='Customer photo') }}
+            <div class="col-12">
+              {{ customer_photos_field() }}
             </div>
-            <div class="col-md-5">
+            <div class="col-12">
               <label class="form-label">Name</label>
               <input name="name" class="form-control" required>
             </div>
-            <div class="col-md-5">
+            <div class="col-md-6">
               <label class="form-label">Phone</label>
               <input name="phone" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">CNIC <span class="text-muted fw-normal">(optional)</span></label>
+              <input name="cnic" class="form-control" placeholder="CNIC">
             </div>
             <div class="col-12">
               <label class="form-label">Address</label>
@@ -311,6 +364,13 @@
                 <option value="late_pay">Late Pay</option>
               </select>
             </div>
+            <div class="col-md-6">
+              <label class="form-label">Status</label>
+              <select name="is_active" class="form-select">
+                <option value="1">Active</option>
+                <option value="0">Inactive</option>
+              </select>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -324,6 +384,10 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+window.customerListChart = {{ customer_chart|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/list-page-charts.js') }}?v=2"></script>
 <script>
 window.OPEN_FORM_MODAL = {{ 'true' if open_modal else 'false' }};
 
@@ -366,22 +430,17 @@ document.addEventListener('click', (e) => {
   form.action = `/customers/${btn.dataset.id}/edit`;
   form.querySelector('[name=name]').value = btn.dataset.name || '';
   form.querySelector('[name=phone]').value = btn.dataset.phone || '';
+  form.querySelector('[name=cnic]').value = btn.dataset.cnic || '';
   form.querySelector('[name=address]').value = btn.dataset.address || '';
   form.querySelector('[name=old_book_no]').value = btn.dataset.oldBook || '';
   form.querySelector('[name=opening_balance]').value =
     btn.dataset.opening && Number(btn.dataset.opening) !== 0 ? btn.dataset.opening : '';
   form.querySelector('[name=joined_date]').value = btn.dataset.joined || '';
   form.querySelector('[name=customer_type]').value = btn.dataset.type || 'good';
-  const picker = form.querySelector('.photo-picker');
-  if (picker && window.PhotoPicker) {
-    picker.dataset.current = btn.dataset.photo || '';
-    const clearFlag = picker.querySelector('.photo-clear-flag');
-    if (clearFlag) clearFlag.value = '';
-    const fileInput = picker.querySelector('.photo-file-input');
-    if (fileInput) fileInput.value = '';
-    window.PhotoPicker.setPreview(picker, btn.dataset.photo || null);
-  }
+  form.querySelector('[name=is_active]').value = btn.dataset.active === '0' ? '0' : '1';
+  window.CustomerPhotos?.loadExisting(form, JSON.parse(btn.dataset.photos || '[]'));
   bootstrap.Modal.getOrCreateInstance(document.getElementById('editCustomerModal')).show();
 });
 </script>
+<script src="{{ url_for('static', filename='js/customer-photos.js') }}"></script>
 {% endblock %}

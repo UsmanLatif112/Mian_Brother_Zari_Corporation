@@ -3,7 +3,6 @@ from decimal import Decimal
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import func
 
 from app.extensions import db
 from app.forms import ExpenseForm
@@ -55,40 +54,18 @@ def _expense_page(form=None, open_modal=False):
 
     expenses = query.order_by(Expense.expense_date.desc(), Expense.id.desc()).all()
 
-    base_filters = [Expense.is_deleted.is_(False)]
-    if range_start:
-        base_filters.append(Expense.expense_date >= range_start)
-    if range_end:
-        base_filters.append(Expense.expense_date <= range_end)
-    if category_id:
-        base_filters.append(Expense.category_id == category_id)
+    from app.services.expense_analytics_service import expense_page_analytics
 
-    total_amount = (
-        db.session.query(func.coalesce(func.sum(Expense.amount), 0))
-        .filter(*base_filters)
-        .scalar()
-    ) or Decimal("0")
-    settled_amount = (
-        db.session.query(func.coalesce(func.sum(Expense.amount), 0))
-        .filter(*base_filters, Expense.is_settled.is_(True))
-        .scalar()
-    ) or Decimal("0")
-    pending_amount = (
-        db.session.query(func.coalesce(func.sum(Expense.amount), 0))
-        .filter(*base_filters, Expense.is_settled.is_(False))
-        .scalar()
-    ) or Decimal("0")
-    pending_count = (
-        Expense.query.filter(*base_filters, Expense.is_settled.is_(False)).count()
+    expense_summary = expense_page_analytics(
+        range_start=range_start,
+        range_end=range_end,
+        category_id=category_id,
     )
     categories = ExpenseCategory.query.filter_by(is_deleted=False).order_by(ExpenseCategory.name).all()
     return render_template(
         "expenses/index.html",
         expenses=expenses,
-        total_amount=total_amount,
-        settled_amount=settled_amount,
-        pending_amount=pending_amount,
-        pending_count=pending_count,
+        expense_summary=expense_summary,
         total_count=len(expenses),
         form=form or _expense_form(),
         categories=categories,

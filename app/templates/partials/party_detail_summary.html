@@ -1,0 +1,65 @@
+{# Party detail summary: info + legend on left, pie on right. #}
+{% from 'partials/macros.html' import party_active_badge %}
+{% macro party_detail_summary_card(party, party_kind, account_pie, display_balance, balance_as_of) %}
+<div class="card dash-panel border-0 shadow-sm mb-3">
+  <div class="card-body py-3">
+    {% set pie = account_pie.pie %}
+    <div class="row align-items-center g-3 dash-pie-row party-detail-summary-row">
+      <div class="col-md-5">
+        <div class="party-detail-info mb-3 mb-md-0">
+          {% if party_kind == 'customer' %}
+          <dl class="row g-2 mb-0 small">
+            <dt class="col-5 text-muted">Phone</dt>
+            <dd class="col-7 mb-0 fw-semibold">{{ party.phone or '—' }}</dd>
+            <dt class="col-5 text-muted">CNIC</dt>
+            <dd class="col-7 mb-0">{{ party.cnic or '—' }}</dd>
+            <dt class="col-5 text-muted">Type</dt>
+            <dd class="col-7 mb-0">{{ party.customer_type_label }}</dd>
+            <dt class="col-5 text-muted">Status</dt>
+            <dd class="col-7 mb-0">{{ party_active_badge(party) }}</dd>
+            <dt class="col-5 text-muted">Balance{% if balance_as_of %} <span class="fw-normal">(as of {{ balance_as_of }})</span>{% endif %}</dt>
+            <dd class="col-7 mb-0 fw-bold">{{ '%.2f'|format(display_balance|float) }}</dd>
+          </dl>
+          {% else %}
+          <dl class="row g-2 mb-0 small">
+            <dt class="col-5 text-muted">Phone</dt>
+            <dd class="col-7 mb-0 fw-semibold">{{ party.phone or '—' }}</dd>
+            <dt class="col-5 text-muted">CNIC</dt>
+            <dd class="col-7 mb-0">{{ party.cnic or '—' }}</dd>
+            <dt class="col-5 text-muted">Status</dt>
+            <dd class="col-7 mb-0">{{ party_active_badge(party) }}</dd>
+            <dt class="col-5 text-muted">Balance{% if balance_as_of %} <span class="fw-normal">(as of {{ balance_as_of }})</span>{% endif %}</dt>
+            <dd class="col-7 mb-0 fw-bold">{{ '%.2f'|format(display_balance|float) }}</dd>
+          </dl>
+          {% endif %}
+        </div>
+        {% if pie.rows %}
+        <ul class="dash-pie-list list-unstyled mb-0">
+          {% for item in pie.rows %}
+          <li class="dash-pie-list-item">
+            <span class="dash-pie-swatch" data-color-idx="{{ loop.index0 }}"></span>
+            <div class="dash-pie-list-text">
+              <div class="dash-pie-list-name">{{ item.name }}</div>
+              {% if item.detail %}
+              <div class="dash-pie-list-meta text-muted small">{{ item.detail }}</div>
+              {% endif %}
+            </div>
+            <div class="dash-pie-list-value">{{ '%.2f'|format(item.value|float) }}</div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      <div class="col-md-7">
+        {% if pie.rows %}
+        <div class="dash-pie-wrap party-detail-pie-wrap">
+          <canvas id="partyAccountPie" aria-label="Account summary chart"></canvas>
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0">No account activity in this period to chart.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}

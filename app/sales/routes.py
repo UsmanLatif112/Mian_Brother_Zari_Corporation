@@ -4,7 +4,6 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
 from app.extensions import db
@@ -125,8 +124,13 @@ def _parse_sale_request(data):
     items = []
     for line in items_raw:
         product = db.session.get(Product, int(line.get("product_id") or 0))
-        if not product:
+        if not product or product.is_deleted:
             return None, (jsonify({"ok": False, "error": "Invalid product selected."}), 400)
+        if not product.is_active:
+            return None, (
+                jsonify({"ok": False, "error": f"{product.name} is inactive and cannot be sold."}),
+                400,
+            )
 
         list_price = Decimal(
             str(line.get("list_unit_price") if line.get("list_unit_price") is not None else product.sale_price or 0)
@@ -423,37 +427,28 @@ def index():
     )
     history_rows = history_rows[:250]
 
-    total_sale_q = db.session.query(func.coalesce(func.sum(Sale.grand_total), 0))
-    from sqlalchemy import case
+    from app.services.sales_analytics_service import sales_page_chart_metrics
 
-    total_credit_q = db.session.query(
-        func.coalesce(
-            func.sum(
-                case(
-                    (Sale.amount_paid < Sale.grand_total, Sale.grand_total - Sale.amount_paid),
-                    else_=0,
-                )
-            ),
-            0,
-        )
-    ).filter(Sale.payment_status != PaymentStatus.PAID)
-    total_returns_q = db.session.query(func.coalesce(func.sum(SaleReturn.grand_total), 0))
-    if range_start:
-        total_sale_q = total_sale_q.filter(Sale.sale_date >= range_start)
-        total_credit_q = total_credit_q.filter(Sale.sale_date >= range_start)
-        total_returns_q = total_returns_q.filter(SaleReturn.return_date >= range_start)
-    if range_end:
-        total_sale_q = total_sale_q.filter(Sale.sale_date <= range_end)
-        total_credit_q = total_credit_q.filter(Sale.sale_date <= range_end)
-        total_returns_q = total_returns_q.filter(SaleReturn.return_date <= range_end)
+    sales_metrics = sales_page_chart_metrics(
+        period=period,
+        start_date=period_start,
+        end_date=period_end,
+    )
+    total_sale = sales_metrics["total_sale"]
+    total_returns = sales_metrics["total_returns"]
+    total_credit = sales_metrics["total_credit"]
+    net_sale = sales_metrics["net_sale"]
 
-    total_sale = total_sale_q.scalar() or Decimal("0")
-    total_returns = total_returns_q.scalar() or Decimal("0")
-    total_credit = total_credit_q.scalar() or Decimal("0")
-    net_sale = total_sale - total_returns
-
-    customers = Customer.query.filter_by(is_deleted=False).order_by(Customer.name).all()
-    products = Product.query.filter_by(is_deleted=False).order_by(Product.name).all()
+    customers = (
+        Customer.query.filter_by(is_deleted=False, is_active=True)
+        .order_by(Customer.name)
+        .all()
+    )
+    products = (
+        Product.query.filter_by(is_deleted=False, is_active=True)
+        .order_by(Product.name)
+        .all()
+    )
 
     from app.models import Category
     from app.services.fifo_service import next_fifo_sale_price
@@ -475,6 +470,7 @@ def index():
         total_returns=total_returns,
         net_sale=net_sale,
         total_credit=total_credit,
+        sales_chart=sales_metrics["chart"],
         period_as_of=range_end,
         selected_period=period,
         start_date=request.args.get("start_date") or "",

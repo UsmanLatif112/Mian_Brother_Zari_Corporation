@@ -31,16 +31,39 @@
       return [...new Set([...form.elements].map((el) => el.name).filter(Boolean))];
     }
 
+    function fieldsForPersist(form) {
+      const names = formFieldNames(form);
+      const key = form.dataset.persistFilters || '';
+      // Period filter must not re-apply saved status; default is All.
+      if (key.endsWith('-period')) {
+        return names.filter((n) => n !== 'active');
+      }
+      return names;
+    }
+
     function isDefaultFilter(saved) {
       if (!saved || typeof saved !== 'object') return true;
       const period = saved.period;
       const category = saved.category_id;
       const start = saved.start_date || saved.start;
       const end = saved.end_date || saved.end;
+      const active = saved.active;
+      const type = saved.type;
+      const status = saved.status;
       const periodDefault = !period || period === 'all';
       const categoryDefault = !category;
       const datesDefault = !start && !end;
-      return periodDefault && categoryDefault && datesDefault;
+      const activeDefault = !active || active === 'all';
+      const typeDefault = !type || type === 'all';
+      const statusDefault = !status || status === 'all';
+      return (
+        periodDefault &&
+        categoryDefault &&
+        datesDefault &&
+        activeDefault &&
+        typeDefault &&
+        statusDefault
+      );
     }
 
     function readSaved(key) {
@@ -72,7 +95,7 @@
     const key = form.dataset.persistFilters;
     if (!key) return;
 
-    const fields = formFieldNames(form);
+    const fields = fieldsForPersist(form);
     const url = new URL(window.location.href);
     // Any filter query key present (even empty / "all") means user applied a filter this visit
     const hasFilterInUrl = fields.some((name) => url.searchParams.has(name));
@@ -91,6 +114,7 @@
 
     let changed = false;
     Object.entries(saved).forEach(([name, value]) => {
+      if (!fields.includes(name)) return;
       if (value == null || value === '') return;
       if (url.searchParams.get(name) === String(value)) return;
       url.searchParams.set(name, String(value));
@@ -117,7 +141,10 @@
     '<"dt-footer"<"dt-left"i><"dt-right"p>>';
 
   if (window.jQuery && $('.datatable').length) {
-    $('.datatable').DataTable({
+    $('.datatable').each(function initDatatable() {
+      const $table = $(this);
+      const emptyTable = $table.data('emptyTable') || 'No data available';
+      $table.DataTable({
       pageLength: 25,
       lengthMenu: [
         [10, 25, 50, 100, -1],
@@ -136,10 +163,11 @@
           next: '›',
         },
         zeroRecords: 'No matching records',
-        emptyTable: 'No data available',
+        emptyTable,
       },
       // When navbar owns search for this page, hide DataTables' own filter.
       dom: pageTableSearch ? dtDomNoFilter : dtDomWithFilter,
+    });
     });
   }
 

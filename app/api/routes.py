@@ -3,7 +3,7 @@ from flask_login import login_required
 from sqlalchemy import or_
 from decimal import Decimal
 
-from app.extensions import db
+from app.utils.party_filters import apply_party_active_filter, parse_party_active
 from app.forms import CustomerForm
 from app.models import Category, Customer, ExpenseCategory, Product, Sale, Vendor
 
@@ -173,7 +173,10 @@ def categories_quick():
 @login_required
 def customers_lookup():
     q = (request.args.get("q") or "").strip()
-    query = Customer.query.filter(Customer.is_deleted.is_(False))
+    query = Customer.query.filter(
+        Customer.is_deleted.is_(False),
+        Customer.is_active.is_(True),
+    )
     if q:
         like = f"%{q}%"
         query = query.filter(or_(Customer.name.ilike(like), Customer.phone.ilike(like)))
@@ -198,7 +201,10 @@ def customers_lookup():
 @login_required
 def vendors_lookup():
     q = (request.args.get("q") or "").strip()
-    query = Vendor.query.filter(Vendor.is_deleted.is_(False))
+    query = Vendor.query.filter(
+        Vendor.is_deleted.is_(False),
+        Vendor.is_active.is_(True),
+    )
     if q:
         like = f"%{q}%"
         query = query.filter(or_(Vendor.name.ilike(like), Vendor.phone.ilike(like)))
@@ -331,9 +337,13 @@ def quick_vendor():
 
     opening = Decimal(str(data.get("opening_balance") or 0))
     photo = accept_uploaded_path(data.get("photo"), "vendors")
+    photo_paths = data.get("photo_paths") or []
+    if isinstance(photo_paths, str):
+        photo_paths = [photo_paths]
     vendor = Vendor(
         name=name,
         phone=(data.get("phone") or "").strip() or None,
+        cnic=(data.get("cnic") or "").strip() or None,
         address=(data.get("address") or "").strip() or None,
         opening_balance=opening,
         balance=opening,
@@ -342,6 +352,21 @@ def quick_vendor():
     )
     db.session.add(vendor)
     db.session.flush()
+    from app.models import VendorPhoto
+
+    paths = []
+    if photo:
+        paths.append(photo)
+    for raw in photo_paths:
+        clean = accept_uploaded_path(raw, "vendors")
+        if clean and clean not in paths:
+            paths.append(clean)
+    for idx, path in enumerate(paths):
+        db.session.add(
+            VendorPhoto(vendor_id=vendor.id, path=path, sort_order=idx)
+        )
+    if paths:
+        vendor.photo = paths[0]
     if opening:
         from app.services.ledger_service import post_ledger_entry
         from app.utils.working_date import get_working_date
@@ -411,7 +436,9 @@ def products_lookup():
     )
 
     q = (request.args.get("q") or "").strip()
+    active_filter = parse_party_active(request.args.get("active"), default="all")
     query = Product.query.filter(Product.is_deleted.is_(False))
+    query = apply_party_active_filter(query, Product, active_filter)
     if q:
         like = f"%{q}%"
         query = query.filter(
@@ -481,9 +508,13 @@ def quick_customer():
 
     opening = Decimal(str(data.get("opening_balance") or data.get("old_account_balance") or 0))
     photo = accept_uploaded_path(data.get("photo"), "customers")
+    photo_paths = data.get("photo_paths") or []
+    if isinstance(photo_paths, str):
+        photo_paths = [photo_paths]
     customer = Customer(
         name=name,
         phone=(data.get("phone") or "").strip() or None,
+        cnic=(data.get("cnic") or "").strip() or None,
         address=(data.get("address") or "").strip() or None,
         old_book_no=(data.get("old_book_no") or "").strip() or None,
         joined_date=joined_date,
@@ -496,6 +527,21 @@ def quick_customer():
     )
     db.session.add(customer)
     db.session.flush()
+    from app.models import CustomerPhoto
+
+    paths = []
+    if photo:
+        paths.append(photo)
+    for raw in photo_paths:
+        clean = accept_uploaded_path(raw, "customers")
+        if clean and clean not in paths:
+            paths.append(clean)
+    for idx, path in enumerate(paths):
+        db.session.add(
+            CustomerPhoto(customer_id=customer.id, path=path, sort_order=idx)
+        )
+    if paths:
+        customer.photo = paths[0]
     sync_party_opening_entry(
         "customer",
         customer.id,
@@ -506,6 +552,16 @@ def quick_customer():
     )
     db.session.commit()
     return jsonify({"ok": True, "id": customer.id, "name": customer.name, "phone": customer.phone or ""})
+
+
+@api_bp.route("/products/batch", methods=["POST"])
+@login_required
+def products_batch():
+    """Same as Inventory Add Products — for sales page quick-add (login only)."""
+    from app.inventory.routes import _create_inventory_products
+
+    data = request.get_json(silent=True) or {}
+    return _create_inventory_products(data, as_json=True)
 
 
 @api_bp.route("/products/quick", methods=["POST"])
@@ -639,6 +695,7 @@ def quick_product():
             photo=photo,
             unit_weight=uw,
             weight_unit=wu if uw else None,
+            is_active=True,
         )
         db.session.add(product)
         db.session.flush()

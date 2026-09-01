@@ -1,8 +1,8 @@
 {
-  "version": "1.6.7",
-  "build": 167,
-  "released_at": "2026-08-26",
-  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.6.7.zip",
-  "sha256": "e42bfd86abe1df08c50897f329ea645b4a3e143235ea10626b9da8c28d378f0a",
-  "release_notes": "- Sales listing: item image column removed; separate Notes column (truncated with tooltip)\n- Reprice / edit purchase price corrects sold cost of goods for that batch (dashboard Total Cost & profit)\n- Sale price change still applies to remaining stock only\n- Inventory movements: Reprice notes show cost old\u2192new; Sale Out / Return notes update after reprice\n- Customer & salesman ledger notes: Sale INV-\u2026 / item particulars (returns too)"
+  "version": "1.6.9",
+  "build": 169,
+  "released_at": "2026-09-01",
+  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.6.9.zip",
+  "sha256": "4de7c39f3900beb21af9548af50f9e5475359a940fa114dce699376b04a777a3",
+  "release_notes": "- Purchase entry: full sealed bags + loose kg (not one decimal like 12.5)\n- Sale edit void: stock restores correctly; re-sale uses void layers first (no orphan stock)\n- Recent movements: Void Reversal vs Sale Return In; Purchase/Reprice/Qty adjust labels & notes\n- Existing void movements relabeled on startup (not customer returns)\n- Inventory: Active/Inactive status (like customers/vendors); inactive hidden from sale modal\n- Dashboard & list charts restored on Sales, Purchases, Account, Journal, Expenses, and more\n- Customer/Vendor active filter defaults to All; filter by Active or Inactive as needed"
 }

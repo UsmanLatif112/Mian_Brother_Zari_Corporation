@@ -1,0 +1,37 @@
+{# Expense summary: 4 KPI lines on left, matching KPI pie on right. #}
+{% macro expense_summary_card(expense_summary) %}
+{% set pie = expense_summary.pie %}
+<div class="card dash-panel border-0 shadow-sm mb-4">
+  <div class="card-body py-3">
+    <div class="row align-items-center g-3 dash-pie-row party-detail-summary-row">
+      <div class="col-md-5">
+        <ul class="dash-pie-list list-unstyled mb-0 expense-kpi-list">
+          {% for item in expense_summary.kpis %}
+          <li class="dash-pie-list-item">
+            <span class="dash-pie-swatch expense-kpi-swatch" data-color-idx="{{ loop.index0 }}"></span>
+            <div class="dash-pie-list-text">
+              <div class="dash-pie-list-name">{{ item.name }}</div>
+              {% if item.detail %}
+              <div class="dash-pie-list-meta text-muted small">{{ item.detail }}</div>
+              {% endif %}
+            </div>
+            <div class="dash-pie-list-value">
+              {% if item.is_count %}{{ item.value|int }}{% else %}{{ '%.2f'|format(item.value|float) }}{% endif %}
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="col-md-7">
+        {% if pie.rows %}
+        <div class="dash-pie-wrap party-detail-pie-wrap">
+          <canvas id="partyAccountPie" aria-label="Expense summary chart"></canvas>
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0">No expense activity in this period to chart.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}

@@ -206,6 +206,7 @@ class CustomerForm(FlaskForm):
 class VendorForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired()])
     phone = StringField("Phone", validators=[Optional()])
+    cnic = StringField("CNIC", validators=[Optional()])
     address = TextAreaField("Address", validators=[Optional()])
     opening_balance = DecimalField(
         "Opening Balance",

@@ -7,12 +7,13 @@ from app.extensions import db
 from app.models import (
     Customer,
     Expense,
+    ExpenseCategory,
     Product,
     Purchase,
     Sale,
     Vendor,
 )
-from app.models.sales import PaymentStatus, SaleItem
+from app.models.sales import PaymentStatus, SaleItem, SaleReturn, SaleReturnItem
 from app.services.cashbook_service import get_cash_dashboard_metrics, period_cash_collections
 from app.services.fifo_service import stock_valuation, stock_valuation_as_of
 from app.services.ledger_service import sum_party_balances_as_of
@@ -49,6 +50,21 @@ def ensure_customer_type_column():
                     conn.execute(text(stmt))
     except Exception:
         pass
+
+    for table in ("customers", "vendors", "products"):
+        try:
+            insp = inspect(db.engine)
+            cols = {c["name"] for c in insp.get_columns(table)}
+            if "is_active" not in cols:
+                with db.engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE {table} ADD COLUMN is_active "
+                            "BOOLEAN DEFAULT 1 NOT NULL"
+                        )
+                    )
+        except Exception:
+            pass
 
     try:
         insp = inspect(db.engine)
@@ -530,6 +546,92 @@ def _filters(date_field, start, end):
     return []
 
 
+def _earliest_dashboard_activity_date():
+    """First date with sales, returns, purchases, expenses, or inventory loss."""
+    from app.models import InventoryLoss
+    from app.utils.working_date import get_working_date
+
+    today = get_working_date()
+    candidates: list[date] = []
+
+    def _min_date(model, col, *, soft_delete=True):
+        try:
+            q = db.session.query(func.min(col))
+            if soft_delete and hasattr(model, "is_deleted"):
+                q = q.filter(model.is_deleted.is_(False))
+            raw = q.scalar()
+            if raw is None:
+                return
+            if isinstance(raw, date):
+                candidates.append(raw)
+            elif hasattr(raw, "date"):
+                candidates.append(raw.date())
+        except Exception:
+            pass
+
+    _min_date(Sale, Sale.sale_date, soft_delete=False)
+    _min_date(SaleReturn, SaleReturn.return_date, soft_delete=False)
+    _min_date(Purchase, Purchase.purchase_date, soft_delete=False)
+    _min_date(Expense, Expense.expense_date)
+    _min_date(InventoryLoss, InventoryLoss.loss_date, soft_delete=False)
+
+    if not candidates:
+        return today - timedelta(days=29)
+    return min(candidates)
+
+
+def _chart_range_and_granularity(start, end, *, period="all"):
+    """Return (start, end, group_fmt, daily) for dashboard chart buckets."""
+    from app.utils.working_date import get_working_date
+
+    end = end or get_working_date()
+    if not start:
+        if period == "all":
+            start = _earliest_dashboard_activity_date()
+        else:
+            start = end - timedelta(days=364)
+    span = (end - start).days
+    daily = span <= 31
+    group_fmt = "%Y-%m-%d" if daily else "%Y-%m"
+    return start, end, group_fmt, daily
+
+
+def _iter_chart_bucket_keys(start: date, end: date, *, daily: bool) -> list[str]:
+    """Every day or month in range (inclusive) for aligned chart x-axis."""
+    keys: list[str] = []
+    if daily:
+        d = start
+        while d <= end:
+            keys.append(d.strftime("%Y-%m-%d"))
+            d += timedelta(days=1)
+        return keys
+    y, m = start.year, start.month
+    end_y, end_m = end.year, end.month
+    while (y, m) <= (end_y, end_m):
+        keys.append(f"{y:04d}-{m:02d}")
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return keys
+
+
+def _format_chart_axis_label(bucket: str, *, daily: bool) -> str:
+    """Human-readable x-axis label (e.g. 05 Aug or Aug 2026)."""
+    if daily:
+        try:
+            return date.fromisoformat(bucket).strftime("%d %b")
+        except ValueError:
+            return bucket
+    try:
+        parts = bucket.split("-")
+        if len(parts) >= 2:
+            return date(int(parts[0]), int(parts[1]), 1).strftime("%b %Y")
+    except (ValueError, TypeError):
+        pass
+    return bucket
+
+
 def _customer_due_info(customer: Customer, today: date, oldest_sale_date=None, *, batched=False):
     ctype = getattr(customer, "customer_type", None) or "good"
     meta = CUSTOMER_TYPE_META.get(ctype, CUSTOMER_TYPE_META["good"])
@@ -585,14 +687,102 @@ def _oldest_unpaid_sale_dates(customer_ids):
     return {cid: d for cid, d in rows}
 
 
+def _pie_payload(items):
+    """Chart.js-friendly labels/values plus row metadata for the template."""
+    labels = [i["name"] for i in items]
+    values = [float(i.get("value") or 0) for i in items]
+    return {"labels": labels, "values": values, "rows": items}
+
+
+def _top_profitable_products(start, end, limit=5):
+    """Top products by gross profit (sale line − COGS, net of returns) in period."""
+    profit_expr = SaleItem.line_total - SaleItem.cost_of_goods
+    sales_q = db.session.query(
+        SaleItem.product_id,
+        func.coalesce(func.sum(profit_expr), 0),
+    ).join(Sale, Sale.id == SaleItem.sale_id)
+    for f in _filters(Sale.sale_date, start, end):
+        sales_q = sales_q.filter(f)
+    sales_map = {r[0]: Decimal(str(r[1] or 0)) for r in sales_q.group_by(SaleItem.product_id).all()}
+
+    ret_expr = SaleReturnItem.line_total - SaleReturnItem.cost_of_goods
+    ret_q = db.session.query(
+        SaleReturnItem.product_id,
+        func.coalesce(func.sum(ret_expr), 0),
+    ).join(SaleReturn, SaleReturn.id == SaleReturnItem.sale_return_id)
+    for f in _filters(SaleReturn.return_date, start, end):
+        ret_q = ret_q.filter(f)
+    ret_map = {r[0]: Decimal(str(r[1] or 0)) for r in ret_q.group_by(SaleReturnItem.product_id).all()}
+
+    merged: dict[int, Decimal] = {}
+    for pid, amt in sales_map.items():
+        merged[pid] = merged.get(pid, Decimal("0")) + amt
+    for pid, amt in ret_map.items():
+        merged[pid] = merged.get(pid, Decimal("0")) - amt
+
+    ranked = sorted(
+        [(pid, profit) for pid, profit in merged.items() if profit > 0],
+        key=lambda x: x[1],
+        reverse=True,
+    )[:limit]
+    if not ranked:
+        return []
+
+    product_ids = [pid for pid, _ in ranked]
+    names = {
+        p.id: p.name
+        for p in Product.query.filter(Product.id.in_(product_ids)).all()
+    }
+    items = []
+    for pid, profit in ranked:
+        items.append(
+            {
+                "id": pid,
+                "name": names.get(pid, f"Product #{pid}"),
+                "value": float(profit),
+                "detail": f"Profit {float(profit):,.2f}",
+            }
+        )
+    return items
+
+
+def _top_expense_categories(start, end, limit=5):
+    """Top expense categories by total amount in period (with entry count)."""
+    q = (
+        db.session.query(
+            func.coalesce(ExpenseCategory.name, "Uncategorized").label("cat_name"),
+            func.coalesce(func.sum(Expense.amount), 0).label("total"),
+            func.count(Expense.id).label("cnt"),
+        )
+        .outerjoin(ExpenseCategory, Expense.category_id == ExpenseCategory.id)
+        .filter(Expense.is_deleted.is_(False))
+    )
+    for f in _filters(Expense.expense_date, start, end):
+        q = q.filter(f)
+    rows = (
+        q.group_by(Expense.category_id, ExpenseCategory.name)
+        .order_by(func.sum(Expense.amount).desc())
+        .limit(limit)
+        .all()
+    )
+    items = []
+    for name, total, cnt in rows:
+        items.append(
+            {
+                "name": name or "Uncategorized",
+                "value": float(total or 0),
+                "detail": f"{int(cnt or 0)} expense{'s' if int(cnt or 0) != 1 else ''}",
+            }
+        )
+    return items
+
+
 def get_dashboard_metrics(period="all", start_date=None, end_date=None):
     # Schema ensure runs once at app startup — not on every dashboard hit
     from app.utils.working_date import get_working_date
 
     start, end = _range_for_filter(period, start_date, end_date)
     today = get_working_date()
-
-    from app.models import SaleReturn, SaleReturnItem
 
     gross_sale = _sum_period(Sale.grand_total, Sale.sale_date, start, end)
     total_returns = _sum_period(SaleReturn.grand_total, SaleReturn.return_date, start, end)
@@ -651,8 +841,10 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
     cash_without_expense = cash_metrics["cash_without_expense"]
     cash_without_prev_and_expense = cash_metrics["cash_without_prev_and_expense"]
 
-    # Chart series (aligned labels)
-    group_fmt = "%Y-%m-%d" if start and end and (end - start).days <= 31 else "%Y-%m"
+    # Chart series — from first activity (period=all) or selected range through today/end
+    chart_start, chart_end, group_fmt, chart_daily = _chart_range_and_granularity(
+        start, end, period=period
+    )
 
     sales_income = {
         r[0]: float(r[1] or 0)
@@ -660,7 +852,7 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
             func.strftime(group_fmt, Sale.sale_date),
             func.coalesce(func.sum(Sale.grand_total), 0),
         )
-        .filter(*_filters(Sale.sale_date, start, end))
+        .filter(*_filters(Sale.sale_date, chart_start, chart_end))
         .group_by(func.strftime(group_fmt, Sale.sale_date))
         .all()
     }
@@ -670,7 +862,7 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
             func.strftime(group_fmt, SaleReturn.return_date),
             func.coalesce(func.sum(SaleReturn.grand_total), 0),
         )
-        .filter(*_filters(SaleReturn.return_date, start, end))
+        .filter(*_filters(SaleReturn.return_date, chart_start, chart_end))
         .group_by(func.strftime(group_fmt, SaleReturn.return_date))
         .all()
     }
@@ -681,7 +873,7 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
             func.coalesce(func.sum(SaleItem.cost_of_goods), 0),
         )
         .join(Sale, Sale.id == SaleItem.sale_id)
-        .filter(*_filters(Sale.sale_date, start, end))
+        .filter(*_filters(Sale.sale_date, chart_start, chart_end))
         .group_by(func.strftime(group_fmt, Sale.sale_date))
         .all()
     }
@@ -692,7 +884,7 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
             func.coalesce(func.sum(SaleReturnItem.cost_of_goods), 0),
         )
         .join(SaleReturn, SaleReturn.id == SaleReturnItem.sale_return_id)
-        .filter(*_filters(SaleReturn.return_date, start, end))
+        .filter(*_filters(SaleReturn.return_date, chart_start, chart_end))
         .group_by(func.strftime(group_fmt, SaleReturn.return_date))
         .all()
     }
@@ -702,7 +894,7 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
             func.strftime(group_fmt, Expense.expense_date),
             func.coalesce(func.sum(Expense.amount), 0),
         )
-        .filter(Expense.is_deleted.is_(False), *_filters(Expense.expense_date, start, end))
+        .filter(Expense.is_deleted.is_(False), *_filters(Expense.expense_date, chart_start, chart_end))
         .group_by(func.strftime(group_fmt, Expense.expense_date))
         .all()
     }
@@ -714,38 +906,55 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
             func.strftime(group_fmt, InventoryLoss.loss_date),
             func.coalesce(func.sum(InventoryLoss.amount), 0),
         )
-        .filter(*_filters(InventoryLoss.loss_date, start, end))
+        .filter(*_filters(InventoryLoss.loss_date, chart_start, chart_end))
         .group_by(func.strftime(group_fmt, InventoryLoss.loss_date))
         .all()
     }
 
-    all_buckets = sorted(
-        set(sales_income)
-        | set(returns_income)
-        | set(sales_cost)
-        | set(returns_cost)
-        | set(expense_map)
-        | set(loss_map)
-    )
+    bucket_keys = _iter_chart_bucket_keys(chart_start, chart_end, daily=chart_daily)
+    if chart_daily and len(bucket_keys) > 62:
+        bucket_keys = bucket_keys[-62:]
+    elif period != "all" and not chart_daily and len(bucket_keys) > 24:
+        bucket_keys = bucket_keys[-24:]
+
     chart_labels = []
     chart_income = []
     chart_cost = []
     chart_expense = []
     chart_gross = []
     chart_net = []
-    for bucket in all_buckets[-24:]:
+    for bucket in bucket_keys:
         income_f = sales_income.get(bucket, 0.0) - returns_income.get(bucket, 0.0)
         cost_f = sales_cost.get(bucket, 0.0) - returns_cost.get(bucket, 0.0)
         exp_f = expense_map.get(bucket, 0.0)
         loss_f = loss_map.get(bucket, 0.0)
         gross_f = income_f - cost_f - loss_f
         net_f = gross_f - exp_f
-        chart_labels.append(bucket)
+        chart_labels.append(_format_chart_axis_label(bucket, daily=chart_daily))
         chart_income.append(income_f)
         chart_cost.append(cost_f)
         chart_expense.append(exp_f)
         chart_gross.append(gross_f)
         chart_net.append(net_f)
+
+    first_active = 0
+    for i in range(len(bucket_keys)):
+        if (
+            chart_income[i]
+            or chart_cost[i]
+            or chart_expense[i]
+            or chart_gross[i]
+            or chart_net[i]
+        ):
+            first_active = i
+            break
+    if first_active > 0:
+        chart_labels = chart_labels[first_active:]
+        chart_income = chart_income[first_active:]
+        chart_cost = chart_cost[first_active:]
+        chart_expense = chart_expense[first_active:]
+        chart_gross = chart_gross[first_active:]
+        chart_net = chart_net[first_active:]
 
     recent_expenses = (
         Expense.query.filter_by(is_deleted=False)
@@ -799,15 +1008,57 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
         .all()
     )
 
-    # Mini history tables for KPI redirect cards
-    recent_sales = (
-        Sale.query.order_by(Sale.sale_date.desc(), Sale.id.desc()).limit(5).all()
-    )
-    recent_purchases = (
-        Purchase.query.order_by(Purchase.purchase_date.desc(), Purchase.id.desc())
-        .limit(5)
-        .all()
-    )
+    profitable_items = _top_profitable_products(start, end, limit=5)
+    expense_categories = _top_expense_categories(start, end, limit=5)
+
+    credit_pie_items = []
+    for c in top_credit:
+        if c["overdue_days"] > 0:
+            detail = f"{c['overdue_days']} days overdue"
+        else:
+            detail = f"{c['due_days']} / {c['allowed_days']} days"
+        credit_pie_items.append(
+            {
+                "id": c["id"],
+                "name": c["name"],
+                "value": float(c["balance"] or 0),
+                "detail": detail,
+            }
+        )
+
+    vendor_pie_items = [
+        {
+            "id": v.id,
+            "name": v.name,
+            "value": float(v.balance or 0),
+            "detail": v.phone or "—",
+        }
+        for v in top_vendors
+    ]
+
+    low_stock_pie_items = []
+    for p in low_stock:
+        min_s = Decimal(str(p.minimum_stock or 0))
+        cur = Decimal(str(p.current_stock or 0))
+        gap = min_s - cur if min_s > cur else min_s
+        if gap <= 0:
+            gap = max(cur, Decimal("0.001"))
+        low_stock_pie_items.append(
+            {
+                "id": p.id,
+                "name": p.name,
+                "value": float(gap),
+                "detail": p.stock_display,
+            }
+        )
+
+    pies = {
+        "profitable_items": _pie_payload(profitable_items),
+        "expense_categories": _pie_payload(expense_categories),
+        "credit_customers": _pie_payload(credit_pie_items),
+        "vendor_payables": _pie_payload(vendor_pie_items),
+        "low_stock": _pie_payload(low_stock_pie_items),
+    }
 
     return {
         "total_sale": total_sale,
@@ -832,13 +1083,13 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
             "expense": chart_expense,
             "gross": chart_gross,
             "net": chart_net,
+            "granularity": "day" if chart_daily else "month",
         },
+        "pies": pies,
         "recent_expenses": recent_expenses,
         "top_credit": top_credit,
         "top_vendors": top_vendors,
         "low_stock": low_stock,
-        "recent_sales": recent_sales,
-        "recent_purchases": recent_purchases,
         "selected_period": period,
         "period_as_of": end,
         "start_date": start,

@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from 'partials/macros.html' import form_modal, header_period_filter, header_category_filter %}
+{% from 'partials/expense_summary_card.html' import expense_summary_card %}
 {% block title %}Expenses{% endblock %}
 {% block page_filters %}
 {{ header_period_filter(
@@ -41,60 +42,7 @@
     </button>
   </div>
 
-  <div class="row g-3 mb-4">
-    <div class="col-6 col-xl-3">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-start">
-            <div>
-              <p class="text-muted small mb-1">Total Expenses</p>
-              <h3 class="mb-0 fw-bold">{{ '%.2f'|format(total_amount|float) }}</h3>
-            </div>
-            <div class="stat-icon bg-danger-subtle text-danger"><i class="fa-solid fa-receipt"></i></div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="col-6 col-xl-3">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-start">
-            <div>
-              <p class="text-muted small mb-1">Pending Amount</p>
-              <h3 class="mb-0 fw-bold">{{ '%.2f'|format(pending_amount|float) }}</h3>
-            </div>
-            <div class="stat-icon bg-warning-subtle text-warning"><i class="fa-solid fa-clock"></i></div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="col-6 col-xl-3">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-start">
-            <div>
-              <p class="text-muted small mb-1">Settled Amount</p>
-              <h3 class="mb-0 fw-bold">{{ '%.2f'|format(settled_amount|float) }}</h3>
-            </div>
-            <div class="stat-icon bg-success-subtle text-success"><i class="fa-solid fa-circle-check"></i></div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="col-6 col-xl-3">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-start">
-            <div>
-              <p class="text-muted small mb-1">Pending Items</p>
-              <h3 class="mb-0 fw-bold">{{ pending_count }}</h3>
-            </div>
-            <div class="stat-icon bg-secondary-subtle text-secondary"><i class="fa-solid fa-list"></i></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+  {{ expense_summary_card(expense_summary) }}
 
   <div class="card dash-panel border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
@@ -341,7 +289,10 @@
 {% block extra_js %}
 <script>
 window.OPEN_FORM_MODAL = {{ 'true' if open_modal else 'false' }};
-
+window.partyAccountPie = {{ expense_summary.pie|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/party-detail.js') }}?v=2"></script>
+<script>
 function toggleCustomDates() {
   const isCustom = document.getElementById('period-filter')?.value === 'custom';
   document.querySelectorAll('.custom-date-field').forEach((el) => {

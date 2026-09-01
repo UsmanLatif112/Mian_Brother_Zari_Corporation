@@ -31,16 +31,54 @@ class Customer(SoftDeleteMixin, TimestampMixin, db.Model):
     balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     remote_id = db.Column(db.Integer, nullable=True, index=True)
     photo = db.Column(db.String(255), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+
+    photos = db.relationship(
+        "CustomerPhoto",
+        back_populates="customer",
+        order_by="CustomerPhoto.sort_order",
+        lazy="selectin",
+    )
 
     @property
     def customer_type_label(self):
         return dict(CUSTOMER_TYPE_CHOICES).get(self.customer_type, self.customer_type)
 
     @property
+    def active_label(self):
+        return "Active" if self.is_active else "Inactive"
+
+    @property
     def photo_url(self):
         if not self.photo:
             return None
         return f"/static/uploads/{self.photo}"
+
+    @property
+    def photos_data(self):
+        rows = []
+        for photo in self.photos or []:
+            rows.append(
+                {"id": photo.id, "path": photo.path, "url": f"/static/uploads/{photo.path}"}
+            )
+        if not rows and self.photo:
+            rows.append({"id": None, "path": self.photo, "url": self.photo_url})
+        return rows
+
+    @property
+    def photo_urls(self):
+        return [row["url"] for row in self.photos_data if row.get("url")]
+
+
+class CustomerPhoto(db.Model):
+    __tablename__ = "customer_photos"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    path = db.Column(db.String(255), nullable=False)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+
+    customer = db.relationship("Customer", back_populates="photos")
 
 
 class Vendor(SoftDeleteMixin, TimestampMixin, db.Model):
@@ -49,18 +87,57 @@ class Vendor(SoftDeleteMixin, TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False, index=True)
     phone = db.Column(db.String(30), nullable=True)
+    cnic = db.Column(db.String(20), nullable=True)
     address = db.Column(db.Text, nullable=True)
     opening_balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     notes = db.Column(db.Text, nullable=True)
     balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     remote_id = db.Column(db.Integer, nullable=True, index=True)
     photo = db.Column(db.String(255), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+
+    photos = db.relationship(
+        "VendorPhoto",
+        back_populates="vendor",
+        order_by="VendorPhoto.sort_order",
+        lazy="selectin",
+    )
+
+    @property
+    def active_label(self):
+        return "Active" if self.is_active else "Inactive"
 
     @property
     def photo_url(self):
         if not self.photo:
             return None
         return f"/static/uploads/{self.photo}"
+
+    @property
+    def photos_data(self):
+        rows = []
+        for photo in self.photos or []:
+            rows.append(
+                {"id": photo.id, "path": photo.path, "url": f"/static/uploads/{photo.path}"}
+            )
+        if not rows and self.photo:
+            rows.append({"id": None, "path": self.photo, "url": self.photo_url})
+        return rows
+
+    @property
+    def photo_urls(self):
+        return [row["url"] for row in self.photos_data if row.get("url")]
+
+
+class VendorPhoto(db.Model):
+    __tablename__ = "vendor_photos"
+
+    id = db.Column(db.Integer, primary_key=True)
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=False, index=True)
+    path = db.Column(db.String(255), nullable=False)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+
+    vendor = db.relationship("Vendor", back_populates="photos")
 
 
 class Salesman(SoftDeleteMixin, TimestampMixin, db.Model):
@@ -75,7 +152,7 @@ class Salesman(SoftDeleteMixin, TimestampMixin, db.Model):
     address = db.Column(db.Text, nullable=True)
     opening_balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     notes = db.Column(db.Text, nullable=True)
-    # Outstanding credit attributable to this salesman (debit − credit on ledger)
+    # Outstanding credit attributable to this salesman (debit - credit on ledger)
     balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     remote_id = db.Column(db.Integer, nullable=True, index=True)
     photo = db.Column(db.String(255), nullable=True)

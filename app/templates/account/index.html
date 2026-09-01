@@ -68,6 +68,17 @@
     </div>
   </div>
 
+  <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Amount Taken · Cash In Hand · Previous Balance · Balance After</strong>
+    </div>
+    <div class="card-body pt-3 pb-2">
+      <div class="dash-chart-wrap">
+        <canvas id="accountPerformanceChart"></canvas>
+      </div>
+    </div>
+  </div>
+
   <div class="card dash-panel border-0 shadow-sm">
     <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
       <strong>Amount Taken</strong>
@@ -260,6 +271,10 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+window.accountPerformanceChart = {{ account_chart|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/account-page-chart.js') }}?v=2"></script>
 <script>
 function toggleCustomDates() {
   const isCustom = document.getElementById('period-filter')?.value === 'custom';

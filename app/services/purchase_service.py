@@ -188,6 +188,13 @@ def record_purchase(
         batch_number = str(batch_seq_by_product[pid])
         batch_seq_by_product[pid] += 1
 
+        sealed_qty = line.get("sealed_qty")
+        open_weight = line.get("open_weight")
+        fifo_kwargs = {}
+        if sealed_qty is not None:
+            fifo_kwargs["sealed_qty"] = Decimal(str(sealed_qty))
+            fifo_kwargs["open_weight"] = Decimal(str(open_weight or 0))
+
         fifo_receive(
             product,
             qty,
@@ -204,6 +211,7 @@ def record_purchase(
             entry_at=purchase_date,
             unit_weight=line_uw if line_uw is not None else line.get("unit_weight"),
             weight_unit=line_wu if line_wu is not None else line.get("weight_unit"),
+            **fifo_kwargs,
         )
         subtotal += line_total
 

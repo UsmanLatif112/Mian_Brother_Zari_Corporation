@@ -119,190 +119,63 @@
       <i class="fa-solid fa-up-right-from-square"></i>
     </a>
   </div>
-  <div class="card-body pt-3">
-    <canvas id="profitChart" height="100"></canvas>
+  <div class="card-body pt-3 pb-2">
+    <div class="dash-chart-wrap">
+      <canvas id="profitChart"></canvas>
+    </div>
   </div>
 </div>
 
 <div class="row g-4">
+  {% set pie_panels = [
+    ('Most Profitable Items', 'sales.index', 'profitable_items', 'No profitable sales in this period'),
+    ('Top Expenses', 'expenses.index', 'expense_categories', 'No expenses in this period'),
+    ('Top Credit Customers', 'customers.index', 'credit_customers', 'No credit balances'),
+    ('Top Vendor Payable', 'vendors.index', 'vendor_payables', 'No vendor payables'),
+    ('Top Low Stock', 'inventory.index', 'low_stock', 'All stock levels healthy'),
+  ] %}
+  {% for title, route, key, empty_msg in pie_panels %}
+  {% set pie = metrics.pies[key] %}
   <div class="col-lg-6">
     <div class="card dash-panel border-0 shadow-sm h-100">
       <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <strong>Recent Sales</strong>
-        <a href="{{ url_for('sales.index') }}" class="redirect-icon-btn" title="Open Sales">
+        <strong>{{ title }}</strong>
+        <a href="{{ url_for(route) }}" class="redirect-icon-btn" title="Open {{ title }}">
           <i class="fa-solid fa-up-right-from-square"></i>
         </a>
       </div>
-      <div class="table-responsive">
-        <table class="table table-sm mb-0">
-          <thead><tr><th>Invoice</th><th>Date</th><th class="text-end">Total</th></tr></thead>
-          <tbody>
-            {% for s in metrics.recent_sales %}
-            <tr>
-              <td><a href="{{ url_for('sales.invoice', sale_id=s.id) }}">{{ s.invoice_no }}</a></td>
-              <td>{{ s.sale_date }}</td>
-              <td class="text-end">{{ '%.2f'|format(s.grand_total|float) }}</td>
-            </tr>
-            {% else %}
-            <tr><td colspan="3" class="text-muted small">No sales yet</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="card-body py-3">
+        {% if pie.rows %}
+        <div class="row align-items-center g-3 dash-pie-row">
+          <div class="col-md-5">
+            <ul class="dash-pie-list list-unstyled mb-0">
+              {% for item in pie.rows %}
+              <li class="dash-pie-list-item">
+                <span class="dash-pie-swatch" data-color-idx="{{ loop.index0 }}"></span>
+                <div class="dash-pie-list-text">
+                  <div class="dash-pie-list-name text-truncate" title="{{ item.name }}">{{ item.name }}</div>
+                  {% if item.detail %}
+                  <div class="dash-pie-list-meta text-muted small">{{ item.detail }}</div>
+                  {% endif %}
+                </div>
+                <div class="dash-pie-list-value">{{ '%.2f'|format(item.value|float) }}</div>
+              </li>
+              {% endfor %}
+            </ul>
+          </div>
+          <div class="col-md-7">
+            <div class="dash-pie-wrap">
+              <canvas class="dash-pie-canvas" data-pie-key="{{ key }}" aria-label="{{ title }} chart"></canvas>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0">{{ empty_msg }}</p>
+        {% endif %}
       </div>
     </div>
   </div>
-
-  <div class="col-lg-6">
-    <div class="card dash-panel border-0 shadow-sm h-100">
-      <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <strong>Top Credit Customers</strong>
-        <a href="{{ url_for('customers.index') }}" class="redirect-icon-btn" title="Open Customers">
-          <i class="fa-solid fa-up-right-from-square"></i>
-        </a>
-      </div>
-      <div class="table-responsive">
-        <table class="table table-sm mb-0">
-          <thead>
-            <tr>
-              <th>Customer</th>
-              <th>Type</th>
-              <th class="text-end">Due</th>
-              <th class="text-end">Days</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for c in metrics.top_credit %}
-            <tr>
-              <td>
-                <a href="{{ url_for('customers.detail', customer_id=c.id) }}" class="text-decoration-none">{{ c.name }}</a>
-              </td>
-              <td><span class="badge bg-light text-dark border">{{ c.type_label }}</span></td>
-              <td class="text-end">{{ '%.2f'|format(c.balance|float) }}</td>
-              <td class="text-end">
-                {% if c.overdue_days > 0 %}
-                  <span class="text-danger fw-semibold">{{ c.overdue_days }} overdue</span>
-                  <div class="small text-muted">age {{ c.due_days }} / allow {{ c.allowed_days }}</div>
-                {% else %}
-                  <span class="text-success">{{ c.due_days }} / {{ c.allowed_days }}</span>
-                {% endif %}
-              </td>
-            </tr>
-            {% else %}
-            <tr><td colspan="4" class="text-muted small">No credit balances</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-lg-6">
-    <div class="card dash-panel border-0 shadow-sm h-100">
-      <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <strong>Recent Expenses</strong>
-        <a href="{{ url_for('expenses.index') }}" class="redirect-icon-btn" title="Open Expenses">
-          <i class="fa-solid fa-up-right-from-square"></i>
-        </a>
-      </div>
-      <div class="table-responsive">
-        <table class="table table-sm mb-0">
-          <thead><tr><th>Expense</th><th>Date</th><th class="text-end">Amount</th></tr></thead>
-          <tbody>
-            {% for e in metrics.recent_expenses %}
-            <tr>
-              <td>{{ e.name }}</td>
-              <td>{{ e.expense_date }}</td>
-              <td class="text-end">{{ '%.2f'|format(e.amount|float) }}</td>
-            </tr>
-            {% else %}
-            <tr><td colspan="3" class="text-muted small">No expenses yet</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-lg-6">
-    <div class="card dash-panel border-0 shadow-sm h-100">
-      <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <strong>Recent Purchases</strong>
-        <a href="{{ url_for('purchases.index') }}" class="redirect-icon-btn" title="Open Purchases">
-          <i class="fa-solid fa-up-right-from-square"></i>
-        </a>
-      </div>
-      <div class="table-responsive">
-        <table class="table table-sm mb-0">
-          <thead><tr><th>Invoice</th><th>Date</th><th class="text-end">Total</th></tr></thead>
-          <tbody>
-            {% for p in metrics.recent_purchases %}
-            <tr>
-              <td>{{ p.invoice_no }}</td>
-              <td>{{ p.purchase_date }}</td>
-              <td class="text-end">{{ '%.2f'|format(p.grand_total|float) }}</td>
-            </tr>
-            {% else %}
-            <tr><td colspan="3" class="text-muted small">No purchases yet</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-lg-6">
-    <div class="card dash-panel border-0 shadow-sm h-100">
-      <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <strong>Top Vendors To Pay</strong>
-        <a href="{{ url_for('vendors.index') }}" class="redirect-icon-btn" title="Open Vendors">
-          <i class="fa-solid fa-up-right-from-square"></i>
-        </a>
-      </div>
-      <div class="table-responsive">
-        <table class="table table-sm mb-0">
-          <thead><tr><th>Vendor</th><th>Phone</th><th class="text-end">Payable</th></tr></thead>
-          <tbody>
-            {% for v in metrics.top_vendors %}
-            <tr>
-              <td><a href="{{ url_for('vendors.detail', vendor_id=v.id) }}" class="text-decoration-none">{{ v.name }}</a></td>
-              <td>{{ v.phone or '—' }}</td>
-              <td class="text-end text-danger fw-semibold">{{ '%.2f'|format(v.balance|float) }}</td>
-            </tr>
-            {% else %}
-            <tr><td colspan="3" class="text-muted small">No vendor payables</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-lg-6">
-    <div class="card dash-panel border-0 shadow-sm h-100">
-      <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <strong>Top Low Stock</strong>
-        <a href="{{ url_for('inventory.index') }}" class="redirect-icon-btn" title="Open Inventory">
-          <i class="fa-solid fa-up-right-from-square"></i>
-        </a>
-      </div>
-      <div class="table-responsive">
-        <table class="table table-sm mb-0">
-          <thead><tr><th>Product</th><th class="text-end">Stock</th><th class="text-end">Min</th></tr></thead>
-          <tbody>
-            {% for p in metrics.low_stock %}
-            <tr>
-              <td>{{ p.name }}</td>
-              <td class="text-end text-danger fw-semibold">{{ p.stock_display }}</td>
-              <td class="text-end">{{ p.minimum_stock|qty_display(p) }}</td>
-            </tr>
-            {% else %}
-            <tr><td colspan="3" class="text-muted small">All stock levels healthy</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
+  {% endfor %}
 </div>
 </div>
 {% endblock %}
@@ -324,6 +197,7 @@ function onDashPeriodChange() {
 toggleCustomDates();
 
 window.dashboardCharts = {{ metrics.chart|tojson }};
+window.dashboardPies = {{ metrics.pies|tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=2"></script>
 {% endblock %}
