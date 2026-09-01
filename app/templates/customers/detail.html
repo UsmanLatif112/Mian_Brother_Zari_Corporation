@@ -45,15 +45,16 @@
     <div class="col-md-4">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
-          <p class="text-muted small mb-1">Current Balance</p>
-          <h3 class="mb-0 fw-bold {% if customer.balance|float > 0 %}text-warning{% elif customer.balance|float < 0 %}text-success{% endif %}">
-            {{ '%.2f'|format(customer.balance|float) }}
+          <p class="text-muted small mb-1">{% if balance_as_of %}Balance as of {{ balance_as_of }}{% else %}Current Balance{% endif %}</p>
+          <h3 class="mb-0 fw-bold {% if display_balance|float > 0 %}text-warning{% elif display_balance|float < 0 %}text-success{% endif %}">
+            {{ '%.2f'|format(display_balance|float) }}
           </h3>
           <div class="small text-muted mt-1">
-            Old account + sales &amp; payments
+            {% if balance_as_of %}Through selected period
+            {% else %}Old account + sales &amp; payments{% endif %}
             ·
-            {% if customer.balance|float > 0 %}Customer owes (credit)
-            {% elif customer.balance|float < 0 %}Advance with us
+            {% if display_balance|float > 0 %}Customer owes (credit)
+            {% elif display_balance|float < 0 %}Advance with us
             {% else %}Settled{% endif %}
           </div>
         </div>
@@ -88,9 +89,10 @@
       <thead>
         <tr>
           <th>Date</th>
+          <th>Invoice</th>
+          <th>Particulars</th>
           <th>Type</th>
           <th>Status</th>
-          <th>Notes</th>
           <th class="text-end">Debit</th>
           <th class="text-end">Credit</th>
           <th class="text-end">Balance</th>
@@ -101,11 +103,14 @@
         {% for l in ledger %}
         <tr>
           <td>{{ l.entry_date }}</td>
+          <td class="fw-semibold">{{ l.invoice_no }}</td>
+          <td class="small journal-particulars" title="{{ l.particulars }}">
+            <span class="journal-particulars-text">{{ l.particulars }}</span>
+          </td>
           <td>{{ l.entry_type.replace('_', ' ')|title }}</td>
           <td>
             <span class="badge {{ l.status_badge_class }}">{{ l.status_label }}</span>
           </td>
-          <td class="small text-muted">{{ l.notes or '—' }}</td>
           <td class="text-end">{{ '%.2f'|format(l.debit|float) }}</td>
           <td class="text-end">{{ '%.2f'|format(l.credit|float) }}</td>
           <td class="text-end">{{ '%.2f'|format(l.balance_after|float) }}</td>
@@ -328,9 +333,9 @@ document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
     partyLabel: 'Customer',
     partyName: {{ customer.name|tojson }},
     partyFields,
-    partyBalance: {{ '%.2f'|format(customer.balance|float)|tojson }},
-    partyBalanceLabel: 'Current Balance',
-    sumColumns: [4, 5],
+    partyBalance: {{ '%.2f'|format(display_balance|float)|tojson }},
+    partyBalanceLabel: {% if balance_as_of %}{{ ('Balance as of ' ~ balance_as_of)|tojson }}{% else %}'Current Balance'{% endif %},
+    sumColumns: [5, 6],
   });
 });
 </script>

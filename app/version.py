@@ -1,13 +1,11 @@
 """Application version — bump when releasing a desktop update."""
 
-APP_VERSION = "1.6.3"
-APP_BUILD = 163
+APP_VERSION = "1.6.7"
+APP_BUILD = 167
 
 # Used by make_release_manifest when --notes is omitted.
-RELEASE_NOTES = """- Customer list: Old Balance + Total Balance (old + sales/payments)
-- Customer ledger: Opening entry with date when old account is set
-- Editing old account balance syncs Opening ledger row and total balance
-- Customer ledger sorted newest first
-- Salesmen (field officers): optional on each sale — name, phone, company, photo, opening balance
-- Salesman list + ledger: invoice, particulars, Paid/Partial/Unpaid, debit/credit/balance
-- One product = one fixed unit weight; open leftover kg first"""
+RELEASE_NOTES = """- Sales listing: item image column removed; separate Notes column (truncated with tooltip)
+- Reprice / edit purchase price corrects sold cost of goods for that batch (dashboard Total Cost & profit)
+- Sale price change still applies to remaining stock only
+- Inventory movements: Reprice notes show cost old→new; Sale Out / Return notes update after reprice
+- Customer & salesman ledger notes: Sale INV-… / item particulars (returns too)"""

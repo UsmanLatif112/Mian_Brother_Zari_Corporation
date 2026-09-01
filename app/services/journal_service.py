@@ -9,6 +9,7 @@ from app.models import (
     ExpenseSettlement,
     Purchase,
     Sale,
+    SaleReturn,
     VendorPayment,
 )
 from app.services.dashboard_service import _range_for_filter
@@ -30,31 +31,18 @@ def _fmt_particular(*parts) -> str:
 
 
 def _sale_line_particular(it) -> str:
-    """Sale: name / units / sold weight unit — e.g. fhgj / 0.75 / 300 g."""
+    """
+    Sale line: name / qty display.
+
+    Full bags → bag count (3); open → 25 kg; mix → 1 + 25 kg.
+    Never show total kg for full bags (not 150 kg for 3×50).
+    """
+    from app.utils.weight_utils import format_sale_item_qty_display
+
     product = getattr(it, "product", None)
     name = (getattr(product, "name", None) or "Item").strip() or "Item"
-    sale_weight = getattr(it, "sale_weight", None)
-    weight_unit = (
-        getattr(it, "weight_unit", None)
-        or getattr(product, "weight_unit", None)
-        or ""
-    ).strip()
-    qty = getattr(it, "quantity", None)
-    unit_weight = getattr(product, "unit_weight", None)
-
-    if sale_weight is not None and _d(sale_weight) > 0:
-        unit = weight_unit or "kg"
-        # Open sale: show sold weight only (avoid confusing 0.333 bag fraction)
-        return _fmt_particular(name, f"{_fmt_qty(sale_weight)} {unit}")
-
-    if unit_weight is not None and _d(unit_weight) > 0 and qty is not None and _d(qty) > 0:
-        total_w = _d(unit_weight) * _d(qty)
-        unit = weight_unit or "kg"
-        return _fmt_particular(name, _fmt_qty(qty), f"{_fmt_qty(total_w)} {unit}")
-
-    if qty is not None and _d(qty) > 0:
-        return _fmt_particular(name, f"{_fmt_qty(qty)} units")
-    return name
+    qty_text = format_sale_item_qty_display(it, product)
+    return _fmt_particular(name, qty_text)
 
 
 def _purchase_line_particular(it) -> str:
@@ -66,12 +54,32 @@ def _purchase_line_particular(it) -> str:
 
 def items_particulars(items, *, limit: int = 4, fallback: str = "", kind: str = "sale") -> str:
     """Particulars from line items only (no amounts — those are in money columns)."""
-    formatter = _purchase_line_particular if kind == "purchase" else _sale_line_particular
-    labels: list[str] = []
-    for it in items or []:
-        label = formatter(it)
-        if label:
-            labels.append(label)
+    if kind == "purchase":
+        labels: list[str] = []
+        for it in items or []:
+            label = _purchase_line_particular(it)
+            if label:
+                labels.append(label)
+    else:
+        # Group same product so 1 full + 25 kg open → "Name / 1 + 25 kg"
+        from collections import OrderedDict
+
+        from app.utils.weight_utils import format_sale_items_qty_display
+
+        groups: OrderedDict = OrderedDict()
+        for it in items or []:
+            product = getattr(it, "product", None)
+            pid = getattr(it, "product_id", None) or getattr(product, "id", None) or id(it)
+            if pid not in groups:
+                name = (getattr(product, "name", None) or "Item").strip() or "Item"
+                groups[pid] = {"name": name, "items": []}
+            groups[pid]["items"].append(it)
+
+        labels = []
+        for g in groups.values():
+            qty_text = format_sale_items_qty_display(g["items"])
+            labels.append(_fmt_particular(g["name"], qty_text))
+
     if not labels:
         return fallback
     if len(labels) <= limit:
@@ -120,6 +128,9 @@ def get_general_journal(period="all", start_date=None, end_date=None):
     Cash in/out for the period (no opening balances).
     Expenses: Out when spent; In when you replenish the till on settle.
     Sales: In = cash received; Out = unpaid credit.
+    Sale returns: always listed (item came back).
+      Cash refund → Out only (never In — sale already booked In).
+      Unpaid / account credit → row with In/Out blank; customer ledger decreases balance.
     Purchases: Out = cash paid to vendor; unpaid not in In/Out (payable until paid).
     Customer advance/settle = In, loan = Out; vendor loan = In, vendor pay = Out.
     """
@@ -153,6 +164,49 @@ def get_general_journal(period="all", start_date=None, end_date=None):
                 f"/sales/{s.id}/invoice",
                 s.id,
                 total_paid=total_paid,
+                invoice_total=total,
+            )
+        )
+
+    # —— Sale returns ——
+    # Always list the return (sale happened, item came back).
+    # Paid/partial cash refund → Out only (sale cash was already In).
+    # Unpaid / account-credit → row with In=0 Out=0; money side is customer ledger only.
+    rq = SaleReturn.query
+    if range_start:
+        rq = rq.filter(SaleReturn.return_date >= range_start)
+    if range_end:
+        rq = rq.filter(SaleReturn.return_date <= range_end)
+    for r in rq.order_by(SaleReturn.return_date.desc(), SaleReturn.id.desc()).all():
+        total = _d(r.grand_total)
+        cash = _d(r.refund_cash)
+        credit = _d(r.refund_credit)
+        party = r.customer.name if r.customer else (r.sale.customer.name if r.sale and r.sale.customer else "Walk-in")
+        inv = r.sale.invoice_no if r.sale else ""
+        note = f"Return of {inv}" if inv else "Sale return"
+        try:
+            note = _items_particulars(r.items, fallback=note, kind="sale")
+        except Exception:
+            pass
+        if cash > 0 and credit > 0:
+            status = "Cash + Credit"
+        elif cash > 0:
+            status = "Cash Refund"
+        else:
+            status = "Account Credit"
+        rows.append(
+            _row(
+                r.return_date,
+                "Sale Return",
+                r.return_no,
+                note,
+                party,
+                Decimal("0"),  # never In — original sale already recorded cash In
+                cash if cash > 0 else Decimal("0"),  # Out only when money is given back
+                status,
+                f"/sales/{r.sale_id}/invoice" if r.sale_id else "/sales/",
+                r.id,
+                total_paid=cash,
                 invoice_total=total,
             )
         )
@@ -310,6 +364,7 @@ def get_general_journal(period="all", start_date=None, end_date=None):
         ~CashBookEntry.category.in_(
             [
                 "sales_collection",
+                "sale_return_refund",
                 "expense_spent",
                 "expense_settlement",
                 "customer_advance",

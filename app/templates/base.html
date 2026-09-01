@@ -15,7 +15,7 @@
   <link href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" rel="stylesheet">
   <link href="{{ url_for('static', filename='vendor/datatables/dataTables.bootstrap5.min.css') }}" rel="stylesheet">
   <link href="{{ url_for('static', filename='vendor/cropperjs/cropper.min.css') }}" rel="stylesheet">
-  <link href="{{ url_for('static', filename='css/theme.css') }}?v=15" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/theme.css') }}?v=17" rel="stylesheet">
   {% block extra_css %}{% endblock %}
 </head>
 <body class="erp-body"{% if current_user.is_authenticated %} data-search-scope="{{ search_scope }}" data-search-mode="{{ search_mode }}" data-search-table="{{ search_table_selector }}" data-user-registered="{{ '1' if current_user.is_registration_complete() else '0' }}" data-working-date="{{ working_date }}" data-calendar-today="{{ calendar_today }}" data-desktop-app="{{ '1' if is_desktop_app else '0' }}" data-updates-enabled="{{ '1' if updates_enabled else '0' }}" data-app-version="{{ app_version }}"{% endif %}>

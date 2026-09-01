@@ -26,7 +26,13 @@
       <p class="text-muted mb-0">
         {{ product.sku }}
         {% if product.category %} · {{ product.category.name }}{% endif %}
-        · Stock {{ product.stock_total_display }}
+        · Stock
+        {% if (total_stock|float) < 0 %}
+          <span class="text-danger fw-semibold">{% if period_as_of %}{{ stock_display }}{% else %}{{ product.stock_total_display }}{% endif %}</span>
+          <span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1">Negative</span>
+        {% else %}
+          {% if period_as_of %}{{ stock_display }} <span class="fw-normal">(as of {{ period_as_of }})</span>{% else %}{{ product.stock_total_display }}{% endif %}
+        {% endif %}
       </p>
       </div>
     </div>
@@ -41,20 +47,38 @@
     <div class="col-md-3">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
-          <p class="text-muted small mb-1">Total Stock</p>
-          <h3 class="mb-0">{{ product.stock_total_display }}</h3>
+          <p class="text-muted small mb-1">Total Stock{% if period_as_of %} <span class="fw-normal">(as of {{ period_as_of }})</span>{% endif %}</p>
+          <h3 class="mb-0 {% if (total_stock|float) < 0 %}text-danger{% endif %}">{{ stock_display }}</h3>
+          {% if (total_stock|float) < 0 %}
+          <div class="small text-danger mt-1">Includes pending cover</div>
+          {% endif %}
         </div>
       </div>
     </div>
     <div class="col-md-3">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
-          <p class="text-muted small mb-1">Total Stock Value</p>
+          <p class="text-muted small mb-1">Pending to cover</p>
+          <h3 class="mb-0 {% if (pending_backorder_qty|default(0)|float) > 0 %}text-warning{% endif %}">
+            {% if (pending_backorder_qty|default(0)|float) > 0 %}
+              −{{ pending_backorder_display }}
+            {% else %}
+              0
+            {% endif %}
+          </h3>
+          <div class="small text-muted mt-1">Sold without stock — next purchase covers</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Total Stock Value{% if period_as_of %} <span class="fw-normal">(as of {{ period_as_of }})</span>{% endif %}</p>
           <h3 class="mb-0">{{ '%.2f'|format(total_stock_value|float) }}</h3>
         </div>
       </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
           <p class="text-muted small mb-1">Open Batch</p>
@@ -62,7 +86,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
           <p class="text-muted small mb-1">Closed Batch</p>
@@ -72,13 +96,55 @@
     </div>
   </div>
 
+  {% if pending_backorders %}
+  <div class="card dash-panel border-warning border-2 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong class="text-warning"><i class="fa-solid fa-clock-rotate-left me-1"></i> Pending cover (negative stock)</strong>
+      <span class="badge bg-warning-subtle text-warning border">{{ pending_backorders|length }} open</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table mb-0 table-sm">
+        <thead>
+          <tr>
+            <th>Sale</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th class="text-end">Pending qty</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in pending_backorders %}
+          <tr>
+            <td>
+              {% if b.sale_id %}
+              <a href="{{ url_for('sales.invoice', sale_id=b.sale_id) }}">{{ b.invoice_no or ('Sale #' ~ b.sale_id) }}</a>
+              {% else %}
+              —
+              {% endif %}
+            </td>
+            <td>{{ b.sale_date or '—' }}</td>
+            <td><span class="badge bg-warning-subtle text-warning border">{{ b.status|title }}</span></td>
+            <td class="text-end text-warning fw-semibold">
+              −{{ b.qty_remaining|qty_display(product) }}
+              {% if b.weight_remaining is not none and (b.weight_remaining|float) > 0 %}
+                <span class="text-muted small">({{ '%.3f'|format(b.weight_remaining|float) }} {{ product.weight_unit or 'kg' }})</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="card dash-panel border-0 shadow-sm mb-3">
     <div class="card-header bg-white">
       <strong>Stock Batches (FIFO)</strong>
-      <span class="text-muted small ms-2">Each batch keeps its own unit weight · Sealed bags and open kg are separate</span>
+      <span class="text-muted small ms-2">Newest purchase on top · FIFO still uses oldest first when selling</span>
     </div>
     <div class="table-responsive">
-      <table class="table mb-0 table-sm datatable inventory-batches-table" id="inventory-batches-table">
+      <table class="table mb-0 table-sm inventory-batches-table" id="inventory-batches-table">
         <thead>
           <tr>
             <th>Batch</th>
@@ -100,7 +166,7 @@
         <tbody>
           {% for L in layers %}
           <tr class="{% if not L.has_stock() %}text-muted{% endif %}">
-            <td>{% if L.batch_number %}#{{ L.batch_number }}{% else %}#{{ L.id }}{% endif %}</td>
+            <td data-order="{{ L.id }}">{% if L.batch_number %}#{{ L.batch_number }}{% else %}#{{ L.id }}{% endif %}</td>
             <td>{{ L.vendor.name if L.vendor else '—' }}</td>
             <td>{{ L.invoice_no or '—' }}</td>
             <td class="text-end">
@@ -121,7 +187,9 @@
               —
               {% endif %}
             </td>
-            <td>{{ L.received_at.strftime('%Y-%m-%d') if L.received_at else '—' }}</td>
+            <td data-order="{{ L.received_at.strftime('%Y%m%d%H%M%S') if L.received_at else '0' }}{{ '%08d'|format(L.id) }}">
+              {{ L.received_at.strftime('%Y-%m-%d') if L.received_at else '—' }}
+            </td>
             <td class="text-end">{{ L.quantity_purchased|qty_display(L) }}</td>
             <td class="text-end">{{ (L.quantity_remaining or 0)|clean_num }}</td>
             <td class="text-end">
@@ -131,7 +199,7 @@
                 —
               {% endif %}
             </td>
-            <td class="text-end fw-semibold">{{ L.quantity_remaining|qty_display(L) }}</td>
+            <td class="text-end fw-semibold">{{ L.stock_qty_equivalent|qty_display(L) }}</td>
             <td class="text-end text-muted">{{ L.quantity_used|qty_display(L) }}</td>
             <td class="text-end">{{ '%.2f'|format(L.unit_cost|float) }}</td>
             <td class="text-end">{{ '%.2f'|format((L.sale_price or product.sale_price or 0)|float) }}</td>
@@ -182,7 +250,9 @@
   </div>
 
   <div class="card dash-panel border-0 shadow-sm">
-    <div class="card-header bg-white"><strong>Recent Movements</strong></div>
+    <div class="card-header bg-white"><strong>Recent Movements</strong>
+      <span class="text-muted small ms-2">Newest entry on top</span>
+    </div>
     <div class="table-responsive">
       <table class="table mb-0">
         <thead>
@@ -199,8 +269,25 @@
           {% for m in movements %}
           <tr>
             <td>{{ m.created_at.strftime('%Y-%m-%d %H:%M') if m.created_at else '—' }}</td>
-            <td>{{ m.movement_type }}</td>
-            <td class="text-end">{{ m|movement_qty_display(product) }}</td>
+            <td>
+              {% set mt = m.movement_type or '' %}
+              {% if mt == 'sale_out' %}
+              <span class="badge bg-danger-subtle text-danger border">Sale Out</span>
+              {% elif mt == 'sale_return_in' %}
+              <span class="badge bg-success-subtle text-success border">Sale Return In</span>
+              {% elif mt == 'purchase_in' %}
+              <span class="badge bg-primary-subtle text-primary border">Purchase In</span>
+              {% elif mt == 'reprice' %}
+              <span class="badge bg-secondary-subtle text-secondary border">Reprice</span>
+              {% elif mt.startswith('adjust_') %}
+              <span class="badge bg-warning-subtle text-warning border">{{ mt.replace('_', ' ')|title }}</span>
+              {% else %}
+              <span class="badge bg-secondary-subtle text-secondary border">{{ mt.replace('_', ' ')|title }}</span>
+              {% endif %}
+            </td>
+            <td class="text-end {% if (m.quantity or 0)|float < 0 %}text-danger{% elif (m.quantity or 0)|float > 0 %}text-success{% endif %}">
+              {{ m|movement_qty_display(product) }}
+            </td>
             <td class="text-end">{{ '%.2f'|format((m.unit_cost or 0)|float) }}</td>
             <td class="text-end">{{ m.balance_after|qty_display(product) }}</td>
             <td class="small text-muted">{{ m.notes or '—' }}</td>

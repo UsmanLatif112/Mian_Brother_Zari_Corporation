@@ -43,13 +43,14 @@
     <div class="col-md-4">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
-          <p class="text-muted small mb-1">Current Balance</p>
-          <h3 class="mb-0 fw-bold {% if vendor.balance|float > 0 %}text-warning{% elif vendor.balance|float < 0 %}text-success{% endif %}">
-            {{ '%.2f'|format(vendor.balance|float) }}
+          <p class="text-muted small mb-1">{% if balance_as_of %}Balance as of {{ balance_as_of }}{% else %}Current Balance{% endif %}</p>
+          <h3 class="mb-0 fw-bold {% if display_balance|float > 0 %}text-warning{% elif display_balance|float < 0 %}text-success{% endif %}">
+            {{ '%.2f'|format(display_balance|float) }}
           </h3>
           <div class="small text-muted mt-1">
-            {% if vendor.balance|float > 0 %}We owe vendor (payable)
-            {% elif vendor.balance|float < 0 %}Advance / prepaid
+            {% if balance_as_of %}Through selected period · {% endif %}
+            {% if display_balance|float > 0 %}We owe vendor (payable)
+            {% elif display_balance|float < 0 %}Advance / prepaid
             {% else %}Settled{% endif %}
           </div>
         </div>
@@ -254,7 +255,7 @@ document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
       { label: 'Phone', value: {{ (vendor.phone or '—')|tojson }} },
       { label: 'Address', value: {{ (vendor.address or '—')|tojson }} },
       { label: 'Opening Balance', value: {{ '%.2f'|format((vendor.opening_balance or 0)|float)|tojson }} },
-      { label: 'Current Balance', value: {{ '%.2f'|format(vendor.balance|float)|tojson }} },
+      { label: {% if balance_as_of %}{{ ('Balance as of ' ~ balance_as_of)|tojson }}{% else %}'Current Balance'{% endif %}, value: {{ '%.2f'|format(display_balance|float)|tojson }} },
       { label: 'Notes', value: {{ (vendor.notes or '—')|tojson }} },
     ],
     sumColumns: [3, 4],

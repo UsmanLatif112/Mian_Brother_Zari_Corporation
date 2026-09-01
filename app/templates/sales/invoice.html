@@ -95,17 +95,21 @@
           <td>{{ loop.index }}</td>
           <td>
             {{ i.product.name if i.product else 'Item' }}
-            {% if i.sale_weight is not none %}
-            <div class="meta">Sold {{ '%.3f'|format(i.sale_weight|float) }} {{ i.weight_unit or '' }}
+            {% if i.product and i.product.unit_weight %}
+            <div class="meta">{{ i.quantity|qty_display(i.product) }}{% if i.list_unit_price is not none %} · list {{ '%.2f'|format(i.list_unit_price|float) }}/unit{% endif %}</div>
+            {% elif i.sale_weight is not none %}
+            <div class="meta">Sold {{ i.sale_weight|clean_num }} {{ i.weight_unit or '' }}
               {% if i.list_unit_price is not none %}(list {{ '%.2f'|format(i.list_unit_price|float) }}/unit){% endif %}
             </div>
             {% endif %}
           </td>
           <td class="text-end">
-            {% if i.sale_weight is not none %}
-              {{ '%.3f'|format(i.sale_weight|float) }} {{ i.weight_unit or '' }}
+            {% if i.product and i.product.unit_weight %}
+              {{ i.quantity|qty_display(i.product) }}
+            {% elif i.sale_weight is not none %}
+              {{ i.sale_weight|clean_num }} {{ i.weight_unit or '' }}
             {% else %}
-              {{ i.quantity }}
+              {{ i.quantity|clean_num }}
             {% endif %}
           </td>
           <td class="text-end">{{ '%.2f'|format((i.list_unit_price if i.list_unit_price is not none else i.unit_price)|float) }}</td>

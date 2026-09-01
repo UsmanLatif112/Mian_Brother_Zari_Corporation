@@ -6,6 +6,8 @@
   let customerTimer = null;
   let productTimer = null;
   let editingSaleId = null;
+  let allowNegativeStock = false;
+  let pendingZeroStock = null; // { mode:'select', tr, product } | { mode:'save', payload, url, productName }
 
   function headers() {
     return {
@@ -169,6 +171,12 @@
     const listPrice = Number(
       p.list_price ?? p.list_unit_price ?? p.sale_price ?? p.unit_price ?? 0
     );
+    const stock = Number(p.stock ?? p.current_stock ?? 0);
+    tr.dataset.stock = String(stock);
+    if (p.allow_negative) {
+      tr.dataset.allowNegative = '1';
+      allowNegativeStock = true;
+    }
     tr.querySelector('.product-id').value = p.id || p.product_id || '';
     tr.querySelector('.product-search').value = p.name || '';
     tr.querySelector('.product-unit-weight').value = unitWeight > 0 ? unitWeight : '';
@@ -445,6 +453,7 @@
                       data-list="${p.list_price ?? p.sale_price}"
                       data-unit-weight="${p.unit_weight || ''}"
                       data-weight-unit="${p.weight_unit || ''}"
+                      data-stock="${p.stock != null ? p.stock : 0}"
                       data-photo="${p.photo_url || ''}">${p.label}</button>`;
                 })
                 .join('') +
@@ -469,7 +478,7 @@
         bootstrap.Modal.getOrCreateInstance(document.getElementById('quickProductModal')).show();
         return;
       }
-      fillProductOnRow(tr, {
+      const productPayload = {
         id: btn.dataset.id,
         name: btn.dataset.name,
         sale_price: btn.dataset.price,
@@ -477,15 +486,85 @@
         unit_weight: btn.dataset.unitWeight || '',
         weight_unit: btn.dataset.weightUnit || '',
         photo_url: btn.dataset.photo || null,
+        stock: Number(btn.dataset.stock || 0),
         sale_mode: 'full',
-      });
+      };
       results.classList.add('d-none');
+      if (Number(productPayload.stock || 0) <= 0) {
+        showZeroStockWarning(tr, productPayload);
+        return;
+      }
+      fillProductOnRow(tr, productPayload);
       recalc();
     });
   }
 
+  function showZeroStockWarning(tr, productPayload) {
+    pendingZeroStock = { mode: 'select', tr, product: productPayload };
+    const nameEl = document.getElementById('zero-stock-product-name');
+    if (nameEl) nameEl.textContent = productPayload.name || 'This product';
+    const msg = document.getElementById('zero-stock-message');
+    if (msg) {
+      msg.textContent =
+        'This product is not available in stock. Add stock, cancel, or continue anyway (stock will go negative until the next purchase).';
+    }
+    const saleModal = document.getElementById('saleModal');
+    saleModal?.classList.add('modal-nested-open');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('zeroStockWarningModal')).show();
+  }
+
+  function showInsufficientStockWarning(serverMsg, payload, url) {
+    const match = String(serverMsg || '').match(/insufficient stock(?: weight)? for (.+)$/i);
+    const productName = (match && match[1] ? match[1].trim() : '') || 'This product';
+    pendingZeroStock = { mode: 'save', payload, url, productName };
+    const nameEl = document.getElementById('zero-stock-product-name');
+    if (nameEl) nameEl.textContent = productName;
+    const msg = document.getElementById('zero-stock-message');
+    if (msg) {
+      msg.textContent =
+        'Not enough stock for this sale. Add product/stock, cancel, or continue anyway (stock will go negative until the next purchase covers it).';
+    }
+    document.getElementById('saleModal')?.classList.add('modal-nested-open');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('zeroStockWarningModal')).show();
+  }
+
+  async function submitSalePayload(payload, url) {
+    const err = document.getElementById('sale-error');
+    const btn = document.getElementById('btn-save-sale');
+    btn.disabled = true;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        const msg = data.error || 'Sale failed';
+        if (/insufficient stock/i.test(msg) && !payload.allow_negative_stock) {
+          showInsufficientStockWarning(msg, payload, url);
+          return;
+        }
+        err.textContent = msg;
+        err.classList.remove('d-none');
+        return;
+      }
+      bootstrap.Modal.getInstance(document.getElementById('saleModal'))?.hide();
+      const invoiceUrl = data.invoice_url || '/sales/' + data.sale_id + '/invoice';
+      const sep = invoiceUrl.includes('?') ? '&' : '?';
+      window.location.href = invoiceUrl + sep + 'next=' + encodeURIComponent('/sales/');
+    } catch (e) {
+      err.textContent = 'Network error. Try again.';
+      err.classList.remove('d-none');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   function resetSaleModal() {
     editingSaleId = null;
+    allowNegativeStock = false;
+    pendingZeroStock = null;
     const title = document.getElementById('sale-modal-title');
     if (title) title.textContent = 'Add Sale';
     const saveBtn = document.getElementById('btn-save-sale');
@@ -1078,6 +1157,9 @@
           item.weight_unit = tr.querySelector('.product-weight-unit')?.value || '';
         }
       }
+      if (tr.dataset.allowNegative === '1' || allowNegativeStock) {
+        item.allow_negative_stock = true;
+      }
       items.push(item);
     });
     if (!items.length) {
@@ -1101,33 +1183,11 @@
       amount_paid: document.getElementById('amount-paid').value,
       discount: document.getElementById('sale-discount')?.value || 0,
       notes: document.getElementById('sale-notes').value,
+      allow_negative_stock: allowNegativeStock || items.some((i) => i.allow_negative_stock),
       items,
     };
-    const btn = document.getElementById('btn-save-sale');
-    btn.disabled = true;
     const url = editingSaleId ? `/sales/${editingSaleId}/replace` : '/sales/create';
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        err.textContent = data.error || 'Sale failed';
-        err.classList.remove('d-none');
-        return;
-      }
-      bootstrap.Modal.getInstance(document.getElementById('saleModal'))?.hide();
-      const invoiceUrl = data.invoice_url || '/sales/' + data.sale_id + '/invoice';
-      const sep = invoiceUrl.includes('?') ? '&' : '?';
-      window.location.href = invoiceUrl + sep + 'next=' + encodeURIComponent('/sales/');
-    } catch (e) {
-      err.textContent = 'Network error. Try again.';
-      err.classList.remove('d-none');
-    } finally {
-      btn.disabled = false;
-    }
+    submitSalePayload(payload, url);
   });
 
   ['quickCustomerModal', 'quickProductModal', 'quickVendorModal'].forEach((id) => {
@@ -1184,5 +1244,338 @@
     if (!e.target.closest('.lookup-results') && !e.target.closest('.product-search') && !e.target.closest('#customer-search')) {
       document.querySelectorAll('.lookup-results').forEach((el) => el.classList.add('d-none'));
     }
+  });
+
+  // —— Sale return ——
+  let returnMeta = null;
+
+  function returnLineValue(tr) {
+    const remValue = Number(tr.dataset.remValue || 0);
+    const remQty = Number(tr.dataset.remQty || 0);
+    const remW = tr.dataset.remWeight !== '' ? Number(tr.dataset.remWeight) : null;
+    const isOpen = tr.dataset.isOpen === '1';
+    if (isOpen && remW != null && remW > 0) {
+      const rw = Number(tr.querySelector('.return-weight')?.value || 0);
+      return remValue * (rw / remW);
+    }
+    const rq = Number(tr.querySelector('.return-qty')?.value || 0);
+    return remQty > 0 ? remValue * (rq / remQty) : 0;
+  }
+
+  function applyReturnRefundSplit(total) {
+    const cashEl = document.getElementById('return-cash');
+    const creditEl = document.getElementById('return-credit');
+    if (!cashEl || !creditEl) return;
+    const maxCash = Number(returnMeta?.cash_refundable || 0);
+    const status = (returnMeta?.payment_status || 'paid').toLowerCase();
+    let cash;
+    if (status === 'unpaid' || maxCash <= 0) {
+      cash = 0;
+    } else {
+      // Paid / partial: refund cash first up to collected amount
+      cash = Math.min(total, maxCash);
+    }
+    cashEl.value = money(cash);
+    creditEl.value = money(Math.max(0, total - cash));
+  }
+
+  function recalcReturnTotals() {
+    const rows = document.querySelectorAll('#return-lines tbody tr');
+    let total = 0;
+    rows.forEach((tr) => { total += returnLineValue(tr); });
+    total = Math.round(total * 100) / 100;
+    document.getElementById('return-total').value = money(total);
+    applyReturnRefundSplit(total);
+  }
+
+  function clampReturnLineInput(tr) {
+    if (!tr) return;
+    const isOpen = tr.dataset.isOpen === '1';
+    if (isOpen) {
+      const inp = tr.querySelector('.return-weight');
+      if (!inp) return;
+      const max = Number(tr.dataset.remWeight || 0);
+      let v = Number(inp.value);
+      if (inp.value === '' || Number.isNaN(v)) return;
+      if (v < 0) v = 0;
+      if (v > max) v = max;
+      inp.value = v;
+    } else {
+      const inp = tr.querySelector('.return-qty');
+      if (!inp) return;
+      const max = Number(tr.dataset.remQty || 0);
+      let v = Number(inp.value);
+      if (inp.value === '' || Number.isNaN(v)) return;
+      if (v < 0) v = 0;
+      if (v > max) v = max;
+      inp.value = v;
+    }
+  }
+
+  function fillReturnModal(data) {
+    returnMeta = data;
+    document.getElementById('return-sale-id').value = data.sale_id;
+    document.getElementById('return-invoice-label').textContent = data.invoice_no || '';
+    document.getElementById('return-customer').value = data.customer_name || 'Walk-in';
+    document.getElementById('return-cash-hint').textContent =
+      maxCashLabel(data.cash_refundable);
+    const tbody = document.querySelector('#return-lines tbody');
+    tbody.innerHTML = '';
+    (data.items || []).forEach((it) => {
+      const remQty = Number(it.quantity_remaining || 0);
+      const remW = it.weight_remaining != null ? Number(it.weight_remaining) : null;
+      const tr = document.createElement('tr');
+      tr.dataset.saleItemId = it.sale_item_id;
+      tr.dataset.remValue = it.remaining_value;
+      tr.dataset.remQty = remQty;
+      tr.dataset.remWeight = remW != null ? remW : '';
+      tr.dataset.isOpen = it.is_open ? '1' : '0';
+      const soldLabel = it.is_open && remW != null
+        ? `${remW} ${it.weight_unit || 'kg'}`
+        : String(remQty);
+      let inputHtml;
+      if (it.is_open && remW != null) {
+        inputHtml = `<div class="input-group input-group-sm justify-content-end">
+          <input type="number" step="0.001" min="0" max="${remW}" class="form-control form-control-sm text-end return-weight" value="0">
+          <span class="input-group-text">${it.weight_unit || 'kg'}</span>
+        </div>`;
+      } else {
+        inputHtml = `<input type="number" step="0.001" min="0" max="${remQty}" class="form-control form-control-sm text-end return-qty" value="0">`;
+      }
+      tr.innerHTML = `
+        <td class="fw-semibold">${escapeHtml(it.product_name)}</td>
+        <td class="text-end small">${soldLabel}</td>
+        <td class="text-end" style="min-width:120px">${inputHtml}</td>
+        <td class="text-end return-line-val">0.00</td>`;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('return-cash').value = '0.00';
+    document.getElementById('return-credit').value = '0.00';
+    document.getElementById('return-notes').value = '';
+    document.getElementById('return-error')?.classList.add('d-none');
+    const hint = document.getElementById('return-refund-hint');
+    if (hint) {
+      const st = (data.payment_status || 'paid').toLowerCase();
+      if (st === 'unpaid') {
+        hint.textContent = 'Original sale was unpaid — return goes to customer account credit (reduces due).';
+      } else if (st === 'partial') {
+        hint.textContent = 'Partial sale — cash refund limited to amount collected; remainder goes to account credit.';
+      } else {
+        hint.textContent = 'Paid sale — cash refund preferred up to amount paid; remainder to account credit if any.';
+      }
+    }
+    recalcReturnTotals();
+  }
+
+  function maxCashLabel(n) {
+    return `(max ${money(n)})`;
+  }
+
+  function escapeHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.btn-return-sale');
+    if (!btn) return;
+    const saleId = btn.dataset.id;
+    const err = document.getElementById('return-error');
+    err?.classList.add('d-none');
+    try {
+      const res = await fetch('/sales/' + saleId + '/returnable');
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (_) {
+        alert('Could not open return. Please refresh the page and try again.');
+        return;
+      }
+      if (!data.ok) {
+        alert(data.error || 'Cannot open return');
+        return;
+      }
+      if (!(data.items || []).length) {
+        alert('Nothing left to return on this sale.');
+        return;
+      }
+      fillReturnModal(data);
+      const dateEl = document.getElementById('return-date');
+      if (dateEl && !dateEl.value) {
+        dateEl.value =
+          window.getErpWorkingDate?.() ||
+          document.body?.dataset?.workingDate ||
+          dateEl.dataset.today ||
+          '';
+      }
+      bootstrap.Modal.getOrCreateInstance(document.getElementById('returnSaleModal')).show();
+    } catch (err2) {
+      alert('Network error loading return.');
+    }
+  });
+
+  document.getElementById('return-lines')?.addEventListener('input', (e) => {
+    const tr = e.target.closest('tr');
+    if (!tr) return;
+    if (e.target.classList.contains('return-qty') || e.target.classList.contains('return-weight')) {
+      clampReturnLineInput(tr);
+    }
+    const val = returnLineValue(tr);
+    const cell = tr.querySelector('.return-line-val');
+    if (cell) cell.textContent = money(val);
+    recalcReturnTotals();
+  });
+
+  document.getElementById('return-lines')?.addEventListener('change', (e) => {
+    const tr = e.target.closest('tr');
+    if (!tr) return;
+    if (e.target.classList.contains('return-qty') || e.target.classList.contains('return-weight')) {
+      clampReturnLineInput(tr);
+      const val = returnLineValue(tr);
+      const cell = tr.querySelector('.return-line-val');
+      if (cell) cell.textContent = money(val);
+      recalcReturnTotals();
+    }
+  });
+
+  document.getElementById('return-cash')?.addEventListener('input', () => {
+    const total = Number(document.getElementById('return-total').value || 0);
+    const maxCash = Number(returnMeta?.cash_refundable || 0);
+    let cash = Number(document.getElementById('return-cash').value || 0);
+    if (cash > maxCash) cash = maxCash;
+    if (cash > total) cash = total;
+    if (cash < 0) cash = 0;
+    document.getElementById('return-credit').value = money(Math.max(0, total - cash));
+  });
+
+  document.getElementById('btn-return-all')?.addEventListener('click', () => {
+    document.querySelectorAll('#return-lines tbody tr').forEach((tr) => {
+      const isOpen = tr.dataset.isOpen === '1';
+      if (isOpen) {
+        const inp = tr.querySelector('.return-weight');
+        if (inp) inp.value = tr.dataset.remWeight || 0;
+      } else {
+        const inp = tr.querySelector('.return-qty');
+        if (inp) inp.value = tr.dataset.remQty || 0;
+      }
+      const cell = tr.querySelector('.return-line-val');
+      if (cell) cell.textContent = money(returnLineValue(tr));
+    });
+    recalcReturnTotals();
+  });
+
+  document.getElementById('btn-save-return')?.addEventListener('click', async () => {
+    const err = document.getElementById('return-error');
+    err.classList.add('d-none');
+    const saleId = document.getElementById('return-sale-id').value;
+    const items = [];
+    document.querySelectorAll('#return-lines tbody tr').forEach((tr) => {
+      clampReturnLineInput(tr);
+      const isOpen = tr.dataset.isOpen === '1';
+      const maxQty = Number(tr.dataset.remQty || 0);
+      const maxW = tr.dataset.remWeight !== '' ? Number(tr.dataset.remWeight) : null;
+      const row = { sale_item_id: Number(tr.dataset.saleItemId) };
+      if (isOpen) {
+        let w = Number(tr.querySelector('.return-weight')?.value || 0);
+        if (maxW != null && w > maxW) w = maxW;
+        if (w > 0) row.sale_weight = w;
+      } else {
+        let q = Number(tr.querySelector('.return-qty')?.value || 0);
+        if (q > maxQty) q = maxQty;
+        if (q > 0) row.quantity = q;
+      }
+      if (row.quantity || row.sale_weight) items.push(row);
+    });
+    if (!items.length) {
+      err.textContent = 'Enter a return quantity or weight on at least one line.';
+      err.classList.remove('d-none');
+      return;
+    }
+    const payload = {
+      return_date: document.getElementById('return-date').value,
+      refund_cash: document.getElementById('return-cash').value || 0,
+      refund_credit: document.getElementById('return-credit').value || 0,
+      notes: document.getElementById('return-notes').value || '',
+      items,
+    };
+    const btn = document.getElementById('btn-save-return');
+    btn.disabled = true;
+    try {
+      const res = await fetch('/sales/' + saleId + '/return', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        err.textContent = data.error || 'Return failed';
+        err.classList.remove('d-none');
+        return;
+      }
+      bootstrap.Modal.getInstance(document.getElementById('returnSaleModal'))?.hide();
+      window.location.reload();
+    } catch (e2) {
+      err.textContent = 'Network error. Try again.';
+      err.classList.remove('d-none');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('btn-zero-stock-continue')?.addEventListener('click', () => {
+    if (!pendingZeroStock) return;
+    const pending = pendingZeroStock;
+    pendingZeroStock = null;
+    bootstrap.Modal.getInstance(document.getElementById('zeroStockWarningModal'))?.hide();
+    document.getElementById('saleModal')?.classList.remove('modal-nested-open');
+
+    if (pending.mode === 'save') {
+      allowNegativeStock = true;
+      const payload = {
+        ...pending.payload,
+        allow_negative_stock: true,
+        items: (pending.payload.items || []).map((it) => ({
+          ...it,
+          allow_negative_stock: true,
+        })),
+      };
+      submitSalePayload(payload, pending.url);
+      return;
+    }
+
+    const { tr, product } = pending;
+    if (tr && product) {
+      fillProductOnRow(tr, { ...product, allow_negative: true });
+      recalc();
+    }
+  });
+
+  document.getElementById('btn-zero-stock-cancel')?.addEventListener('click', () => {
+    pendingZeroStock = null;
+    document.getElementById('saleModal')?.classList.remove('modal-nested-open');
+  });
+
+  document.getElementById('zeroStockWarningModal')?.addEventListener('hidden.bs.modal', () => {
+    document.getElementById('saleModal')?.classList.remove('modal-nested-open');
+  });
+
+  document.getElementById('btn-zero-stock-add-product')?.addEventListener('click', () => {
+    const pending = pendingZeroStock;
+    const name =
+      pending?.product?.name ||
+      pending?.productName ||
+      '';
+    if (pending?.mode === 'select') {
+      activeRow = pending.tr || activeRow;
+    }
+    pendingZeroStock = null;
+    bootstrap.Modal.getInstance(document.getElementById('zeroStockWarningModal'))?.hide();
+    const nameInput = document.getElementById('qp-name');
+    if (nameInput) nameInput.value = name;
+    window.PhotoPicker?.clear?.(document.getElementById('qp-photo-picker'));
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('quickProductModal')).show();
   });
 })();

@@ -79,27 +79,30 @@
 
 <div class="row g-3 mb-4">
   {% set kpis = [
-    ('Total Sale', metrics.total_sale, 'fa-sack-dollar', 'success'),
-    ('Total Cost', metrics.total_cost, 'fa-boxes-packing', 'secondary'),
-    ('Gross Profit', metrics.gross_profit, 'fa-chart-line', 'primary'),
-    ('Cash collected (no Prev / Expense)', metrics.cash_without_prev_and_expense, 'fa-wallet', 'info'),
-    ('Previous Balance', metrics.previous_balance, 'fa-scale-balanced', 'secondary'),
-    ('Total Expense', metrics.total_expense, 'fa-receipt', 'danger'),
-    ('Cash + Prev (before Expense)', metrics.cash_without_expense, 'fa-money-bills', 'primary'),
-    ('Cash In Hand (Prev − Expense)', metrics.cash_in_hand, 'fa-money-bill-wave', 'success'),
-    ('Net Profit', metrics.net_profit, 'fa-coins', 'success'),
-    ('Total Credit', metrics.total_credit, 'fa-hand-holding-dollar', 'warning'),
-    ('Total Purchasing', metrics.total_purchasing, 'fa-truck', 'dark'),
-    ('Stock Value', metrics.stock_value, 'fa-warehouse', 'info'),
+    ('Gross Sale', metrics.gross_sale, 'fa-sack-dollar', 'success', none),
+    ('Returns', metrics.total_returns, 'fa-rotate-left', 'danger', none),
+    ('Total Sale (after returns)', metrics.total_sale, 'fa-chart-pie', 'primary', none),
+    ('Total Cost (after returns)', metrics.total_cost, 'fa-boxes-packing', 'secondary', none),
+    ('Inventory Loss', metrics.inventory_loss, 'fa-triangle-exclamation', 'danger', none),
+    ('Gross Profit', metrics.gross_profit, 'fa-chart-line', 'primary', none),
+    ('Cash collected (no Prev / Expense)', metrics.cash_without_prev_and_expense, 'fa-wallet', 'info', none),
+    ('Previous Balance', metrics.previous_balance, 'fa-scale-balanced', 'secondary', none),
+    ('Total Expense', metrics.total_expense, 'fa-receipt', 'danger', none),
+    ('Cash + Prev (before Expense)', metrics.cash_without_expense, 'fa-money-bills', 'primary', none),
+    ('Cash In Hand (Prev − Expense)', metrics.cash_in_hand, 'fa-money-bill-wave', 'success', none),
+    ('Net Profit', metrics.net_profit, 'fa-coins', 'success', none),
+    ('Total Credit', metrics.total_credit, 'fa-hand-holding-dollar', 'warning', metrics.period_as_of and ('as of ' ~ metrics.period_as_of)),
+    ('Total Purchasing', metrics.total_purchasing, 'fa-truck', 'dark', none),
+    ('Stock Value', metrics.stock_value, 'fa-warehouse', 'info', metrics.period_as_of and ('as of ' ~ metrics.period_as_of)),
   ] %}
-  {% for title, value, icon, color in kpis %}
+  {% for title, value, icon, color, hint in kpis %}
   <div class="col-6 col-md-4 col-xl-3">
     <div class="card stat-card border-0 shadow-sm h-100">
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-start">
           <div>
-            <p class="text-muted small mb-1">{{ title }}</p>
-            <h3 class="mb-0 fw-bold">{{ '%.2f'|format(value|float) }}</h3>
+            <p class="text-muted small mb-1">{{ title }}{% if hint %} <span class="fw-normal">({{ hint }})</span>{% endif %}</p>
+            <h3 class="mb-0 fw-bold">{{ '%.2f'|format((value or 0)|float) }}</h3>
           </div>
           <div class="stat-icon bg-{{ color }}-subtle text-{{ color }}"><i class="fa-solid {{ icon }}"></i></div>
         </div>

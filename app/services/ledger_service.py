@@ -234,3 +234,125 @@ def delete_ledger_by_reference(reference_type, reference_id, rebuild=True):
         for party_type, party_id in parties:
             rebuild_party_balances(party_type, party_id, sync_party=False)
     return parties
+
+
+def party_balance_as_of(party_type: str, party_id: int, as_of_date) -> Decimal:
+    """Running balance at end of as_of_date (last ledger row on/before that day)."""
+    if as_of_date is None:
+        return _last_balance(party_type, party_id)
+    last = (
+        LedgerEntry.query.filter(
+            LedgerEntry.party_type == party_type,
+            LedgerEntry.party_id == party_id,
+            LedgerEntry.entry_date <= as_of_date,
+        )
+        .order_by(LedgerEntry.entry_date.desc(), LedgerEntry.id.desc())
+        .first()
+    )
+    return Decimal(str(last.balance_after)) if last else Decimal("0")
+
+
+def sum_party_balances_as_of(party_type: str, as_of_date, party_ids=None):
+    """
+    Sum party balances as of as_of_date.
+
+    Returns (total_positive, total_absolute_negative) — e.g. credit vs advance
+    for customers, payable vs prepaid for vendors.
+    """
+    from sqlalchemy import func
+
+    if as_of_date is None:
+        # Live denormalized balances on party tables
+        if party_type == "customer":
+            from app.models import Customer
+
+            q = Customer.query.filter_by(is_deleted=False)
+            if party_ids is not None:
+                if not party_ids:
+                    return Decimal("0"), Decimal("0")
+                q = q.filter(Customer.id.in_(party_ids))
+            credit = (
+                db.session.query(func.coalesce(func.sum(Customer.balance), 0))
+                .filter(Customer.is_deleted.is_(False), Customer.balance > 0)
+            )
+            advance = (
+                db.session.query(func.coalesce(func.sum(-Customer.balance), 0))
+                .filter(Customer.is_deleted.is_(False), Customer.balance < 0)
+            )
+            if party_ids is not None:
+                credit = credit.filter(Customer.id.in_(party_ids))
+                advance = advance.filter(Customer.id.in_(party_ids))
+            return Decimal(str(credit.scalar() or 0)), Decimal(str(advance.scalar() or 0))
+        if party_type == "vendor":
+            from app.models import Vendor
+
+            credit = (
+                db.session.query(func.coalesce(func.sum(Vendor.balance), 0))
+                .filter(Vendor.is_deleted.is_(False), Vendor.balance > 0)
+            )
+            advance = (
+                db.session.query(func.coalesce(func.sum(-Vendor.balance), 0))
+                .filter(Vendor.is_deleted.is_(False), Vendor.balance < 0)
+            )
+            if party_ids is not None:
+                if not party_ids:
+                    return Decimal("0"), Decimal("0")
+                credit = credit.filter(Vendor.id.in_(party_ids))
+                advance = advance.filter(Vendor.id.in_(party_ids))
+            return Decimal(str(credit.scalar() or 0)), Decimal(str(advance.scalar() or 0))
+        if party_type == "salesman":
+            from app.models import Salesman
+
+            credit = (
+                db.session.query(func.coalesce(func.sum(Salesman.balance), 0))
+                .filter(Salesman.is_deleted.is_(False), Salesman.balance > 0)
+            )
+            advance = (
+                db.session.query(func.coalesce(func.sum(-Salesman.balance), 0))
+                .filter(Salesman.is_deleted.is_(False), Salesman.balance < 0)
+            )
+            if party_ids is not None:
+                if not party_ids:
+                    return Decimal("0"), Decimal("0")
+                credit = credit.filter(Salesman.id.in_(party_ids))
+                advance = advance.filter(Salesman.id.in_(party_ids))
+            return Decimal(str(credit.scalar() or 0)), Decimal(str(advance.scalar() or 0))
+        return Decimal("0"), Decimal("0")
+
+    # As-of: last ledger row per party on/before date
+    q = (
+        db.session.query(
+            LedgerEntry.party_id,
+            LedgerEntry.balance_after,
+            LedgerEntry.entry_date,
+            LedgerEntry.id,
+        )
+        .filter(
+            LedgerEntry.party_type == party_type,
+            LedgerEntry.entry_date <= as_of_date,
+        )
+    )
+    if party_ids is not None:
+        if not party_ids:
+            return Decimal("0"), Decimal("0")
+        q = q.filter(LedgerEntry.party_id.in_(party_ids))
+
+    rows = q.order_by(
+        LedgerEntry.party_id.asc(),
+        LedgerEntry.entry_date.desc(),
+        LedgerEntry.id.desc(),
+    ).all()
+
+    seen = set()
+    positive = Decimal("0")
+    negative = Decimal("0")
+    for party_id, bal_after, _ed, _id in rows:
+        if party_id in seen:
+            continue
+        seen.add(party_id)
+        bal = Decimal(str(bal_after or 0))
+        if bal > 0:
+            positive += bal
+        elif bal < 0:
+            negative += abs(bal)
+    return positive, negative

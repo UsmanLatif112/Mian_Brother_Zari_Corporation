@@ -242,6 +242,9 @@ def _parse_sale_request(data):
                 "sale_mode": mode if has_weight else "qty",
                 "discount": line_discount,
                 "tax_rate": line.get("tax_rate", product.tax_rate or 0),
+                "allow_negative_stock": bool(
+                    line.get("allow_negative_stock") or data.get("allow_negative_stock")
+                ),
             }
         )
 
@@ -301,6 +304,7 @@ def _parse_sale_request(data):
         "payment_method": payment_method,
         "amount_paid": amount_paid,
         "notes": data.get("notes"),
+        "allow_negative_stock": bool(data.get("allow_negative_stock")),
     }
     return (payload, items), None
 
@@ -370,9 +374,54 @@ def index():
     sales = query.order_by(Sale.sale_date.desc(), Sale.id.desc()).limit(200).all()
 
     from app.services.journal_service import items_particulars
+    from app.models import SaleReturn, SaleReturnItem
 
     for s in sales:
         s.particulars = items_particulars(s.items, fallback="—", kind="sale")
+        s.row_kind = "sale"
+
+    returns_q = SaleReturn.query.options(
+        joinedload(SaleReturn.customer),
+        joinedload(SaleReturn.salesman),
+        joinedload(SaleReturn.sale),
+        joinedload(SaleReturn.items).joinedload(SaleReturnItem.product),
+    )
+    if range_start:
+        returns_q = returns_q.filter(SaleReturn.return_date >= range_start)
+    if range_end:
+        returns_q = returns_q.filter(SaleReturn.return_date <= range_end)
+    returns = returns_q.order_by(SaleReturn.return_date.desc(), SaleReturn.id.desc()).limit(200).all()
+
+    history_rows = []
+    for s in sales:
+        history_rows.append(
+            {
+                "kind": "sale",
+                "sort_date": s.sale_date,
+                "sort_id": s.id,
+                "sale": s,
+            }
+        )
+    for r in returns:
+        inv = r.sale.invoice_no if r.sale else ""
+        r.particulars = items_particulars(
+            r.items,
+            fallback=f"Return of {inv}" if inv else "Sale return",
+            kind="sale",
+        )
+        history_rows.append(
+            {
+                "kind": "return",
+                "sort_date": r.return_date,
+                "sort_id": r.id,
+                "ret": r,
+            }
+        )
+    history_rows.sort(
+        key=lambda row: (row["sort_date"] or "", row["sort_id"] or 0),
+        reverse=True,
+    )
+    history_rows = history_rows[:250]
 
     total_sale_q = db.session.query(func.coalesce(func.sum(Sale.grand_total), 0))
     from sqlalchemy import case
@@ -388,15 +437,20 @@ def index():
             0,
         )
     ).filter(Sale.payment_status != PaymentStatus.PAID)
+    total_returns_q = db.session.query(func.coalesce(func.sum(SaleReturn.grand_total), 0))
     if range_start:
         total_sale_q = total_sale_q.filter(Sale.sale_date >= range_start)
         total_credit_q = total_credit_q.filter(Sale.sale_date >= range_start)
+        total_returns_q = total_returns_q.filter(SaleReturn.return_date >= range_start)
     if range_end:
         total_sale_q = total_sale_q.filter(Sale.sale_date <= range_end)
         total_credit_q = total_credit_q.filter(Sale.sale_date <= range_end)
+        total_returns_q = total_returns_q.filter(SaleReturn.return_date <= range_end)
 
     total_sale = total_sale_q.scalar() or Decimal("0")
+    total_returns = total_returns_q.scalar() or Decimal("0")
     total_credit = total_credit_q.scalar() or Decimal("0")
+    net_sale = total_sale - total_returns
 
     customers = Customer.query.filter_by(is_deleted=False).order_by(Customer.name).all()
     products = Product.query.filter_by(is_deleted=False).order_by(Product.name).all()
@@ -416,8 +470,12 @@ def index():
     return render_template(
         "sales/index.html",
         sales=sales,
+        history_rows=history_rows,
         total_sale=total_sale,
+        total_returns=total_returns,
+        net_sale=net_sale,
         total_credit=total_credit,
+        period_as_of=range_end,
         selected_period=period,
         start_date=request.args.get("start_date") or "",
         end_date=request.args.get("end_date") or "",
@@ -567,6 +625,45 @@ def replace(sale_id):
         _audit_sale("update", sale)
         db.session.commit()
         return _sale_success(sale)
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@sales_bp.route("/<int:sale_id>/returnable")
+@login_required
+@permission_required("sales.view")
+def returnable(sale_id):
+    from app.services.sale_return_service import get_returnable_sale
+
+    try:
+        data = get_returnable_sale(sale_id)
+        return jsonify({"ok": True, **data})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+
+
+@sales_bp.route("/<int:sale_id>/return", methods=["POST"])
+@login_required
+@permission_required("sales.create")
+def create_return(sale_id):
+    from app.services.sale_return_service import create_sale_return
+
+    data = request.get_json(silent=True) or {}
+    try:
+        ret = create_sale_return(sale_id, data, current_user.id)
+        db.session.commit()
+        return jsonify(
+            {
+                "ok": True,
+                "return_id": ret.id,
+                "return_no": ret.return_no,
+                "grand_total": float(ret.grand_total or 0),
+            }
+        )
     except ValueError as exc:
         db.session.rollback()
         return jsonify({"ok": False, "error": str(exc)}), 400

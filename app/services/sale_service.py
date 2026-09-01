@@ -6,22 +6,45 @@ from app.models.sales import PaymentMethod, PaymentStatus
 from app.services.audit_service import log_audit
 from app.services.cashbook_service import record_cash_movement, reverse_cash_by_reference
 from app.services.fifo_service import fifo_deduct, fifo_deduct_open_weight, fifo_receive
+from app.services.inventory_loss_service import create_sale_backorder
 from app.services.ledger_service import delete_ledger_by_reference, post_ledger_entry, rebuild_party_balances
 from app.services.sync_service import enqueue_sync
 from app.utils.working_date import get_working_date
 
 
 def _sale_particulars_notes(sale) -> str:
-    """Short particulars for salesman / customer ledger notes."""
+    """Ledger notes: Sale INV-000021 / product particulars."""
+    inv = (getattr(sale, "invoice_no", None) or "").strip() or "—"
+    prefix = f"Sale {inv}"
     try:
-        from app.services.journal_service import _sale_line_particular
+        from app.services.journal_service import items_particulars
 
-        parts = [_sale_line_particular(it) for it in (sale.items or [])]
-        if parts:
-            return " · ".join(parts)
+        text = (items_particulars(sale.items or [], fallback="", kind="sale") or "").strip()
+        if text:
+            return f"{prefix} / {text}"
     except Exception:
         pass
-    return f"Sale {sale.invoice_no}"
+    return prefix
+
+
+def _sale_return_particulars_notes(ret, sale=None) -> str:
+    """Ledger notes: Return RET-… (INV-…) / product particulars."""
+    sale = sale or getattr(ret, "sale", None)
+    inv = (getattr(sale, "invoice_no", None) or "").strip() if sale else ""
+    rno = (getattr(ret, "return_no", None) or "").strip() or "—"
+    if inv:
+        prefix = f"Return {rno} ({inv})"
+    else:
+        prefix = f"Return {rno}"
+    try:
+        from app.services.journal_service import items_particulars
+
+        text = (items_particulars(ret.items or [], fallback="", kind="sale") or "").strip()
+        if text:
+            return f"{prefix} / {text}"
+    except Exception:
+        pass
+    return prefix
 
 
 def _post_salesman_sale_ledger(sale, grand, applied):
@@ -100,8 +123,11 @@ def create_sale(data, items, user_id):
             unit_weight = Decimal(str(unit_weight))
         else:
             unit_weight = None
+        allow_neg = bool(line.get("allow_negative_stock") or data.get("allow_negative_stock"))
+        backorder_qty = Decimal("0")
+        backorder_weight = None
         if (line.get("sale_mode") or "").strip().lower() == "open" and sale_weight and sale_weight > 0:
-            cogs, qty = fifo_deduct_open_weight(
+            cogs, qty, backorder_qty, backorder_weight = fifo_deduct_open_weight(
                 product,
                 sale_weight,
                 "sale_out",
@@ -110,11 +136,12 @@ def create_sale(data, items, user_id):
                 user_id,
                 entry_at=sale_date,
                 unit_weight=unit_weight,
+                allow_negative=allow_neg,
             )
             if qty > 0:
                 unit_price = line_total / qty
         else:
-            cogs = fifo_deduct(
+            cogs, backorder_qty = fifo_deduct(
                 product,
                 qty,
                 "sale_out",
@@ -123,6 +150,7 @@ def create_sale(data, items, user_id):
                 user_id,
                 entry_at=sale_date,
                 unit_weight=unit_weight,
+                allow_negative=allow_neg,
             )
         item = SaleItem(
             sale_id=sale.id,
@@ -138,6 +166,18 @@ def create_sale(data, items, user_id):
             weight_unit=weight_unit,
         )
         db.session.add(item)
+        db.session.flush()
+        if backorder_qty and Decimal(str(backorder_qty)) > 0:
+            create_sale_backorder(
+                sale_item_id=item.id,
+                product_id=product.id,
+                qty_backordered=backorder_qty,
+                weight_backordered=backorder_weight,
+            )
+            # Re-sync so stock includes this backorder row
+            from app.services.fifo_service import sync_product_stock
+
+            sync_product_stock(product)
         subtotal += line_total
 
     sale.subtotal = subtotal
@@ -191,7 +231,7 @@ def create_sale(data, items, user_id):
             entry_date=sale.sale_date,
             reference_type="sale",
             reference_id=sale.id,
-            notes=f"Sale {sale.invoice_no}",
+            notes=_sale_particulars_notes(sale),
         )
         if due > 0:
             customer.balance = Decimal(str(customer.balance or 0)) + due
@@ -274,7 +314,7 @@ def update_sale(sale_id, sale_date=None, notes=None, amount_paid=None, user_id=N
                 entry_date=sale.sale_date,
                 reference_type="sale",
                 reference_id=sale.id,
-                notes=f"Sale {sale.invoice_no}",
+                notes=_sale_particulars_notes(sale),
             )
             if new_excess > 0:
                 post_ledger_entry(
@@ -332,24 +372,49 @@ def void_sale(sale_id, user_id=None):
     if not sale:
         raise ValueError("Sale not found.")
 
+    from app.services.sale_return_service import sale_has_returns
+
+    if sale_has_returns(sale_id):
+        raise ValueError(
+            "This sale has returns. Delete or reverse those returns before voiding the sale."
+        )
+
     for item in list(sale.items):
         product = item.product
         qty = Decimal(str(item.quantity or 0))
         if qty <= 0:
             continue
-        cogs = Decimal(str(item.cost_of_goods or 0))
-        unit_cost = (cogs / qty) if qty else Decimal("0")
-        fifo_receive(
-            product,
-            qty,
-            unit_cost,
-            "sale_return",
-            sale.id,
-            user_id,
-            notes=f"Void sale {sale.invoice_no}",
-            sale_price=item.unit_price,
-            entry_at=sale.sale_date,
-        )
+
+        from app.models import SaleItemBackorder
+        from app.services.fifo_service import sync_product_stock
+
+        open_bo = Decimal("0")
+        bo = SaleItemBackorder.query.filter_by(sale_item_id=item.id).first()
+        if bo:
+            open_bo = Decimal(str(bo.qty_backordered or 0)) - Decimal(str(bo.qty_fulfilled or 0))
+            if open_bo < 0:
+                open_bo = Decimal("0")
+            db.session.delete(bo)
+            db.session.flush()
+
+        # Only put back qty that left physical layers (not still-open backorder debt)
+        restore_qty = qty - open_bo
+        if restore_qty > 0:
+            cogs = Decimal(str(item.cost_of_goods or 0))
+            unit_cost = (cogs / qty) if qty else Decimal("0")
+            fifo_receive(
+                product,
+                restore_qty,
+                unit_cost,
+                "sale_return",
+                sale.id,
+                user_id,
+                notes=f"Void sale {sale.invoice_no}",
+                sale_price=item.unit_price,
+                entry_at=sale.sale_date,
+            )
+        else:
+            sync_product_stock(product)
 
     reverse_cash_by_reference(
         "sale",

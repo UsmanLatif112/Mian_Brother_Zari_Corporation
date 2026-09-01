@@ -14,7 +14,8 @@ from app.models import (
 )
 from app.models.sales import PaymentStatus, SaleItem
 from app.services.cashbook_service import get_cash_dashboard_metrics, period_cash_collections
-from app.services.fifo_service import stock_valuation
+from app.services.fifo_service import stock_valuation, stock_valuation_as_of
+from app.services.ledger_service import sum_party_balances_as_of
 from app.services.account_service import account_previous_amount
 
 # Customer payment / credit types and allowed due days
@@ -201,6 +202,55 @@ def ensure_customer_type_column():
 
     try:
         _ensure_salesman_schema()
+    except Exception:
+        pass
+
+    try:
+        _ensure_sale_return_schema()
+    except Exception:
+        pass
+
+    try:
+        _ensure_inventory_loss_schema()
+    except Exception:
+        pass
+
+
+def _ensure_sale_return_schema():
+    """Create sale_returns / sale_return_items for existing databases."""
+    from app.models import SaleReturn, SaleReturnItem
+
+    try:
+        SaleReturn.__table__.create(db.engine, checkfirst=True)
+    except Exception:
+        pass
+    try:
+        SaleReturnItem.__table__.create(db.engine, checkfirst=True)
+    except Exception:
+        pass
+    # Relabel older return stock movements that were stored as purchase_in
+    try:
+        with db.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE stock_movements SET movement_type = 'sale_return_in' "
+                    "WHERE reference_type = 'sale_return' AND movement_type = 'purchase_in'"
+                )
+            )
+    except Exception:
+        pass
+
+
+def _ensure_inventory_loss_schema():
+    """Create inventory_losses / sale_item_backorders for existing databases."""
+    from app.models import InventoryLoss, SaleItemBackorder
+
+    try:
+        InventoryLoss.__table__.create(db.engine, checkfirst=True)
+    except Exception:
+        pass
+    try:
+        SaleItemBackorder.__table__.create(db.engine, checkfirst=True)
     except Exception:
         pass
 
@@ -542,7 +592,13 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
     start, end = _range_for_filter(period, start_date, end_date)
     today = get_working_date()
 
-    total_sale = _sum_period(Sale.grand_total, Sale.sale_date, start, end)
+    from app.models import SaleReturn, SaleReturnItem
+
+    gross_sale = _sum_period(Sale.grand_total, Sale.sale_date, start, end)
+    total_returns = _sum_period(SaleReturn.grand_total, SaleReturn.return_date, start, end)
+    # Dashboard Total Sale is always after returns
+    total_sale = gross_sale - total_returns
+
     total_purchasing = _sum_period(Purchase.grand_total, Purchase.purchase_date, start, end)
     expense_q = db.session.query(func.coalesce(func.sum(Expense.amount), 0)).filter(
         Expense.is_deleted.is_(False)
@@ -556,15 +612,34 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
     )
     for f in _filters(Sale.sale_date, start, end):
         cost_q = cost_q.filter(f)
-    total_cost = cost_q.scalar() or Decimal("0")
+    gross_cost = cost_q.scalar() or Decimal("0")
 
-    gross_profit = total_sale - total_cost
+    return_cost_q = db.session.query(func.coalesce(func.sum(SaleReturnItem.cost_of_goods), 0)).join(
+        SaleReturn, SaleReturn.id == SaleReturnItem.sale_return_id
+    )
+    for f in _filters(SaleReturn.return_date, start, end):
+        return_cost_q = return_cost_q.filter(f)
+    return_cost = return_cost_q.scalar() or Decimal("0")
+    total_cost = gross_cost - return_cost
+
+    from app.services.inventory_loss_service import period_inventory_loss
+
+    inventory_loss = period_inventory_loss(start, end)
+
+    # Gross / net use sale & COGS after returns; losses & expenses applied after that.
+    # Cash in hand = journal Total In + previous − expenses (loans stay journal Out).
+    gross_profit = total_sale - total_cost - inventory_loss
     net_profit = gross_profit - total_expense
-    total_credit = (
-        db.session.query(func.coalesce(func.sum(Customer.balance), 0))
-        .filter(Customer.is_deleted.is_(False), Customer.balance > 0)
-        .scalar()
-    ) or Decimal("0")
+    if end:
+        total_credit, _ = sum_party_balances_as_of("customer", end)
+        stock_value = stock_valuation_as_of(end)
+    else:
+        total_credit = (
+            db.session.query(func.coalesce(func.sum(Customer.balance), 0))
+            .filter(Customer.is_deleted.is_(False), Customer.balance > 0)
+            .scalar()
+        ) or Decimal("0")
+        stock_value = stock_valuation()
     cash_collections = period_cash_collections(start, end)
     cash_metrics = get_cash_dashboard_metrics(
         total_sale=cash_collections,
@@ -575,7 +650,6 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
     cash_in_hand = cash_metrics["cash_in_hand"]
     cash_without_expense = cash_metrics["cash_without_expense"]
     cash_without_prev_and_expense = cash_metrics["cash_without_prev_and_expense"]
-    stock_value = stock_valuation()
 
     # Chart series (aligned labels)
     group_fmt = "%Y-%m-%d" if start and end and (end - start).days <= 31 else "%Y-%m"
@@ -590,6 +664,16 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
         .group_by(func.strftime(group_fmt, Sale.sale_date))
         .all()
     }
+    returns_income = {
+        r[0]: float(r[1] or 0)
+        for r in db.session.query(
+            func.strftime(group_fmt, SaleReturn.return_date),
+            func.coalesce(func.sum(SaleReturn.grand_total), 0),
+        )
+        .filter(*_filters(SaleReturn.return_date, start, end))
+        .group_by(func.strftime(group_fmt, SaleReturn.return_date))
+        .all()
+    }
     sales_cost = {
         r[0]: float(r[1] or 0)
         for r in db.session.query(
@@ -599,6 +683,17 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
         .join(Sale, Sale.id == SaleItem.sale_id)
         .filter(*_filters(Sale.sale_date, start, end))
         .group_by(func.strftime(group_fmt, Sale.sale_date))
+        .all()
+    }
+    returns_cost = {
+        r[0]: float(r[1] or 0)
+        for r in db.session.query(
+            func.strftime(group_fmt, SaleReturn.return_date),
+            func.coalesce(func.sum(SaleReturnItem.cost_of_goods), 0),
+        )
+        .join(SaleReturn, SaleReturn.id == SaleReturnItem.sale_return_id)
+        .filter(*_filters(SaleReturn.return_date, start, end))
+        .group_by(func.strftime(group_fmt, SaleReturn.return_date))
         .all()
     }
     expense_map = {
@@ -611,8 +706,27 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
         .group_by(func.strftime(group_fmt, Expense.expense_date))
         .all()
     }
+    from app.models import InventoryLoss
 
-    all_buckets = sorted(set(sales_income) | set(sales_cost) | set(expense_map))
+    loss_map = {
+        r[0]: float(r[1] or 0)
+        for r in db.session.query(
+            func.strftime(group_fmt, InventoryLoss.loss_date),
+            func.coalesce(func.sum(InventoryLoss.amount), 0),
+        )
+        .filter(*_filters(InventoryLoss.loss_date, start, end))
+        .group_by(func.strftime(group_fmt, InventoryLoss.loss_date))
+        .all()
+    }
+
+    all_buckets = sorted(
+        set(sales_income)
+        | set(returns_income)
+        | set(sales_cost)
+        | set(returns_cost)
+        | set(expense_map)
+        | set(loss_map)
+    )
     chart_labels = []
     chart_income = []
     chart_cost = []
@@ -620,10 +734,11 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
     chart_gross = []
     chart_net = []
     for bucket in all_buckets[-24:]:
-        income_f = sales_income.get(bucket, 0.0)
-        cost_f = sales_cost.get(bucket, 0.0)
+        income_f = sales_income.get(bucket, 0.0) - returns_income.get(bucket, 0.0)
+        cost_f = sales_cost.get(bucket, 0.0) - returns_cost.get(bucket, 0.0)
         exp_f = expense_map.get(bucket, 0.0)
-        gross_f = income_f - cost_f
+        loss_f = loss_map.get(bucket, 0.0)
+        gross_f = income_f - cost_f - loss_f
         net_f = gross_f - exp_f
         chart_labels.append(bucket)
         chart_income.append(income_f)
@@ -696,7 +811,10 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
 
     return {
         "total_sale": total_sale,
+        "gross_sale": gross_sale,
+        "total_returns": total_returns,
         "total_cost": total_cost,
+        "inventory_loss": inventory_loss,
         "gross_profit": gross_profit,
         "total_expense": total_expense,
         "net_profit": net_profit,
@@ -722,6 +840,7 @@ def get_dashboard_metrics(period="all", start_date=None, end_date=None):
         "recent_sales": recent_sales,
         "recent_purchases": recent_purchases,
         "selected_period": period,
+        "period_as_of": end,
         "start_date": start,
         "end_date": end,
     }

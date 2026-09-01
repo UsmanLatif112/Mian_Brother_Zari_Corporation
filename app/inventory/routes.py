@@ -314,9 +314,12 @@ def _create_inventory_products(data, *, as_json=True):
 
 
 def _inventory_page(form=None, open_modal=False):
-    from datetime import time
-
     from app.services.dashboard_service import _range_for_filter
+    from app.services.fifo_service import (
+        products_stock_as_of,
+        stock_valuation,
+        stock_valuation_as_of,
+    )
 
     category_id = request.args.get("category_id", type=int)
     period = request.args.get("period", "all")
@@ -337,49 +340,24 @@ def _inventory_page(form=None, open_modal=False):
         q = q.filter(
             db.or_(Product.category_id == category_id, Product.subcategory_id == category_id)
         )
-    if range_start and range_end:
-        start_dt = datetime.combine(range_start, time.min)
-        end_dt = datetime.combine(range_end, time.max)
-        product_ids = (
-            db.session.query(StockLayer.product_id)
-            .filter(
-                StockLayer.received_at >= start_dt,
-                StockLayer.received_at <= end_dt,
-            )
-            .distinct()
-        )
-        q = q.filter(Product.id.in_(product_ids))
+    # Period filter is as-of end date for stock cards/rows — do not hide products
+    # that only had receipts outside the window.
 
     products = q.order_by(Product.name).all()
     categories = Category.query.filter_by(is_deleted=False, parent_id=None).order_by(Category.name).all()
     if not open_modal:
         open_modal = bool(session.pop("open_inventory_modal", False))
 
-    from app.services.fifo_service import stock_valuation
-
-    # Same valuation as dashboard (open layers × unit cost). When filtered, sum
-    # remaining value for the products currently listed.
-    if category_id or (range_start and range_end):
-        product_ids = [p.id for p in products]
-        if product_ids:
-            filtered_val = (
-                db.session.query(
-                    func.coalesce(
-                        func.sum(StockLayer.quantity_remaining * StockLayer.unit_cost),
-                        0,
-                    )
-                )
-                .filter(
-                    StockLayer.product_id.in_(product_ids),
-                    StockLayer.quantity_remaining > 0,
-                )
-                .scalar()
-            )
-            stock_value = Decimal(str(filtered_val or 0))
-        else:
-            stock_value = Decimal("0")
+    product_ids = [p.id for p in products]
+    if range_end:
+        stock_value = stock_valuation_as_of(range_end, product_ids=product_ids or None)
+        stock_as_of = products_stock_as_of(range_end, product_ids=product_ids or None)
+    elif category_id:
+        stock_value = stock_valuation_as_of(None, product_ids=product_ids or None)
+        stock_as_of = None
     else:
         stock_value = stock_valuation()
+        stock_as_of = None
 
     return render_template(
         "inventory/index.html",
@@ -393,6 +371,8 @@ def _inventory_page(form=None, open_modal=False):
         end_date=end_raw,
         stock_value=stock_value,
         product_count=len(products),
+        stock_as_of=stock_as_of,
+        period_as_of=range_end,
     )
 
 
@@ -538,17 +518,37 @@ def detail(product_id):
             StockMovement.created_at <= end_dt,
         )
 
-    layers = layers_q.order_by(StockLayer.received_at.desc(), StockLayer.id.desc()).all()
+    layers = layers_q.order_by(StockLayer.id.desc()).all()
     movements = (
-        movements_q.order_by(StockMovement.created_at.desc()).limit(100).all()
+        movements_q.order_by(StockMovement.created_at.desc(), StockMovement.id.desc()).limit(100).all()
     )
     open_batch_count = sum(1 for L in layers if L.has_stock())
     closed_batch_count = sum(1 for L in layers if not L.has_stock())
-    total_stock = sum((L.stock_qty_equivalent for L in layers), Decimal("0"))
-    total_stock_value = sum(
-        (L.stock_qty_equivalent * (L.unit_cost or 0) for L in layers if L.has_stock()),
-        Decimal("0"),
+
+    from app.services.fifo_service import product_stock_as_of, stock_valuation_as_of
+    from app.services.inventory_loss_service import list_open_backorders, open_backorder_qty
+    from app.utils.weight_utils import format_qty_display
+
+    pending_backorder_qty = open_backorder_qty(product.id)
+    pending_backorders = list_open_backorders(product.id)
+    pending_backorder_display = format_qty_display(
+        pending_backorder_qty,
+        product.unit_weight,
+        product.weight_unit or "kg",
     )
+
+    if range_end:
+        total_stock = product_stock_as_of(product.id, range_end)
+        total_stock_value = stock_valuation_as_of(range_end, product_ids=[product.id])
+        stock_display = f"{float(total_stock):.3f}".rstrip("0").rstrip(".")
+    else:
+        total_stock = Decimal(str(product.current_stock or 0))
+        total_stock_value = sum(
+            (L.stock_qty_equivalent * (L.unit_cost or 0) for L in layers if L.has_stock()),
+            Decimal("0"),
+        )
+        stock_display = product.stock_total_display
+
     form = ProductForm(obj=product)
     form.category_id.data = product.category_id
     form.subcategory_id.data = product.subcategory_id
@@ -559,13 +559,18 @@ def detail(product_id):
         movements=movements,
         total_stock=total_stock,
         total_stock_value=total_stock_value,
+        stock_display=stock_display,
         open_batch_count=open_batch_count,
         closed_batch_count=closed_batch_count,
+        pending_backorder_qty=pending_backorder_qty,
+        pending_backorder_display=pending_backorder_display,
+        pending_backorders=pending_backorders,
         form=form,
         today=date.today(),  # calendar day for expiry highlighting only
         selected_period=period,
         start_date=start_raw,
         end_date=end_raw,
+        period_as_of=range_end,
         categories=Category.query.filter_by(is_deleted=False, parent_id=None).order_by(Category.name).all(),
     )
 
@@ -700,17 +705,13 @@ def edit_layer_entry(layer_id):
             )
         layer.quantity_received = new_purchased
 
-        if layer.has_stock():
-            reprice_batch(
-                layer,
-                unit_cost=purchase_price,
-                sale_price=sale_price,
-                user_id=current_user.id,
-                notes="Edited inventory entry",
-            )
-        else:
-            layer.unit_cost = purchase_price
-            layer.sale_price = sale_price
+        reprice_batch(
+            layer,
+            unit_cost=purchase_price,
+            sale_price=sale_price,
+            user_id=current_user.id,
+            notes=None,  # movement notes = "Reprice: cost old→new"
+        )
 
         from app.services.fifo_service import sync_product_stock
 
@@ -750,7 +751,7 @@ def edit_layer_entry(layer_id):
             ),
         )
         db.session.commit()
-        flash("Inventory entry updated (purchase & vendor payable synced).", "success")
+        flash("Inventory entry updated (purchase, vendor payable & sold cost synced).", "success")
     except Exception as exc:
         db.session.rollback()
         flash(str(exc), "danger")
@@ -856,7 +857,7 @@ def reprice_layer(layer_id):
             ),
         )
         db.session.commit()
-        flash("Batch pricing updated (purchase & vendor payable synced).", "success")
+        flash("Batch pricing updated (purchase, sold cost & dashboard synced).", "success")
     except Exception as exc:
         db.session.rollback()
         flash(str(exc), "danger")
@@ -897,7 +898,10 @@ def reprice_product_remaining(product_id):
             ),
         )
         db.session.commit()
-        flash(f"Updated pricing on {count} open batch(es). Sold stock not affected.", "success")
+        flash(
+            f"Repriced {count} batch(es); sold cost of goods & dashboard updated.",
+            "success",
+        )
     except Exception as exc:
         db.session.rollback()
         flash(str(exc), "danger")

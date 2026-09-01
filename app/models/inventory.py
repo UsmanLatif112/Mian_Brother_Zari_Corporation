@@ -223,3 +223,54 @@ class InventoryAdjustment(db.Model):
 
     product = db.relationship("Product")
     created_by = db.relationship("User")
+
+
+class InventoryLoss(db.Model):
+    """
+    Non-cash inventory loss (shrinkage / shortage).
+
+    Does NOT affect cash in hand — only gross/net profit on the dashboard.
+    """
+
+    __tablename__ = "inventory_losses"
+
+    id = db.Column(db.Integer, primary_key=True)
+    loss_date = db.Column(db.Date, nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False, index=True)
+    # adjustment_shortage | backorder_trueup (optional future)
+    source_type = db.Column(db.String(40), nullable=False, index=True)
+    source_id = db.Column(db.Integer, nullable=True)
+    quantity = db.Column(db.Numeric(18, 6), nullable=False, default=Decimal("0"))
+    unit_cost = db.Column(db.Numeric(14, 2), nullable=False, default=Decimal("0"))
+    amount = db.Column(db.Numeric(14, 2), nullable=False, default=Decimal("0"))
+    notes = db.Column(db.Text, nullable=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, nullable=False)
+
+    product = db.relationship("Product")
+    created_by = db.relationship("User")
+
+
+class SaleItemBackorder(db.Model):
+    """
+    Qty/weight sold when stock was insufficient (negative stock).
+
+    Later purchases fulfill these FIFO and true-up SaleItem.cost_of_goods.
+    """
+
+    __tablename__ = "sale_item_backorders"
+
+    id = db.Column(db.Integer, primary_key=True)
+    sale_item_id = db.Column(db.Integer, db.ForeignKey("sale_items.id"), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False, index=True)
+    qty_backordered = db.Column(db.Numeric(18, 6), nullable=False, default=Decimal("0"))
+    qty_fulfilled = db.Column(db.Numeric(18, 6), nullable=False, default=Decimal("0"))
+    weight_backordered = db.Column(db.Numeric(14, 3), nullable=True)
+    weight_fulfilled = db.Column(db.Numeric(14, 3), nullable=True)
+    # open | partial | closed
+    status = db.Column(db.String(20), nullable=False, default="open", index=True)
+    created_at = db.Column(db.DateTime, nullable=False)
+    updated_at = db.Column(db.DateTime, nullable=True)
+
+    sale_item = db.relationship("SaleItem", backref=db.backref("backorder", uselist=False))
+    product = db.relationship("Product")

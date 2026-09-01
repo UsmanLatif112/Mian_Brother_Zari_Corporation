@@ -82,11 +82,12 @@ def get_cash_in_hand() -> Decimal:
 
 def get_cash_dashboard_metrics(total_sale=None, previous_amount=None, total_expense=None) -> dict:
     """
-    Dashboard cash cards (collections-based, not credit sales):
-    - Cash (w/o Prev. Bal. & Expense) = cash actually received
+    Dashboard cash cards. Collections = General Journal Total In
+    (no previous, no expense; customer loans are Out, not In).
+    - Cash (w/o Prev. Bal. & Expense) = journal Total In
     - Previous Balance = Account previous amount
-    - Cash (w/o Expense) = collections + Previous Amount
-    - Cash In Hand = collections + Previous Amount - Expense
+    - Cash (w/o Expense) = journal Total In + Previous Amount
+    - Cash In Hand = journal Total In + Previous Amount - Expense
     """
     sale = Decimal(str(total_sale if total_sale is not None else 0))
     prev = Decimal(str(previous_amount if previous_amount is not None else 0))
@@ -102,14 +103,16 @@ def get_cash_dashboard_metrics(total_sale=None, previous_amount=None, total_expe
 
 def period_cash_collections(start=None, end=None) -> Decimal:
     """
-    Cash actually received in the period:
-    - Sale amount paid (cash at sale time)
-    - Customer advance / account settle collections
-    - Vendor loan cash in
-    Minus customer loans (cash out to customer).
+    Same figure as General Journal Total In for the period:
+    - Sale cash received (amount_paid)
+    - Customer advance / account settle
+    - Vendor loan (cash in)
+    - Expense settle (replenish till)
+    - Other cash-book In (manual / misc)
+    Customer loans and expenses are Out — not subtracted here.
     Credit/unpaid sale totals are excluded.
     """
-    from app.models import CustomerReceiving, Sale, VendorPayment
+    from app.models import CashBookEntry, CustomerReceiving, Expense, ExpenseSettlement, Sale, VendorPayment
 
     cash = Decimal("0")
 
@@ -128,16 +131,6 @@ def period_cash_collections(start=None, end=None) -> Decimal:
         )
     cash += Decimal(str(cust_in_q.scalar() or 0))
 
-    cust_loan_q = db.session.query(func.coalesce(func.sum(CustomerReceiving.amount), 0)).filter(
-        CustomerReceiving.payment_type == "loan"
-    )
-    if start and end:
-        cust_loan_q = cust_loan_q.filter(
-            CustomerReceiving.receiving_date >= start,
-            CustomerReceiving.receiving_date <= end,
-        )
-    cash -= Decimal(str(cust_loan_q.scalar() or 0))
-
     vendor_loan_q = db.session.query(func.coalesce(func.sum(VendorPayment.amount), 0)).filter(
         VendorPayment.payment_type == "loan"
     )
@@ -147,6 +140,47 @@ def period_cash_collections(start=None, end=None) -> Decimal:
             VendorPayment.payment_date <= end,
         )
     cash += Decimal(str(vendor_loan_q.scalar() or 0))
+
+    settlements = (
+        ExpenseSettlement.query.join(Expense)
+        .filter(Expense.is_deleted.is_(False))
+        .all()
+    )
+    for s in settlements:
+        e = s.expense
+        if not e:
+            continue
+        pay_date = s.settled_at.date() if s.settled_at else e.expense_date
+        if start and pay_date < start:
+            continue
+        if end and pay_date > end:
+            continue
+        cash += Decimal(str(s.amount or 0))
+
+    extra_in_q = db.session.query(func.coalesce(func.sum(CashBookEntry.amount), 0)).filter(
+        CashBookEntry.entry_type == "in",
+        ~CashBookEntry.category.in_(
+            [
+                "sales_collection",
+                "sale_return_refund",
+                "expense_spent",
+                "expense_settlement",
+                "customer_advance",
+                "customer_settle",
+                "customer_loan",
+                "vendor_advance",
+                "vendor_settle",
+                "vendor_loan",
+            ]
+        ),
+        ~CashBookEntry.category.like("void_%"),
+    )
+    if start and end:
+        extra_in_q = extra_in_q.filter(
+            CashBookEntry.entry_date >= start,
+            CashBookEntry.entry_date <= end,
+        )
+    cash += Decimal(str(extra_in_q.scalar() or 0))
 
     return cash
 

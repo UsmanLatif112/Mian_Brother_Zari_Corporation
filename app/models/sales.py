@@ -73,6 +73,53 @@ class SaleItem(db.Model):
         return f"/static/uploads/{self.photo}"
 
 
+class SaleReturn(TimestampMixin, db.Model):
+    """Merchandise return against an original sale (full or partial)."""
+
+    __tablename__ = "sale_returns"
+
+    id = db.Column(db.Integer, primary_key=True)
+    return_no = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    return_date = db.Column(db.Date, default=default_entry_date, nullable=False, index=True)
+    sale_id = db.Column(db.Integer, db.ForeignKey("sales.id"), nullable=False, index=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=True)
+    salesman_id = db.Column(db.Integer, db.ForeignKey("salesmen.id"), nullable=True)
+    subtotal = db.Column(db.Numeric(14, 2), default=Decimal("0"))
+    grand_total = db.Column(db.Numeric(14, 2), default=Decimal("0"))
+    # Cash paid back to customer
+    refund_cash = db.Column(db.Numeric(14, 2), default=Decimal("0"))
+    # Amount credited to customer account (reduces what they owe / creates advance)
+    refund_credit = db.Column(db.Numeric(14, 2), default=Decimal("0"))
+    notes = db.Column(db.Text, nullable=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+
+    sale = db.relationship("Sale", backref=db.backref("returns", lazy="dynamic"))
+    customer = db.relationship("Customer")
+    salesman = db.relationship("Salesman")
+    created_by = db.relationship("User")
+    items = db.relationship(
+        "SaleReturnItem", backref="sale_return", cascade="all, delete-orphan"
+    )
+
+
+class SaleReturnItem(db.Model):
+    __tablename__ = "sale_return_items"
+
+    id = db.Column(db.Integer, primary_key=True)
+    sale_return_id = db.Column(db.Integer, db.ForeignKey("sale_returns.id"), nullable=False)
+    sale_item_id = db.Column(db.Integer, db.ForeignKey("sale_items.id"), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+    quantity = db.Column(db.Numeric(18, 6), nullable=False)
+    sale_weight = db.Column(db.Numeric(14, 3), nullable=True)
+    weight_unit = db.Column(db.String(10), nullable=True)
+    unit_price = db.Column(db.Numeric(14, 2), nullable=False)
+    line_total = db.Column(db.Numeric(14, 2), nullable=False)
+    cost_of_goods = db.Column(db.Numeric(14, 2), default=Decimal("0"))
+
+    sale_item = db.relationship("SaleItem")
+    product = db.relationship("Product")
+
+
 class CustomerReceiving(db.Model):
     __tablename__ = "customer_receivings"
 

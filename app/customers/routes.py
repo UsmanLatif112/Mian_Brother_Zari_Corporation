@@ -4,6 +4,7 @@ from decimal import Decimal
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
 from app.extensions import db
 from app.forms import CustomerForm
@@ -45,6 +46,108 @@ def _opening_notes(customer):
     return "Old book balance" + (
         f" ({customer.old_book_no})" if customer.old_book_no else ""
     )
+
+
+def _attach_customer_ledger_particulars(ledger):
+    """Attach invoice_no + item particulars for sale / sale_return ledger rows.
+
+    Also refreshes notes to: Sale INV-… / particulars (and same for returns).
+    """
+    from app.models import Sale, SaleItem, SaleReturn, SaleReturnItem
+    from app.services.journal_service import items_particulars
+    from app.services.sale_service import _sale_particulars_notes, _sale_return_particulars_notes
+
+    sale_ids = [
+        int(e.reference_id)
+        for e in ledger
+        if (e.reference_type or "").lower() == "sale" and e.reference_id
+    ]
+    return_ids = [
+        int(e.reference_id)
+        for e in ledger
+        if (e.reference_type or "").lower() == "sale_return" and e.reference_id
+    ]
+
+    sales_map = {}
+    if sale_ids:
+        sales = (
+            Sale.query.options(joinedload(Sale.items).joinedload(SaleItem.product))
+            .filter(Sale.id.in_(sale_ids))
+            .all()
+        )
+        for sale in sales:
+            parts = items_particulars(
+                sale.items, fallback=sale.notes or "—", kind="sale"
+            )
+            sales_map[sale.id] = {
+                "invoice_no": sale.invoice_no,
+                "particulars": parts,
+                "notes": _sale_particulars_notes(sale),
+            }
+
+    returns_map = {}
+    if return_ids:
+        returns = (
+            SaleReturn.query.options(
+                joinedload(SaleReturn.items).joinedload(SaleReturnItem.product),
+                joinedload(SaleReturn.sale),
+            )
+            .filter(SaleReturn.id.in_(return_ids))
+            .all()
+        )
+        for ret in returns:
+            inv = ret.sale.invoice_no if ret.sale else ""
+            fallback = f"Return of {inv}" if inv else (ret.return_no or "Sale return")
+            returns_map[ret.id] = {
+                "invoice_no": ret.return_no or inv or "—",
+                "particulars": items_particulars(
+                    ret.items, fallback=fallback, kind="sale"
+                ),
+                "notes": _sale_return_particulars_notes(ret, ret.sale),
+            }
+
+    notes_dirty = False
+    for entry in ledger:
+        ref = (entry.reference_type or "").lower()
+        rid = int(entry.reference_id) if entry.reference_id else None
+        info = None
+        if ref == "sale" and rid:
+            info = sales_map.get(rid)
+        elif ref == "sale_return" and rid:
+            info = returns_map.get(rid)
+
+        entry.invoice_no = (info or {}).get("invoice_no") or "—"
+        if info and info.get("particulars"):
+            entry.particulars = info["particulars"]
+        else:
+            entry.particulars = entry.notes or "—"
+
+        desired = (info or {}).get("notes")
+        if desired and desired != (entry.notes or ""):
+            current = (entry.notes or "").strip()
+            inv = (info.get("invoice_no") or "").strip()
+            if ref == "sale":
+                bare = (
+                    not current
+                    or current == inv
+                    or current == f"Sale {inv}"
+                    or (current.lower().startswith("sale ") and " / " not in current)
+                )
+            else:
+                bare = (
+                    not current
+                    or current.lower().startswith("return ")
+                    and " / " not in current
+                )
+            if bare:
+                entry.notes = desired
+                notes_dirty = True
+
+    if notes_dirty:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
 
 def _ensure_customer_opening(customer):
@@ -125,25 +228,38 @@ def _customer_page(form=None, open_modal=False):
     customers = query.order_by(Customer.name).all()
     _heal_customers_opening(customers)
 
-    base = [Customer.is_deleted.is_(False)]
-    if range_start:
-        base.append(Customer.joined_date >= range_start)
+    from app.services.ledger_service import sum_party_balances_as_of
+
+    # Money cards: as-of end date for all active customers (type filter still applies).
+    # Do not use join-date for credit totals — that confuses period meaning.
     if range_end:
-        base.append(Customer.joined_date <= range_end)
-    if ctype and ctype != "all":
-        base.append(Customer.customer_type == ctype)
-    total_credit = (
-        db.session.query(func.coalesce(func.sum(Customer.balance), 0))
-        .filter(*base, Customer.balance > 0)
-        .scalar()
-        or Decimal("0")
-    )
-    total_advance = (
-        db.session.query(func.coalesce(func.sum(-Customer.balance), 0))
-        .filter(*base, Customer.balance < 0)
-        .scalar()
-        or Decimal("0")
-    )
+        type_ids = None
+        if ctype and ctype != "all":
+            type_ids = [
+                c.id
+                for c in Customer.query.filter_by(is_deleted=False, customer_type=ctype).all()
+            ]
+        total_credit, total_advance = sum_party_balances_as_of(
+            "customer", range_end, party_ids=type_ids
+        )
+        period_as_of = range_end
+    else:
+        base = [Customer.is_deleted.is_(False)]
+        if ctype and ctype != "all":
+            base.append(Customer.customer_type == ctype)
+        total_credit = (
+            db.session.query(func.coalesce(func.sum(Customer.balance), 0))
+            .filter(*base, Customer.balance > 0)
+            .scalar()
+            or Decimal("0")
+        )
+        total_advance = (
+            db.session.query(func.coalesce(func.sum(-Customer.balance), 0))
+            .filter(*base, Customer.balance < 0)
+            .scalar()
+            or Decimal("0")
+        )
+        period_as_of = None
 
     if not open_modal:
         open_modal = bool(session.pop("open_customer_modal", False))
@@ -154,6 +270,7 @@ def _customer_page(form=None, open_modal=False):
         form=form,
         total_credit=total_credit,
         total_advance=total_advance,
+        period_as_of=period_as_of,
         open_modal=open_modal,
         today=get_working_date().isoformat(),
         payment_types=PAYMENT_TYPES,
@@ -294,11 +411,24 @@ def detail(customer_id):
 
     ledger = ledger_q.order_by(LedgerEntry.entry_date.desc(), LedgerEntry.id.desc()).all()
     receivings = recv_q.order_by(CustomerReceiving.receiving_date.desc()).all()
+    _attach_customer_ledger_particulars(ledger)
+
+    from app.services.ledger_service import party_balance_as_of
+
+    if range_end:
+        display_balance = party_balance_as_of("customer", customer_id, range_end)
+        balance_as_of = range_end
+    else:
+        display_balance = Decimal(str(customer.balance or 0))
+        balance_as_of = None
+
     return render_template(
         "customers/detail.html",
         customer=customer,
         ledger=ledger,
         receivings=receivings,
+        display_balance=display_balance,
+        balance_as_of=balance_as_of,
         today=get_working_date().isoformat(),
         payment_types=PAYMENT_TYPES,
         selected_period=period,

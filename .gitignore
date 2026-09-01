@@ -1,14 +1,64 @@
+# Python
 .venv/
+venv/
 __pycache__/
 *.pyc
-instance/
-.env
-backups/
-*.db
+*.pyo
+*.pyd
 .mypy_cache/
 .pytest_cache/
+*.egg-info/
+.eggs/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Secrets & local config
+.env
+.env.*
+!.env.example
+!.env.online.example
+
+# Local databases & runtime data
+instance/
+instance_*/
+instance - Copy/
+*.db
+*.db-shm
+*.db-wal
+data/
+backups/
+databses/
+
+# User packages / scratch DB folders
+Saeed_New/
+new_test/
+
+# Desktop build output (PyInstaller)
 build/
 dist/
 *.spec.bak
-data/
+
+# Release artifacts — never commit zips or extracted app bundles
 releases/
+final release/
+*.zip
+
+# User uploads (logos, photos — per-install, not source code)
+app/static/uploads/
+
+# Test / import scratch data
+test/*.csv
+test/*.xlsx
+test/*.xls
+
+# Misc local files
+image.png
+*.log
+agent-tools/

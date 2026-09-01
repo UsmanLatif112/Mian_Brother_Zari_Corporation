@@ -1,7 +1,0 @@
-{% extends 'base.html' %}
-{% block title %}Cash Book{% endblock %}
-{% block content %}
-<h1 class="h3 mb-3">Cash Book</h1>
-<table class="table datatable"><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Balance</th></tr></thead>
-<tbody>{% for e in entries %}<tr><td>{{ e.entry_date }}</td><td>{{ e.entry_type }}</td><td>{{ e.category }}</td><td>{{ e.amount }}</td><td>{{ e.balance_after }}</td></tr>{% endfor %}</tbody></table>
-{% endblock %}

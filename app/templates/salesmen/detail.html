@@ -40,18 +40,18 @@
     <div class="col-md-4">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
-          <p class="text-muted small mb-1">Credit Outstanding</p>
-          <h3 class="mb-0 fw-bold {% if salesman.balance|float > 0 %}text-warning{% endif %}">
-            {{ '%.2f'|format(salesman.balance|float) }}
+          <p class="text-muted small mb-1">{% if balance_as_of %}Credit as of {{ balance_as_of }}{% else %}Credit Outstanding{% endif %}</p>
+          <h3 class="mb-0 fw-bold {% if display_balance|float > 0 %}text-warning{% endif %}">
+            {{ '%.2f'|format(display_balance|float) }}
           </h3>
-          <div class="small text-muted mt-1">Unpaid portion of sales they brought</div>
+          <div class="small text-muted mt-1">{% if balance_as_of %}Through selected period{% else %}Unpaid portion of sales they brought{% endif %}</div>
         </div>
       </div>
     </div>
     <div class="col-md-4">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body">
-          <p class="text-muted small mb-1">Total Sales</p>
+          <p class="text-muted small mb-1">Total Sales{% if balance_as_of %} <span class="fw-normal">(period)</span>{% endif %}</p>
           <h3 class="mb-0 fw-bold">{{ '%.2f'|format(total_sales|float) }}</h3>
         </div>
       </div>

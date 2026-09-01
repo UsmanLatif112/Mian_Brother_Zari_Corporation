@@ -72,24 +72,26 @@ def _vendor_page(form=None, open_modal=False):
 
     vendors = query.order_by(Vendor.name).all()
 
-    base = [Vendor.is_deleted.is_(False)]
-    if range_start and range_end:
-        start_dt = datetime.combine(range_start, time.min)
-        end_dt = datetime.combine(range_end, time.max)
-        base.extend([Vendor.created_at >= start_dt, Vendor.created_at <= end_dt])
+    from app.services.ledger_service import sum_party_balances_as_of
 
-    total_payable = (
-        db.session.query(func.coalesce(func.sum(Vendor.balance), 0))
-        .filter(*base, Vendor.balance > 0)
-        .scalar()
-        or Decimal("0")
-    )
-    total_prepaid = (
-        db.session.query(func.coalesce(func.sum(-Vendor.balance), 0))
-        .filter(*base, Vendor.balance < 0)
-        .scalar()
-        or Decimal("0")
-    )
+    if range_end:
+        total_payable, total_prepaid = sum_party_balances_as_of("vendor", range_end)
+        period_as_of = range_end
+    else:
+        total_payable = (
+            db.session.query(func.coalesce(func.sum(Vendor.balance), 0))
+            .filter(Vendor.is_deleted.is_(False), Vendor.balance > 0)
+            .scalar()
+            or Decimal("0")
+        )
+        total_prepaid = (
+            db.session.query(func.coalesce(func.sum(-Vendor.balance), 0))
+            .filter(Vendor.is_deleted.is_(False), Vendor.balance < 0)
+            .scalar()
+            or Decimal("0")
+        )
+        period_as_of = None
+
     return render_template(
         "vendors/index.html",
         vendors=vendors,
@@ -99,6 +101,7 @@ def _vendor_page(form=None, open_modal=False):
         payment_types=PAYMENT_TYPES,
         total_payable=total_payable,
         total_prepaid=total_prepaid,
+        period_as_of=period_as_of,
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
         end_date=period_end.isoformat() if period_end else "",
@@ -334,11 +337,23 @@ def detail(vendor_id):
             db.session.rollback()
 
     payments = pay_q.order_by(VendorPayment.payment_date.desc()).all()
+
+    from app.services.ledger_service import party_balance_as_of
+
+    if range_end:
+        display_balance = party_balance_as_of("vendor", vendor_id, range_end)
+        balance_as_of = range_end
+    else:
+        display_balance = Decimal(str(vendor.balance or 0))
+        balance_as_of = None
+
     return render_template(
         "vendors/detail.html",
         vendor=vendor,
         ledger=ledger,
         payments=payments,
+        display_balance=display_balance,
+        balance_as_of=balance_as_of,
         today=get_working_date().isoformat(),
         payment_types=PAYMENT_TYPES,
         selected_period=period,

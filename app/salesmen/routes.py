@@ -41,16 +41,19 @@ def _parse_date(value):
         return None
 
 
-def _sales_totals_by_salesman(salesman_ids):
-    """Map salesman_id → total grand_total of attributed sales."""
+def _sales_totals_by_salesman(salesman_ids, range_start=None, range_end=None):
+    """Map salesman_id → total grand_total of attributed sales (optionally by sale_date)."""
     if not salesman_ids:
         return {}
-    rows = (
+    q = (
         db.session.query(Sale.salesman_id, func.coalesce(func.sum(Sale.grand_total), 0))
         .filter(Sale.salesman_id.in_(salesman_ids))
-        .group_by(Sale.salesman_id)
-        .all()
     )
+    if range_start:
+        q = q.filter(Sale.sale_date >= range_start)
+    if range_end:
+        q = q.filter(Sale.sale_date <= range_end)
+    rows = q.group_by(Sale.salesman_id).all()
     return {int(sid): Decimal(str(total or 0)) for sid, total in rows}
 
 
@@ -71,17 +74,32 @@ def _salesman_page(form=None, open_modal=False):
         query = query.filter(Salesman.created_at >= start_dt, Salesman.created_at <= end_dt)
 
     salesmen = query.order_by(Salesman.name).all()
-    totals = _sales_totals_by_salesman([s.id for s in salesmen])
-    for s in salesmen:
-        s.total_sales = totals.get(s.id, Decimal("0"))
 
-    total_sales_all = sum((s.total_sales for s in salesmen), Decimal("0"))
-    total_credit = (
-        db.session.query(func.coalesce(func.sum(Salesman.balance), 0))
-        .filter(Salesman.is_deleted.is_(False), Salesman.balance > 0)
-        .scalar()
-        or Decimal("0")
+    from app.services.ledger_service import sum_party_balances_as_of
+
+    # Sales totals for the period across all active salesmen (not only those created in range)
+    all_ids = [s.id for s in Salesman.query.filter_by(is_deleted=False).all()]
+    period_totals = _sales_totals_by_salesman(
+        all_ids, range_start=range_start, range_end=range_end
     )
+    list_totals = _sales_totals_by_salesman(
+        [s.id for s in salesmen], range_start=range_start, range_end=range_end
+    )
+    for s in salesmen:
+        s.total_sales = list_totals.get(s.id, Decimal("0"))
+
+    total_sales_all = sum((period_totals.get(sid, Decimal("0")) for sid in all_ids), Decimal("0"))
+    if range_end:
+        total_credit, _ = sum_party_balances_as_of("salesman", range_end)
+        period_as_of = range_end
+    else:
+        total_credit = (
+            db.session.query(func.coalesce(func.sum(Salesman.balance), 0))
+            .filter(Salesman.is_deleted.is_(False), Salesman.balance > 0)
+            .scalar()
+            or Decimal("0")
+        )
+        period_as_of = None
 
     return render_template(
         "salesmen/index.html",
@@ -91,6 +109,7 @@ def _salesman_page(form=None, open_modal=False):
         today=get_working_date().isoformat(),
         total_sales_all=total_sales_all,
         total_credit=total_credit,
+        period_as_of=period_as_of,
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
         end_date=period_end.isoformat() if period_end else "",
@@ -233,7 +252,6 @@ def detail(salesman_id):
     from datetime import datetime, time
 
     from app.services.dashboard_service import _range_for_filter
-    from app.services.journal_service import _sale_line_particular
 
     salesman = db.session.get(Salesman, salesman_id)
     if not salesman or salesman.is_deleted:
@@ -254,12 +272,15 @@ def detail(salesman_id):
     ledger = ledger_q.order_by(LedgerEntry.entry_date.desc(), LedgerEntry.id.desc()).all()
 
     # Attach invoice + particulars for sale rows
+    from app.services.sale_service import _sale_particulars_notes
+
     sale_ids = [
         int(e.reference_id)
         for e in ledger
         if (e.reference_type or "").lower() == "sale" and e.reference_id
     ]
     sales_map = {}
+    notes_dirty = False
     if sale_ids:
         from app.models import SaleItem
 
@@ -269,10 +290,14 @@ def detail(salesman_id):
             .all()
         )
         for sale in sales:
-            parts = [_sale_line_particular(it) for it in sale.items]
+            from app.services.journal_service import items_particulars
+
             sales_map[sale.id] = {
                 "invoice_no": sale.invoice_no,
-                "particulars": " · ".join(parts) if parts else (sale.notes or "—"),
+                "particulars": items_particulars(
+                    sale.items, fallback=sale.notes or "—", kind="sale"
+                ),
+                "notes": _sale_particulars_notes(sale),
             }
 
     for entry in ledger:
@@ -280,17 +305,49 @@ def detail(salesman_id):
         entry.invoice_no = (info or {}).get("invoice_no") or "—"
         if (entry.entry_type or "").lower() == "sale" and info:
             entry.particulars = info.get("particulars") or entry.notes or "—"
+            desired = info.get("notes")
+            if desired and desired != (entry.notes or ""):
+                current = (entry.notes or "").strip()
+                inv = (info.get("invoice_no") or "").strip()
+                bare = (
+                    not current
+                    or current == inv
+                    or current == f"Sale {inv}"
+                    or (current.lower().startswith("sale ") and " / " not in current)
+                )
+                if bare:
+                    entry.notes = desired
+                    notes_dirty = True
         else:
             entry.particulars = entry.notes or "—"
 
-    totals = _sales_totals_by_salesman([salesman.id])
+    if notes_dirty:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    totals = _sales_totals_by_salesman(
+        [salesman.id], range_start=range_start, range_end=range_end
+    )
     total_sales = totals.get(salesman.id, Decimal("0"))
+
+    from app.services.ledger_service import party_balance_as_of
+
+    if range_end:
+        display_balance = party_balance_as_of("salesman", salesman.id, range_end)
+        balance_as_of = range_end
+    else:
+        display_balance = Decimal(str(salesman.balance or 0))
+        balance_as_of = None
 
     return render_template(
         "salesmen/detail.html",
         salesman=salesman,
         ledger=ledger,
         total_sales=total_sales,
+        display_balance=display_balance,
+        balance_as_of=balance_as_of,
         today=get_working_date().isoformat(),
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",

@@ -256,6 +256,9 @@ def register_error_handlers(app):
 
     @app.errorhandler(500)
     def server_error(e):
+        logging.getLogger(__name__).exception("HTTP 500: %s", e)
+        if app.debug:
+            raise
         return render_template("errors/500.html"), 500
 
 
@@ -314,20 +317,30 @@ def register_context_processors(app):
         if product is not None and hasattr(qty, "movement_type") and hasattr(qty, "quantity"):
             return format_movement_qty_display(qty, product)
 
-        # StockLayer passed as second arg (detail batches table)
-        if product is not None and hasattr(product, "open_weight_remaining"):
+        # StockLayer as value (legacy) OR packaging source as 2nd arg
+        layer = None
+        if hasattr(qty, "open_weight_remaining") and hasattr(qty, "quantity_remaining"):
+            layer = qty
+        elif product is not None and hasattr(product, "open_weight_remaining"):
             layer = product
-            sealed = Decimal(str(getattr(layer, "quantity_remaining", None) or qty or 0))
-            open_w = Decimal(str(getattr(layer, "open_weight_remaining", None) or 0))
+
+        if layer is not None and (
+            hasattr(qty, "open_weight_remaining") or product is layer
+        ):
             uw = getattr(layer, "effective_unit_weight", None)
             wu = getattr(layer, "effective_weight_unit", None) or "kg"
-            if uw and open_w > 0:
-                if sealed > 0:
-                    return f"{clean_number(sealed)} + {clean_number(open_w)} {wu}"
-                return f"{clean_number(open_w)} {wu}"
-            if uw:
+            # Layer object passed as qty → show available sealed + open
+            if hasattr(qty, "open_weight_remaining"):
+                sealed = Decimal(str(getattr(qty, "quantity_remaining", None) or 0))
+                open_w = Decimal(str(getattr(qty, "open_weight_remaining", None) or 0))
+                if uw and open_w > 0:
+                    if sealed > 0:
+                        return f"{clean_number(sealed)} + {clean_number(open_w)} {wu}"
+                    return f"{clean_number(open_w)} {wu}"
                 return format_qty_display(sealed, uw, wu)
-            return format_qty_display(sealed, None, wu)
+            # Numeric qty (purchased / used / remaining) + layer packaging
+            return format_qty_display(qty, uw, wu)
+
         if unit_weight is not None:
             return format_qty_display(qty, unit_weight, weight_unit or "kg")
         if product is not None:

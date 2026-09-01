@@ -122,6 +122,8 @@ class LedgerEntry(db.Model):
             return "Settle"
         if et == "opening":
             return "Opening"
+        if et == "sale_return":
+            return "Return"
         if et == "sale":
             if debit <= 0 and credit <= 0:
                 return "Sale"
@@ -150,4 +152,5 @@ class LedgerEntry(db.Model):
             "Loan": "bg-primary-subtle text-primary border border-primary-subtle",
             "Settle": "bg-success-subtle text-success border border-success-subtle",
             "Opening": "bg-secondary-subtle text-secondary border border-secondary-subtle",
+            "Return": "bg-info-subtle text-info border border-info-subtle",
         }.get(label, "bg-light text-dark border")

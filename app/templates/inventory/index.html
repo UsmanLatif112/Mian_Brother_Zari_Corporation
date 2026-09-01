@@ -46,7 +46,7 @@
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body d-flex justify-content-between align-items-start">
           <div>
-            <p class="text-muted small mb-1">Stock Value</p>
+            <p class="text-muted small mb-1">Stock Value{% if period_as_of %} <span class="fw-normal">(as of {{ period_as_of }})</span>{% endif %}</p>
             <h3 class="mb-0 fw-bold">{{ '%.2f'|format(stock_value|float) }}</h3>
           </div>
           <div class="stat-icon bg-info-subtle text-info"><i class="fa-solid fa-warehouse"></i></div>
@@ -102,7 +102,7 @@
             </a>
           </td>
           <td>{{ p.category.name if p.category else '—' }}</td>
-          <td class="text-end">{{ p.stock_total_display }}</td>
+          <td class="text-end">{% if stock_as_of is not none %}{{ '%.3f'|format((stock_as_of.get(p.id, 0)|float)) }}{% else %}{{ p.stock_total_display }}{% endif %}</td>
           <td class="text-end">{{ p.minimum_stock }}</td>
           <td class="text-end">{{ p.sale_price }}</td>
           <td>

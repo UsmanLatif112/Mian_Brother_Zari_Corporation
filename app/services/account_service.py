@@ -75,9 +75,9 @@ def computed_cash_in_hand(period="all", start_date=None, end_date=None) -> dict:
     """
     Same formula as dashboard (collections-based):
     - previous_balance from Account table chain
-    - cash_without_prev_and_expense = cash collections (paid sales + payments)
-    - cash_without_expense = collections + previous
-    - cash_in_hand = collections + previous - expense
+    - cash_without_prev_and_expense = General Journal Total In
+    - cash_without_expense = journal In + previous
+    - cash_in_hand = journal In + previous - expense
     """
     from app.models import Expense, Sale
     from app.services.cashbook_service import get_cash_dashboard_metrics, period_cash_collections
