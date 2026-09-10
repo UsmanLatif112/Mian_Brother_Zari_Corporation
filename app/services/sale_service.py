@@ -126,6 +126,17 @@ def create_sale(data, items, user_id, prefer_layer_ids=None):
         allow_neg = bool(line.get("allow_negative_stock") or data.get("allow_negative_stock"))
         backorder_qty = Decimal("0")
         backorder_weight = None
+        is_sale_edit = bool(data.get("is_sale_edit"))
+        from app.utils.movement_labels import sale_out_movement_notes
+
+        mv_notes = sale_out_movement_notes(
+            sale.invoice_no,
+            product,
+            qty,
+            sale_weight=sale_weight,
+            weight_unit=weight_unit,
+            is_edit=is_sale_edit,
+        )
         if (line.get("sale_mode") or "").strip().lower() == "open" and sale_weight and sale_weight > 0:
             cogs, qty, backorder_qty, backorder_weight = fifo_deduct_open_weight(
                 product,
@@ -134,6 +145,7 @@ def create_sale(data, items, user_id, prefer_layer_ids=None):
                 "sale",
                 sale.id,
                 user_id,
+                notes=mv_notes,
                 entry_at=sale_date,
                 unit_weight=unit_weight,
                 allow_negative=allow_neg,
@@ -149,6 +161,7 @@ def create_sale(data, items, user_id, prefer_layer_ids=None):
                 "sale",
                 sale.id,
                 user_id,
+                notes=mv_notes,
                 entry_at=sale_date,
                 unit_weight=unit_weight,
                 allow_negative=allow_neg,
@@ -368,8 +381,11 @@ def update_sale(sale_id, sale_date=None, notes=None, amount_paid=None, user_id=N
     return sale
 
 
-def void_sale(sale_id, user_id=None):
-    """Delete sale and reverse stock, cash, and ledger (customer balance rebuilt from ledger)."""
+def void_sale(sale_id, user_id=None, *, for_edit=False):
+    """Delete sale and reverse stock, cash, and ledger (customer balance rebuilt from ledger).
+
+    When for_edit=True (sale replace), stock restore is labeled Sale Edit not Void Reversal.
+    """
     sale = db.session.get(Sale, sale_id)
     if not sale:
         raise ValueError("Sale not found.")
@@ -406,14 +422,19 @@ def void_sale(sale_id, user_id=None):
         if restore_qty > 0:
             cogs = Decimal(str(item.cost_of_goods or 0))
             unit_cost = (cogs / qty) if qty else Decimal("0")
+            from app.utils.movement_labels import sale_restore_movement_notes
+
+            restore_source = "sale_edit" if for_edit else "sale_void"
             layer = fifo_receive(
                 product,
                 restore_qty,
                 unit_cost,
-                "sale_void",
+                restore_source,
                 sale.id,
                 user_id,
-                notes=f"Void sale {sale.invoice_no}",
+                notes=sale_restore_movement_notes(
+                    sale.invoice_no, product, item, for_edit=for_edit
+                ),
                 sale_price=item.unit_price,
                 entry_at=get_working_datetime(),
             )
@@ -425,7 +446,11 @@ def void_sale(sale_id, user_id=None):
     reverse_cash_by_reference(
         "sale",
         sale.id,
-        notes=f"Void sale {sale.invoice_no}",
+        notes=(
+            f"Sale edit {sale.invoice_no} — cash adjusted"
+            if for_edit
+            else f"Void sale {sale.invoice_no}"
+        ),
         created_by_id=user_id,
     )
 
@@ -452,7 +477,8 @@ def replace_sale(sale_id, data, items, user_id):
     if not sale:
         raise ValueError("Sale not found.")
     invoice_no = sale.invoice_no
-    restored_layers = void_sale(sale_id, user_id)
+    restored_layers = void_sale(sale_id, user_id, for_edit=True)
     payload = dict(data or {})
     payload["invoice_no"] = invoice_no
+    payload["is_sale_edit"] = True
     return create_sale(payload, items, user_id, prefer_layer_ids=restored_layers or None)

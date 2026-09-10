@@ -119,6 +119,7 @@
       err.textContent = '';
     }
     global.CustomerPhotos?.resetField?.(modal);
+    global.ErpModalNesting?.onChildShow?.(modalId);
     bootstrap.Modal.getOrCreateInstance(modal).show();
   }
 

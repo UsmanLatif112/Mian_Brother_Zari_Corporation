@@ -361,6 +361,12 @@ def register_context_processors(app):
 
         return movement_badge(movement)
 
+    @app.template_filter("movement_particulars")
+    def movement_particulars_filter(movement):
+        from app.utils.movement_labels import movement_particulars
+
+        return movement_particulars(movement)
+
     @app.template_filter("stock_display")
     def stock_display_filter(product):
         return format_stock_display(product)

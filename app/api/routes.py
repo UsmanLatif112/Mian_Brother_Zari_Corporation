@@ -3,6 +3,7 @@ from flask_login import login_required
 from sqlalchemy import or_
 from decimal import Decimal
 
+from app.extensions import db
 from app.utils.party_filters import apply_party_active_filter, parse_party_active
 from app.forms import CustomerForm
 from app.models import Category, Customer, ExpenseCategory, Product, Sale, Vendor

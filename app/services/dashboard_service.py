@@ -32,6 +32,16 @@ CUSTOMER_TYPE_META = {
 def ensure_customer_type_column():
     """Add missing customers / receiving / stock_layer columns (offline-safe)."""
     try:
+        from app.models import Setting
+        from app.version import APP_BUILD
+
+        row = Setting.query.filter_by(key="schema_migrations_build").first()
+        if row and str(row.value or "") == str(APP_BUILD):
+            return
+    except Exception:
+        pass
+
+    try:
         insp = inspect(db.engine)
         cols = {c["name"] for c in insp.get_columns("customers")}
         alters = []
@@ -63,6 +73,16 @@ def ensure_customer_type_column():
                             "BOOLEAN DEFAULT 1 NOT NULL"
                         )
                     )
+        except Exception:
+            pass
+
+    for table in ("customers", "vendors"):
+        try:
+            insp = inspect(db.engine)
+            cols = {c["name"] for c in insp.get_columns(table)}
+            if "cnic" not in cols:
+                with db.engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN cnic VARCHAR(20)"))
         except Exception:
             pass
 
@@ -228,6 +248,43 @@ def ensure_customer_type_column():
 
     try:
         _ensure_inventory_loss_schema()
+    except Exception:
+        pass
+
+    try:
+        _migrate_void_movement_types()
+    except Exception:
+        pass
+
+    try:
+        from app.services.settings_service import set_setting
+        from app.version import APP_BUILD
+
+        set_setting("schema_migrations_build", str(APP_BUILD))
+    except Exception:
+        pass
+
+
+def _migrate_void_movement_types():
+    """Relabel legacy void stock restores (not customer sale returns)."""
+    try:
+        with db.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE stock_movements SET movement_type = 'sale_void_in', "
+                    "reference_type = 'sale_void' "
+                    "WHERE movement_type = 'sale_return_in' "
+                    "AND LOWER(COALESCE(notes, '')) LIKE 'void sale%' "
+                    "AND COALESCE(reference_type, '') != 'sale_return'"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE stock_movements SET movement_type = 'sale_void_in' "
+                    "WHERE movement_type = 'sale_return_in' "
+                    "AND reference_type = 'sale_void'"
+                )
+            )
     except Exception:
         pass
 

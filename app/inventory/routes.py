@@ -608,7 +608,9 @@ def detail(product_id):
         )
 
     layers = layers_q.order_by(StockLayer.id.desc()).all()
-    movements = (
+    from app.utils.movement_labels import group_sale_edit_movements
+
+    movements = group_sale_edit_movements(
         movements_q.order_by(StockMovement.created_at.desc(), StockMovement.id.desc()).limit(100).all()
     )
     open_batch_count = sum(1 for L in layers if L.has_stock())

@@ -545,7 +545,7 @@ def fifo_receive(
     sync_product_stock(product)
     if source_type == "sale_return":
         mv_type = "sale_return_in"
-    elif source_type in ("sale_void", "sale_return_void"):
+    elif source_type in ("sale_void", "sale_return_void", "sale_edit"):
         mv_type = "sale_void_in"
     else:
         mv_type = "purchase_in"

@@ -18,6 +18,7 @@
 
   function openQuickProductModal(productName) {
     window._pendingSaleProductName = productName || '';
+    window.ErpModalNesting?.onChildShow?.('quickProductModal');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('quickProductModal')).show();
   }
 
@@ -445,7 +446,7 @@
       recalc();
     });
     tr.querySelector('.btn-remove-row')?.addEventListener('click', () => {
-      if (tbody.rows.length > 1) tr.remove();
+      if (tbody && tbody.rows.length > 1) tr.remove();
       recalc();
     });
     tr.querySelector('.btn-quick-product')?.addEventListener('click', () => {
@@ -750,18 +751,23 @@
 
   function openQuickCustomer(prefillName) {
     const modal = document.getElementById('quickCustomerModal');
-    document.getElementById('qc-name').value = prefillName || '';
-    document.getElementById('qc-phone').value = '';
-    document.getElementById('qc-cnic').value = '';
-    document.getElementById('qc-address').value = '';
-    document.getElementById('qc-book').value = '';
-    document.getElementById('qc-balance').value = '';
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val;
+    };
+    setVal('qc-name', prefillName || '');
+    setVal('qc-phone', '');
+    setVal('qc-cnic', '');
+    setVal('qc-address', '');
+    setVal('qc-book', '');
+    setVal('qc-balance', '');
     const err = document.getElementById('qc-error');
     if (err) {
       err.classList.add('d-none');
       err.textContent = '';
     }
     window.CustomerPhotos?.resetField?.(modal);
+    window.ErpModalNesting?.onChildShow?.('quickCustomerModal');
     bootstrap.Modal.getOrCreateInstance(modal).show();
   }
 
@@ -816,17 +822,22 @@
   });
 
   function openQuickSalesman(prefillName) {
-    document.getElementById('qs-name').value = prefillName || '';
-    document.getElementById('qs-phone').value = '';
-    document.getElementById('qs-company').value = '';
-    document.getElementById('qs-address').value = '';
-    document.getElementById('qs-balance').value = '';
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val;
+    };
+    setVal('qs-name', prefillName || '');
+    setVal('qs-phone', '');
+    setVal('qs-company', '');
+    setVal('qs-address', '');
+    setVal('qs-balance', '');
     const err = document.getElementById('qs-error');
     if (err) {
       err.classList.add('d-none');
       err.textContent = '';
     }
     window.PhotoPicker?.clear?.(document.getElementById('qs-photo-picker'));
+    window.ErpModalNesting?.onChildShow?.('quickSalesmanModal');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('quickSalesmanModal')).show();
   }
 
@@ -883,22 +894,24 @@
 
   document.getElementById('qc-save')?.addEventListener('click', async () => {
     const err = document.getElementById('qc-error');
-    err.classList.add('d-none');
+    err?.classList.add('d-none');
     const qcModal = document.getElementById('quickCustomerModal');
     const payload = {
-      name: document.getElementById('qc-name').value.trim(),
-      phone: document.getElementById('qc-phone').value.trim(),
+      name: document.getElementById('qc-name')?.value.trim() || '',
+      phone: document.getElementById('qc-phone')?.value.trim() || '',
       cnic: document.getElementById('qc-cnic')?.value.trim() || '',
-      address: document.getElementById('qc-address').value.trim(),
-      old_book_no: document.getElementById('qc-book').value.trim(),
-      opening_balance: document.getElementById('qc-balance').value || 0,
-      joined_date: document.getElementById('qc-date').value,
+      address: document.getElementById('qc-address')?.value.trim() || '',
+      old_book_no: document.getElementById('qc-book')?.value.trim() || '',
+      opening_balance: document.getElementById('qc-balance')?.value || 0,
+      joined_date: document.getElementById('qc-date')?.value || '',
       customer_type: document.getElementById('qc-type')?.value || 'good',
       photo_paths: window.CustomerPhotos?.collectNewPaths?.(qcModal) || [],
     };
     if (!payload.name) {
-      err.textContent = 'Customer name is required.';
-      err.classList.remove('d-none');
+      if (err) {
+        err.textContent = 'Customer name is required.';
+        err.classList.remove('d-none');
+      }
       return;
     }
     const res = await fetch('/api/customers/quick', {
@@ -908,8 +921,10 @@
     });
     const data = await res.json();
     if (!data.ok) {
-      err.textContent = data.error || 'Could not save customer';
-      err.classList.remove('d-none');
+      if (err) {
+        err.textContent = data.error || 'Could not save customer';
+        err.classList.remove('d-none');
+      }
       return;
     }
     document.getElementById('customer-id').value = data.id;
@@ -983,22 +998,16 @@
     submitSalePayload(payload, url);
   });
 
-  ['quickCustomerModal', 'quickProductModal', 'quickVendorModal'].forEach((id) => {
-    const el = document.getElementById(id);
-    el?.addEventListener('show.bs.modal', () => {
-      document.getElementById('saleModal')?.classList.add('modal-nested-open');
-    });
-    el?.addEventListener('hidden.bs.modal', () => {
-      const saleModal = document.getElementById('saleModal');
-      if (id === 'quickVendorModal') {
-        // Return to product modal after nested vendor add
+  ['quickCustomerModal', 'quickSalesmanModal', 'quickProductModal', 'quickVendorModal'].forEach((id) => {
+    window.ErpModalNesting?.bindQuickModal?.(id, (modalId) => {
+      if (modalId === 'quickVendorModal') {
         const qp = document.getElementById('quickProductModal');
         if (qp && !qp.classList.contains('show')) {
           bootstrap.Modal.getOrCreateInstance(qp).show();
         }
         return;
       }
-      saleModal?.classList.remove('modal-nested-open');
+      const saleModal = document.getElementById('saleModal');
       if (saleModal && !saleModal.classList.contains('show')) {
         bootstrap.Modal.getOrCreateInstance(saleModal).show();
       }

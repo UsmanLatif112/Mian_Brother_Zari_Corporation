@@ -337,8 +337,12 @@ def login():
             return redirect(next_url)
 
         # New PC: pull account from MySQL cloud registry into local SQLite (one-time, needs internet).
-        if not user and mysql_configured() and is_cloud_registry_reachable():
-            imported = import_user_from_mysql_registry(username, form.password.data or "")
+        if not user and mysql_configured() and is_cloud_registry_reachable(
+            timeout=1.5, mysql_fallback=False
+        ):
+            imported = import_user_from_mysql_registry(
+                username, form.password.data or "", ensure_table=False
+            )
             if imported:
                 db.session.add(imported)
                 db.session.flush()

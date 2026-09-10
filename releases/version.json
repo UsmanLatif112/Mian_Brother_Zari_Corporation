@@ -1,8 +1,8 @@
 {
-  "version": "1.6.9",
-  "build": 169,
+  "version": "1.7.1",
+  "build": 171,
   "released_at": "2026-09-01",
-  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.6.9.zip",
-  "sha256": "4de7c39f3900beb21af9548af50f9e5475359a940fa114dce699376b04a777a3",
-  "release_notes": "- Purchase entry: full sealed bags + loose kg (not one decimal like 12.5)\n- Sale edit void: stock restores correctly; re-sale uses void layers first (no orphan stock)\n- Recent movements: Void Reversal vs Sale Return In; Purchase/Reprice/Qty adjust labels & notes\n- Existing void movements relabeled on startup (not customer returns)\n- Inventory: Active/Inactive status (like customers/vendors); inactive hidden from sale modal\n- Dashboard & list charts restored on Sales, Purchases, Account, Journal, Expenses, and more\n- Customer/Vendor active filter defaults to All; filter by Active or Inactive as needed"
+  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.7.1.zip",
+  "sha256": "9da45bed969c1506a94b1a69c736f691bf84d8027e9341eeb2c25f15c27a1361",
+  "release_notes": "- Fixed Add Product modal on Inventory and Sales (form restored; nested modals work)\n- Fixed Add Customer and Add Vendor from Sales/Inventory (CNIC field, field layout, quick-add API)\n- Sale edit: stock restores correctly; movements show Sale Edit (not Void) with clear particulars\n- Sale edit qty change shows one net row in Recent Movements (e.g. 1 \u2192 2 shows \u22121, not two rows)\n- Modal nesting fix so all Add buttons open correctly across the app\n- Purchase entry: sealed bags + loose kg; void/reprice/movement labels improved\n- Inventory Active/Inactive filter; charts restored on dashboard and list pages\n- Faster login when offline; database migration preserves existing data"
 }

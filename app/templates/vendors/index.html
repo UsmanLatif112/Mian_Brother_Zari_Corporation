@@ -201,9 +201,9 @@
     <div class="col-12">
       {{ customer_photos_field(icon='fa-truck-field', label='Vendor photos', folder='vendors') }}
     </div>
-    <div class="col-md-5">{{ form.name.label(class='form-label') }}{{ form.name(class='form-control') }}</div>
-    <div class="col-md-5">{{ form.phone.label(class='form-label') }}{{ form.phone(class='form-control') }}</div>
-    <div class="col-md-4">
+    <div class="col-md-6">{{ form.name.label(class='form-label') }}{{ form.name(class='form-control') }}</div>
+    <div class="col-md-6">{{ form.phone.label(class='form-label') }}{{ form.phone(class='form-control') }}</div>
+    <div class="col-md-6">
       <label class="form-label">{{ form.cnic.label.text }} <span class="text-muted fw-normal">(optional)</span></label>
       {{ form.cnic(class='form-control', placeholder='CNIC') }}
     </div>
@@ -231,15 +231,15 @@
             <div class="col-12">
               {{ customer_photos_field(icon='fa-truck-field', label='Vendor photos', folder='vendors') }}
             </div>
-            <div class="col-md-5">
+            <div class="col-md-6">
               <label class="form-label">Name</label>
               <input name="name" class="form-control" required>
             </div>
-            <div class="col-md-5">
+            <div class="col-md-6">
               <label class="form-label">Phone</label>
               <input name="phone" class="form-control">
             </div>
-            <div class="col-md-4">
+            <div class="col-md-6">
               <label class="form-label">CNIC <span class="text-muted fw-normal">(optional)</span></label>
               <input name="cnic" class="form-control" placeholder="CNIC">
             </div>

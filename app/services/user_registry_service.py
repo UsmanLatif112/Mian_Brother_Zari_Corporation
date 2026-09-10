@@ -16,6 +16,7 @@ from sqlalchemy.engine import Engine
 logger = logging.getLogger(__name__)
 
 REGISTRY_TABLE = "erp_user_registry"
+_registry_table_ready = False
 
 
 def generate_registration_key() -> str:
@@ -32,7 +33,16 @@ def _engine() -> Engine | None:
     uri = _mysql_uri()
     if not uri:
         return None
-    return create_engine(uri, pool_pre_ping=True, pool_recycle=28000)
+    try:
+        connect_timeout = int(os.environ.get("MYSQL_CONNECT_TIMEOUT", "2"))
+    except (TypeError, ValueError):
+        connect_timeout = 2
+    return create_engine(
+        uri,
+        pool_pre_ping=True,
+        pool_recycle=28000,
+        connect_args={"connect_timeout": max(1, connect_timeout)},
+    )
 
 
 def mysql_configured() -> bool:
@@ -40,6 +50,9 @@ def mysql_configured() -> bool:
 
 
 def ensure_registry_table(engine: Engine | None = None) -> None:
+    global _registry_table_ready
+    if _registry_table_ready:
+        return
     eng = engine or _engine()
     if not eng:
         raise ValueError("MySQL is not configured. Set MYSQL_DATABASE_URI in .env.")
@@ -66,6 +79,7 @@ def ensure_registry_table(engine: Engine | None = None) -> None:
         conn.execute(text(sql))
         _ensure_mysql_license_columns(conn)
         conn.commit()
+    _registry_table_ready = True
 
 
 def _ensure_mysql_license_columns(conn) -> None:
@@ -236,15 +250,16 @@ def activate_user_on_mysql(username: str, key: str, machine_id: str) -> dict[str
     return {"ok": True, "cloud_id": cloud_id, "registration_key": db_key}
 
 
-def fetch_registry_user_full(username: str) -> dict[str, Any] | None:
+def fetch_registry_user_full(username: str, *, ensure_table: bool = True) -> dict[str, Any] | None:
     """Load full cloud registry row for login import."""
     eng = _engine()
     if not eng:
         return None
-    try:
-        ensure_registry_table(eng)
-    except Exception:
-        return None
+    if ensure_table:
+        try:
+            ensure_registry_table(eng)
+        except Exception:
+            return None
     with eng.connect() as conn:
         row = conn.execute(
             text(

@@ -1,1 +1,33 @@
+<form id="entity-form" autocomplete="off">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
+  <div class="row g-2 mb-2 align-items-end">
+    <div class="col-md-6">
+      <label class="form-label">Vendor <span class="text-danger">*</span></label>
+      <div class="position-relative">
+        <div class="input-group erp-input-group-quick">
+          <input type="text" id="vendor-search" class="form-control" placeholder="Search vendor…" autocomplete="off">
+          <button type="button" class="btn erp-btn-quick-add" id="btn-add-vendor" title="Add vendor">
+            <i class="fa-solid fa-plus"></i>
+          </button>
+        </div>
+        <input type="hidden" id="vendor_id" name="vendor_id" value="">
+        <div class="lookup-results d-none" id="vendor-results"></div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Invoice No. <span class="text-muted fw-normal">(optional)</span></label>
+      <input type="text" id="invoice_no" class="form-control" placeholder="Vendor invoice / bill no">
+    </div>
+    <div class="col-12">
+      <p class="small text-muted mb-0">Add multiple products from the same vendor in one purchase.</p>
+    </div>
+  </div>
+
+  <div id="inventory-lines" class="inv-lines"></div>
+
+  <button type="button" class="btn btn-sm erp-btn-add-row mb-1" id="btn-add-inv-row">
+    <i class="fa-solid fa-plus"></i> Add row
+  </button>
+  <div class="text-danger small mt-2 d-none" id="inv-form-error"></div>
+</form>

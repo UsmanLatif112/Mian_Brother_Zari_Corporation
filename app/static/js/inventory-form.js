@@ -1,5 +1,6 @@
 (function () {
   if (!window.CategoryLookup) return;
+  if (!document.getElementById('inventory-lines') || !document.getElementById('entity-form')) return;
 
   const linesEl = document.getElementById('inventory-lines');
   const form = document.getElementById('entity-form');
@@ -608,10 +609,5 @@
   });
 
   // Nested vendor modal stacking
-  document.getElementById('quickVendorModal')?.addEventListener('show.bs.modal', () => {
-    document.getElementById(hostModalId)?.classList.add('modal-nested-open');
-  });
-  document.getElementById('quickVendorModal')?.addEventListener('hidden.bs.modal', () => {
-    document.getElementById(hostModalId)?.classList.remove('modal-nested-open');
-  });
+  window.ErpModalNesting?.bindQuickModal?.('quickVendorModal');
 })();

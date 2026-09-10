@@ -1193,6 +1193,16 @@ p { margin-bottom: 0.45rem; }
 #saleModal .product-results {
   z-index: 2000;
 }
+/* Nested modals: parent stays open underneath child quick-add dialogs */
+.modal.modal-nested-open {
+  z-index: 1040 !important;
+}
+.modal.show:not(.modal-nested-open) {
+  z-index: 1060 !important;
+}
+.modal-backdrop.show {
+  z-index: 1055 !important;
+}
 .erp-form-modal .modal-header {
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--erp-border);

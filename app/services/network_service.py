@@ -81,15 +81,19 @@ def _any_tcp_reachable(targets: Iterable[tuple[str, int]], timeout: float) -> bo
     return False
 
 
-def is_cloud_registry_reachable(timeout: float = 3.0) -> bool:
+def is_cloud_registry_reachable(timeout: float = 3.0, *, mysql_fallback: bool = True) -> bool:
     """
     True when the cloud user registry (MySQL) can be reached.
 
     Registration and first-time login on a new PC depend on this — not on Google.
+    Set mysql_fallback=False on login to avoid a second slow SQL probe when TCP fails.
     """
     endpoint = _mysql_host_port()
     if endpoint and _tcp_reachable(endpoint[0], endpoint[1], timeout):
         return True
+
+    if not mysql_fallback:
+        return False
 
     try:
         from flask import has_app_context

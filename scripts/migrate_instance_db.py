@@ -78,7 +78,7 @@ def _row_counts(db_path: Path) -> dict:
     try:
         cur = conn.cursor()
         counts = {}
-        for t in ("customers", "vendors", "sales", "products", "users"):
+        for t in ("customers", "vendors", "sales", "products", "users", "stock_movements"):
             try:
                 cur.execute(f"SELECT COUNT(*) FROM {t}")
                 counts[t] = cur.fetchone()[0]
@@ -101,6 +101,16 @@ def migrate_instance_db(instance_dir: Path) -> dict:
 
     before = _column_snapshot(db_path)
     counts_before = _row_counts(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        void_before = conn.execute(
+            "SELECT COUNT(*) FROM stock_movements WHERE movement_type='sale_void_in'"
+        ).fetchone()[0]
+    except Exception:
+        void_before = 0
+    finally:
+        conn.close()
 
     import app.models  # noqa: F401
     from flask import Flask
@@ -136,6 +146,14 @@ def migrate_instance_db(instance_dir: Path) -> dict:
     after = _column_snapshot(db_path)
     counts_after = _row_counts(db_path)
 
+    conn = sqlite3.connect(db_path)
+    try:
+        void_after = conn.execute(
+            "SELECT COUNT(*) FROM stock_movements WHERE movement_type='sale_void_in'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
     added = {}
     for table, cols in KEY_COLUMNS.items():
         missing_before = [c for c in cols if c not in before.get(table, [])]
@@ -150,6 +168,8 @@ def migrate_instance_db(instance_dir: Path) -> dict:
         "new_tables": new_tables,
         "counts_before": counts_before,
         "counts_after": counts_after,
+        "void_movements_before": void_before,
+        "void_movements": void_after,
     }
 
 
@@ -177,6 +197,13 @@ def main() -> None:
         print("New tables:", ", ".join(result["new_tables"]))
     print("Row counts before:", result["counts_before"])
     print("Row counts after: ", result["counts_after"])
+    if result.get("void_movements") is not None:
+        print(
+            "sale_void_in movements:",
+            result.get("void_movements_before", "?"),
+            "->",
+            result["void_movements"],
+        )
     print(f"Backup: {result['backup']}")
 
 
