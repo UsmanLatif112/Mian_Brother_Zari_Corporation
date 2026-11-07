@@ -1,9 +1,10 @@
 """Application version — bump when releasing a desktop update."""
 
-APP_VERSION = "1.9.3"
-APP_BUILD = 193
+APP_VERSION = "1.9.4"
+APP_BUILD = 194
 
 # Used by make_release_manifest when --notes is omitted.
-RELEASE_NOTES = """- Fix customer/vendor profit: period filter no longer hides parties by join date
-- List columns: Status → Profit/Loss → Balance
-- Sync: customers/vendors/ledgers + profit metrics (logos via Super Admin online)"""
+RELEASE_NOTES = """- Final handoff build for shop Sync to Agri Books portal
+- Customer/vendor profit period + Status → Profit/Loss → Balance columns
+- Sync: customers, vendors, ledgers, profit metrics (logos via Super Admin online)
+- Device registration + MySQL sync ready for fresh install"""
