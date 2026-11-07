@@ -111,10 +111,10 @@ def company_detail(company_id: int):
             company.is_active = bool(form.is_active.data)
             _save_logo(form.logo.data, company)
             db.session.commit()
-            # Mirror inactive flag to all company users in registry
+            # Mirror logo + flags so offline packages / registry stay in sync
             for u in company.users:
                 mirror_user_to_registry(u)
-            flash("Company updated.", "success")
+            flash("Company updated. Logo applies to their online portal branding.", "success")
             return redirect(url_for("admin.company_detail", company_id=company.id))
     users = company.users.order_by(PortalUser.full_name).all()
     return render_template(

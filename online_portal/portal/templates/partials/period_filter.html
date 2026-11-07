@@ -8,6 +8,7 @@
   ('custom', 'Custom'),
 ] %}
 {% set active = selected_period and selected_period != 'all' %}
+{% set preserve = filter_preserve|default({}) %}
 <div class="header-page-filter dropdown" data-header-filter>
   <button type="button"
           class="btn btn-sm btn-outline-secondary header-filter-toggle{% if active %} is-active{% endif %}"
@@ -22,6 +23,11 @@
   </button>
   <div class="dropdown-menu dropdown-menu-start header-filter-menu p-0">
     <form method="get" class="header-filter-form p-2" id="portal-period-form">
+      {% for key, val in preserve.items() %}
+        {% if val not in (None, '') and key not in ('period', 'start_date', 'end_date') %}
+        <input type="hidden" name="{{ key }}" value="{{ val }}">
+        {% endif %}
+      {% endfor %}
       <label class="dash-filter-label">Period</label>
       <select name="period" class="form-select form-select-sm" id="period-filter" onchange="onPortalPeriodChange()">
         {% for value, text in periods %}

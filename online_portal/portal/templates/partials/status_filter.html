@@ -1,0 +1,35 @@
+{# Generic GET dropdown filter chip (Type / Status / Balance / Profit). #}
+{% set active = selected and selected != default %}
+<div class="header-page-filter dropdown" data-header-filter>
+  <button type="button"
+          class="btn btn-sm btn-outline-secondary header-filter-toggle{% if active %} is-active{% endif %}"
+          data-bs-toggle="dropdown"
+          data-bs-auto-close="outside"
+          aria-expanded="false"
+          title="{{ label }} filter"
+          aria-label="{{ label }} filter">
+    <i class="fa-solid {{ icon }}"></i>
+    <span class="header-filter-toggle-label">{{ label }}</span>
+    {% if active %}<span class="header-filter-dot" aria-hidden="true"></span>{% endif %}
+  </button>
+  <div class="dropdown-menu dropdown-menu-start header-filter-menu p-0">
+    <form method="get" class="header-filter-form p-2">
+      {% for key, val in preserve.items() %}
+        {% if val not in (None, '') %}
+        <input type="hidden" name="{{ key }}" value="{{ val }}">
+        {% endif %}
+      {% endfor %}
+      <label class="dash-filter-label">{{ label }}</label>
+      <select name="{{ field_name }}" class="form-select form-select-sm" onchange="this.form.submit()">
+        {% for value, text in options %}
+        <option value="{{ value }}" {% if selected == value %}selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+      </select>
+      {% if active and clear_url %}
+      <a href="{{ clear_url }}" class="header-filter-clear" title="Clear filter" aria-label="Clear filter">
+        <i class="fa-solid fa-xmark"></i>
+      </a>
+      {% endif %}
+    </form>
+  </div>
+</div>

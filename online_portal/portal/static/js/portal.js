@@ -41,18 +41,7 @@
     });
   });
 
-  const search = document.getElementById("global-search-input");
-  const table = document.querySelector("table.portal-search-table");
-  if (search && table) {
-    search.addEventListener("input", () => {
-      const q = (search.value || "").trim().toLowerCase();
-      table.querySelectorAll("tbody tr").forEach((row) => {
-        if (row.querySelector("td[colspan]")) return;
-        const text = (row.textContent || "").toLowerCase();
-        row.style.display = !q || text.includes(q) ? "" : "none";
-      });
-    });
-  }
+  // Table search is handled by portal-datatables.js when DataTables is present.
 
   function syncCustomDates() {
     const form = document.getElementById("portal-period-form");

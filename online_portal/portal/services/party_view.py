@@ -47,6 +47,74 @@ def list_balance_stats(rows) -> dict:
     }
 
 
+def row_get(row, name, default=None):
+    if hasattr(row, "get"):
+        return row.get(name, default)
+    return getattr(row, name, default)
+
+
+def attach_period_profit(rows, profit_map: dict) -> list[dict]:
+    """Copy mapping rows into mutable dicts with period_profit."""
+    out = []
+    for row in rows:
+        item = dict(row) if hasattr(row, "keys") else dict(row)
+        pid = int(item.get("id") or 0)
+        item["period_profit"] = _f(profit_map.get(pid, 0))
+        out.append(item)
+    return out
+
+
+def filter_by_active(rows, active: str) -> list:
+    active = (active or "all").lower()
+    if active == "active":
+        return [r for r in rows if row_get(r, "is_active") in (1, True, None)]
+    if active == "inactive":
+        return [r for r in rows if row_get(r, "is_active") in (0, False)]
+    return list(rows)
+
+
+def filter_by_customer_type(rows, ctype: str) -> list:
+    ctype = (ctype or "all").strip().lower()
+    if not ctype or ctype == "all":
+        return list(rows)
+    return [r for r in rows if str(row_get(r, "customer_type") or "good").lower() == ctype]
+
+
+def filter_by_vendor_balance(rows, status: str) -> list:
+    status = (status or "all").lower()
+    if status == "payable":
+        return [r for r in rows if _f(row_get(r, "balance")) > 0]
+    if status == "prepaid":
+        return [r for r in rows if _f(row_get(r, "balance")) < 0]
+    if status == "settled":
+        return [r for r in rows if abs(_f(row_get(r, "balance"))) < 0.0001]
+    return list(rows)
+
+
+def filter_by_profit(rows, profit: str) -> list:
+    profit = (profit or "all").lower()
+    if profit == "profit":
+        return [r for r in rows if _f(row_get(r, "period_profit")) > 0]
+    if profit == "loss":
+        return [r for r in rows if _f(row_get(r, "period_profit")) < 0]
+    if profit == "zero":
+        return [r for r in rows if abs(_f(row_get(r, "period_profit"))) < 0.0001]
+    return list(rows)
+
+
+def profit_list_stats(rows) -> dict:
+    total = sum(_f(row_get(r, "period_profit")) for r in rows)
+    profit_n = sum(1 for r in rows if _f(row_get(r, "period_profit")) > 0)
+    loss_n = sum(1 for r in rows if _f(row_get(r, "period_profit")) < 0)
+    return {
+        "total_period_profit": total,
+        "profit_count": profit_n,
+        "loss_count": loss_n,
+        "list_profit": total if total > 0 else 0.0,
+        "list_loss": (-total) if total < 0 else 0.0,
+    }
+
+
 def _iter_bucket_keys(start: date, end: date, *, daily: bool) -> list[str]:
     keys: list[str] = []
     if daily:

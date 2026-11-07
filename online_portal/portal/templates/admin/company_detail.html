@@ -25,7 +25,17 @@
             <input type="hidden" name="form_name" value="company">
             <div class="mb-3">{{ form.name.label(class='form-label') }}{{ form.name(class='form-control') }}</div>
             <div class="mb-3">{{ form.notes.label(class='form-label') }}{{ form.notes(class='form-control', rows=3) }}</div>
-            <div class="mb-3">{{ form.logo.label(class='form-label') }}{{ form.logo(class='form-control') }}</div>
+            <div class="mb-3">
+              {{ form.logo.label(class='form-label') }}
+              <p class="text-muted small mb-2">Upload the shop’s desktop app logo for this company (sidebar + favicon for their online login).</p>
+              {% if company.logo_data or company.logo_path %}
+              <div class="d-flex align-items-center gap-3 mb-2 p-2 border rounded bg-light">
+                <img src="{{ url_for('company_logo', company_id=company.id) }}" alt="Current logo" style="max-height:56px;max-width:120px;object-fit:contain">
+                <span class="small text-muted">Current logo — choose a new file below to replace</span>
+              </div>
+              {% endif %}
+              {{ form.logo(class='form-control') }}
+            </div>
             <div class="form-check mb-3">{{ form.is_active(class='form-check-input') }}{{ form.is_active.label(class='form-check-label') }}</div>
             {{ form.submit(class='btn btn-success') }}
           </form>

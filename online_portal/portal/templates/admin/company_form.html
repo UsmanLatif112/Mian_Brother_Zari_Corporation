@@ -9,7 +9,11 @@
         {{ form.hidden_tag() }}
         <div class="mb-3">{{ form.name.label(class='form-label') }}{{ form.name(class='form-control') }}</div>
         <div class="mb-3">{{ form.notes.label(class='form-label') }}{{ form.notes(class='form-control', rows=3) }}</div>
-        <div class="mb-3">{{ form.logo.label(class='form-label') }}{{ form.logo(class='form-control') }}</div>
+        <div class="mb-3">
+          {{ form.logo.label(class='form-label') }}
+          <p class="text-muted small mb-2">Optional. Upload the shop’s desktop app logo for their online portal branding.</p>
+          {{ form.logo(class='form-control') }}
+        </div>
         <div class="form-check mb-3">{{ form.is_active(class='form-check-input') }}{{ form.is_active.label(class='form-check-label') }}</div>
         {{ form.submit(class='btn btn-success') }}
         <a class="btn btn-outline-secondary" href="{{ url_for('admin.companies') }}">Cancel</a>

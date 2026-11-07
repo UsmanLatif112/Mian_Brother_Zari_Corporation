@@ -21,7 +21,6 @@
           {% endif %}
           <span class="badge customer-status-badge">{{ (customer.customer_type or 'good')|replace('_',' ')|title }}</span>
         </h1>
-        <p class="text-muted mb-0">View only</p>
       </div>
     </div>
   </div>
@@ -90,34 +89,30 @@
         <i class="fa-solid fa-print me-1"></i> Print
       </button>
     </div>
-    <div class="table-responsive">
-      <table class="table mb-0 portal-search-table w-100" id="customer-ledger-table">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Particulars</th>
-            <th>Type</th>
-            <th class="text-end">Debit</th>
-            <th class="text-end">Credit</th>
-            <th class="text-end">Balance</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for e in entries %}
-          <tr>
-            <td>{{ e.entry_date }}</td>
-            <td class="small">{{ e.notes or '—' }}</td>
-            <td>{{ entry_type_label(e.entry_type) }}</td>
-            <td class="text-end">{{ '%.2f'|format((e.debit or 0)|float) }}</td>
-            <td class="text-end">{{ '%.2f'|format((e.credit or 0)|float) }}</td>
-            <td class="text-end fw-semibold">{{ '%.2f'|format((e.balance_after or 0)|float) }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="6" class="text-muted p-3">No ledger entries for this period.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <table class="table datatable mb-0 w-100" id="customer-ledger-table" data-empty-table="No ledger entries for this period.">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Particulars</th>
+          <th>Type</th>
+          <th class="text-end">Debit</th>
+          <th class="text-end">Credit</th>
+          <th class="text-end">Balance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in entries %}
+        <tr>
+          <td>{{ e.entry_date }}</td>
+          <td class="small">{{ e.notes or '—' }}</td>
+          <td>{{ entry_type_label(e.entry_type) }}</td>
+          <td class="text-end">{{ '%.2f'|format((e.debit or 0)|float) }}</td>
+          <td class="text-end">{{ '%.2f'|format((e.credit or 0)|float) }}</td>
+          <td class="text-end fw-semibold">{{ '%.2f'|format((e.balance_after or 0)|float) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 {% endblock %}

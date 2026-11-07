@@ -154,7 +154,7 @@ def connectivity():
 @maintenance_bp.route("/push-mysql", methods=["POST"])
 @login_required
 def push_mysql():
-    """Push SQLite → MySQL (ledgers + company logo for online portal)."""
+    """Push SQLite → MySQL (customers, vendors, ledgers for online portal)."""
     wants_json = (
         request.headers.get("X-Requested-With") == "fetch"
         or request.accept_mimetypes.best == "application/json"

@@ -9,10 +9,10 @@ class CompanyForm(FlaskForm):
     notes = TextAreaField("Notes", validators=[Optional(), Length(max=2000)])
     is_active = BooleanField("Active", default=True)
     logo = FileField(
-        "Logo",
+        "Company / app logo",
         validators=[Optional(), FileAllowed(["jpg", "jpeg", "png", "webp", "gif"], "Images only")],
     )
-    submit = SubmitField("Save company")
+    submit = SubmitField("Save company & logo")
 
 
 class CompanyUserForm(FlaskForm):

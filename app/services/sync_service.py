@@ -18,18 +18,17 @@ from app.models import (
     LedgerEntry,
     SyncLog,
     SyncQueue,
-    User,
     Vendor,
 )
 from app.models.mixins import utcnow
 
 logger = logging.getLogger(__name__)
 
-# Online portal only needs customers, vendors, and their ledgers (+ user logo branding).
+# Online portal only needs customers, vendors, and their ledgers.
+# Company logos are managed by Super Admin on the online portal (not synced from desktop).
 # Do not push inventory/sales/purchases/expenses/etc. — offline SQLite stays the full ERP.
 SYNC_MODELS = [
     CustomerType,  # FK parent for customers when present
-    User,  # company_name / company_logo_data for portal branding
     Customer,
     Vendor,
     LedgerEntry,  # party_type customer|vendor only (see _model_rows)
@@ -160,23 +159,6 @@ def _push_model(conn, model) -> int:
     return count
 
 
-def _prepare_user_logos_for_push() -> int:
-    """Ensure company_logo disk files are loaded into company_logo_data before MySQL push."""
-    from app.utils.company_branding import sync_logo_blob_from_disk
-
-    updated = 0
-    for user in User.query.filter(User.is_deleted.is_(False)).all():
-        path = getattr(user, "company_logo", None)
-        blob = getattr(user, "company_logo_data", None)
-        if path and not blob:
-            sync_logo_blob_from_disk(user)
-            if getattr(user, "company_logo_data", None):
-                updated += 1
-    if updated:
-        db.session.commit()
-    return updated
-
-
 def _table_exists(conn, table: str) -> bool:
     row = conn.execute(
         text(
@@ -190,103 +172,72 @@ def _table_exists(conn, table: str) -> bool:
     return bool(row)
 
 
-def _push_portal_branding(conn) -> int:
-    """
-    Copy desktop company logo/name into Agri Books portal tables so company
-    admins see their logo (and favicon) online after Sync.
-    """
+def _touch_portal_company_sync(conn) -> int:
+    """Stamp last_sync_at on portal companies linked to synced shop users (no logo push)."""
     if not _table_exists(conn, "portal_companies") or not _table_exists(conn, "portal_users"):
         return 0
-
-    updated = 0
-    users = (
-        User.query.filter(User.is_deleted.is_(False))
-        .filter(
-            (User.company_logo_data.isnot(None))
-            | (User.company_logo.isnot(None))
-            | (User.company_name.isnot(None))
+    result = conn.execute(
+        text(
+            """
+            UPDATE portal_companies
+            SET last_sync_at = UTC_TIMESTAMP()
+            WHERE id IN (SELECT DISTINCT company_id FROM portal_users WHERE company_id IS NOT NULL)
+            """
         )
-        .all()
     )
-    for user in users:
-        username = (user.username or "").strip()
-        if not username:
-            continue
-        logo_path = getattr(user, "company_logo", None)
-        logo_data = getattr(user, "company_logo_data", None)
-        company_name = (getattr(user, "company_name", None) or "").strip() or None
+    return int(result.rowcount or 0)
 
-        # Prefer matching portal user by username → company_id
-        portal_row = conn.execute(
+
+def _push_party_profit_metrics(conn) -> int:
+    """
+    Push all-time gross profit per customer/vendor for online portal list filters.
+    Keeps sync lean — no full sales/inventory dump required on the portal.
+    """
+    from app.services.customer_list_analytics_service import customer_gross_profit_map
+    from app.services.vendor_list_analytics_service import vendor_gross_profit_map
+
+    conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS portal_party_metrics (
+              party_type VARCHAR(20) NOT NULL,
+              party_id INT NOT NULL,
+              gross_profit DECIMAL(14, 2) NOT NULL DEFAULT 0,
+              updated_at DATETIME NULL,
+              PRIMARY KEY (party_type, party_id)
+            )
+            """
+        )
+    )
+    conn.execute(text("DELETE FROM portal_party_metrics"))
+
+    count = 0
+    customer_map = customer_gross_profit_map(period="all")
+    for party_id, profit in customer_map.items():
+        conn.execute(
             text(
                 """
-                SELECT company_id FROM portal_users
-                WHERE LOWER(username) = LOWER(:username)
-                LIMIT 1
+                INSERT INTO portal_party_metrics (party_type, party_id, gross_profit, updated_at)
+                VALUES ('customer', :pid, :profit, UTC_TIMESTAMP())
                 """
             ),
-            {"username": username},
-        ).fetchone()
-        company_id = portal_row[0] if portal_row else None
+            {"pid": int(party_id), "profit": float(profit or 0)},
+        )
+        count += 1
 
-        if company_id is None and company_name:
-            by_name = conn.execute(
-                text(
-                    """
-                    SELECT id FROM portal_companies
-                    WHERE LOWER(name) = LOWER(:name)
-                    LIMIT 1
-                    """
-                ),
-                {"name": company_name},
-            ).fetchone()
-            company_id = by_name[0] if by_name else None
-
-        if company_id is not None:
-            sets = ["last_sync_at = UTC_TIMESTAMP()"]
-            params: dict = {"id": company_id}
-            if company_name:
-                sets.append("name = :name")
-                params["name"] = company_name
-            if logo_path is not None:
-                sets.append("logo_path = :logo_path")
-                params["logo_path"] = logo_path
-            if logo_data is not None:
-                sets.append("logo_data = :logo_data")
-                params["logo_data"] = bytes(logo_data) if not isinstance(logo_data, (bytes, memoryview)) else logo_data
-            conn.execute(
-                text(f"UPDATE portal_companies SET {', '.join(sets)} WHERE id = :id"),
-                params,
-            )
-            updated += 1
-
-        if _table_exists(conn, "erp_user_registry"):
-            reg_params = {
-                "username": username,
-                "company_name": company_name,
-                "company_logo": logo_path,
-                "company_logo_data": (
-                    bytes(logo_data)
-                    if logo_data is not None and not isinstance(logo_data, (bytes, memoryview))
-                    else logo_data
-                ),
-                "company_id": company_id,
-            }
-            conn.execute(
-                text(
-                    """
-                    UPDATE erp_user_registry SET
-                        company_name = COALESCE(:company_name, company_name),
-                        company_logo = COALESCE(:company_logo, company_logo),
-                        company_logo_data = COALESCE(:company_logo_data, company_logo_data),
-                        company_id = COALESCE(:company_id, company_id),
-                        updated_at = UTC_TIMESTAMP()
-                    WHERE LOWER(username) = LOWER(:username)
-                    """
-                ),
-                reg_params,
-            )
-    return updated
+    vendor_map = vendor_gross_profit_map(period="all")
+    for party_id, profit in vendor_map.items():
+        conn.execute(
+            text(
+                """
+                INSERT INTO portal_party_metrics (party_type, party_id, gross_profit, updated_at)
+                VALUES ('vendor', :pid, :profit, UTC_TIMESTAMP())
+                """
+            ),
+            {"pid": int(party_id), "profit": float(profit or 0)},
+        )
+        count += 1
+    return count
 
 
 def push_sqlite_to_mysql() -> tuple[int, str]:
@@ -302,7 +253,6 @@ def push_sqlite_to_mysql() -> tuple[int, str]:
     # Flush + WAL checkpoint so push reads a consistent local snapshot
     from app.services.backup_service import prepare_sqlite_for_export
 
-    _prepare_user_logos_for_push()
     prepare_sqlite_for_export()
 
     connect_timeout = int(
@@ -320,22 +270,23 @@ def push_sqlite_to_mysql() -> tuple[int, str]:
             model.__table__.create(remote_engine, checkfirst=True)
 
         total = 0
-        branding = 0
         with remote_engine.connect() as conn:
             conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
             for model in SYNC_MODELS:
                 total += _push_model(conn, model)
             conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
             try:
-                branding = _push_portal_branding(conn)
+                _touch_portal_company_sync(conn)
             except Exception:
-                logger.exception("Portal branding sync failed (data push still OK)")
+                logger.exception("Portal last_sync_at stamp failed (data push still OK)")
+            try:
+                metrics = _push_party_profit_metrics(conn)
+                total += metrics
+            except Exception:
+                logger.exception("Portal party profit metrics sync failed (data push still OK)")
             conn.commit()
 
-        label = get_sync_target_label()
-        if branding:
-            return total, f"{label} (+{branding} portal logo/name update(s))"
-        return total, label
+        return total, get_sync_target_label()
     finally:
         remote_engine.dispose()
 
