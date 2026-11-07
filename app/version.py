@@ -1,10 +1,10 @@
 """Application version — bump when releasing a desktop update."""
 
-APP_VERSION = "1.8.9"
-APP_BUILD = 189
+APP_VERSION = "1.9.0"
+APP_BUILD = 190
 
 # Used by make_release_manifest when --notes is omitted.
-RELEASE_NOTES = """- Backup & Cloud: Sync customers, vendors, ledgers + company logo to MySQL / online portal
-- Sync no longer uploads full ERP (inventory/sales stay local)
-- Company logo pushed for Agri Books portal sidebar + favicon
-- Online portal domain: agribooks.udottechnologies.com"""
+RELEASE_NOTES = """- Sync now: progress overlay, internet/MySQL checks, customers/vendors/ledgers + logo only
+- Google Drive upload queue keeps last 5 pending (older dropped)
+- Backup & Cloud Sync button simplified
+- Company logo for Agri Books portal sidebar + favicon"""
