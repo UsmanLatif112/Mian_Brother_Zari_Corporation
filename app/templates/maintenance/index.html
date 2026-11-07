@@ -6,7 +6,7 @@
   <p class="text-muted mb-4">
     Your data stays on local SQLite for fast offline work. Backups are saved on this PC and can be
     copied to <strong>Google Drive</strong> so you can restore after a crash or on a new computer.
-    Use <strong>Sync to MySQL</strong> to push ledgers and your company logo to the online portal.
+    Use <strong>Sync to MySQL</strong> to push customer/vendor ledgers and your company logo to the online portal.
   </p>
 
   {% if can_sync %}
@@ -19,13 +19,14 @@
     </div>
     <div class="card-body">
       <p class="small text-muted mb-3">
-        Pushes customers, vendors, ledgers, and your <strong>company logo</strong> so Agri Books online
-        shows your branding after login. Requires internet + MySQL configured in <code>.env</code>.
+        Pushes <strong>customers</strong>, <strong>vendors</strong>, their <strong>ledgers</strong>, and your
+        <strong>company logo</strong> to MySQL for the online portal (view-only). Inventory, sales, and
+        other ERP data stay on this PC only. Requires internet + MySQL in <code>.env</code>.
       </p>
       <form method="post" action="{{ url_for('maintenance.push_mysql') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="btn btn-success" type="submit" {% if not mysql_online %}disabled{% endif %}>
-          <i class="fa-solid fa-cloud-arrow-up me-1"></i> Sync now — push data &amp; logo
+          <i class="fa-solid fa-cloud-arrow-up me-1"></i> Sync now — customers, vendors &amp; logo
         </button>
       </form>
       {% if not mysql_online %}

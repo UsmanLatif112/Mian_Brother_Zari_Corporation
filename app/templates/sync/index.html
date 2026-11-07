@@ -3,8 +3,9 @@
 {% block content %}
 <h1 class="h3 mb-2">Synchronization</h1>
 <p class="text-muted mb-4">
-  You are working <strong>offline on SQLite</strong>. When internet is available, push all local data to
-  <strong>{{ sync_target_label }}</strong> (same schema as production).
+  You are working <strong>offline on SQLite</strong>. When internet is available, push
+  <strong>customers, vendors, and their ledgers</strong> (plus company logo) to
+  <strong>{{ sync_target_label }}</strong> for the online portal. Other ERP data stays local.
 </p>
 
 <div class="alert alert-light border mb-4">
@@ -23,7 +24,7 @@
 <form method="post" action="{{ url_for('sync.run') }}" class="mb-4">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <button class="btn btn-success btn-lg" {% if not online %}disabled{% endif %}>
-    <i class="fa-solid fa-cloud-arrow-up"></i> Push local data to {{ sync_target_label }}
+    <i class="fa-solid fa-cloud-arrow-up"></i> Push customers &amp; vendors to {{ sync_target_label }}
   </button>
   {% if not online %}
   <p class="small text-warning mt-2 mb-0">Connect to the internet and refresh this page to enable sync.</p>

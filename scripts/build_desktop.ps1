@@ -37,7 +37,7 @@ $EnvSrc = Join-Path $Root ".env"
 $EnvDst = Join-Path $DataDir ".env"
 if (Test-Path $EnvSrc) {
     Copy-Item -Force $EnvSrc $EnvDst
-    $manifestLine = "UPDATE_MANIFEST_URL=http://mbfupdates.usmanlateef.com/version.json"
+    $manifestLine = "UPDATE_MANIFEST_URL=https://agribooks.udottechnologies.com/updates/version.json"
     $envText = Get-Content -Raw $EnvDst
     if ($envText -notmatch "UPDATE_MANIFEST_URL=") {
         Add-Content -Path $EnvDst -Value "`n$manifestLine"
@@ -116,14 +116,31 @@ $ZipPath = Join-Path $ReleaseDir $ZipName
 if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
 Write-Host "==> Creating release zip: $ZipName" -ForegroundColor Cyan
 Compress-Archive -Path $Dist -DestinationPath $ZipPath -Force
-python scripts\make_release_manifest.py $ZipPath --base-url "http://mbfupdates.usmanlateef.com" -o (Join-Path $ReleaseDir "version.json")
+python scripts\make_release_manifest.py $ZipPath --base-url "https://agribooks.udottechnologies.com/updates" -o (Join-Path $ReleaseDir "version.json")
+
+# Also stage under shop_app for local testing
+$ShopRoot = Join-Path $Root "shop_app"
+$ShopDist = Join-Path $ShopRoot "MianBrotherFertilizers-$Version"
+if (Test-Path $ShopRoot) {
+    Get-ChildItem $ShopRoot -Directory -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -like "MianBrotherFertilizers-*"
+    } | ForEach-Object {
+        Write-Host "==> Removing old shop app: $($_.FullName)" -ForegroundColor Yellow
+        Remove-Item -Recurse -Force $_.FullName
+    }
+}
+New-Item -ItemType Directory -Force -Path $ShopRoot | Out-Null
+Copy-Item -Recurse -Force $Dist $ShopDist
+Write-Host "==> Staged test copy: $ShopDist" -ForegroundColor Cyan
 
 Write-Host ""
 Write-Host "Build complete." -ForegroundColor Green
 Write-Host "Send this folder to users:" -ForegroundColor Green
 Write-Host "  $Dist"
+Write-Host "Local test copy:" -ForegroundColor Green
+Write-Host "  $ShopDist"
 Write-Host ""
-Write-Host "Upload to http://mbfupdates.usmanlateef.com/ (cPanel File Manager):" -ForegroundColor Green
+Write-Host "Upload to https://agribooks.udottechnologies.com/updates/ (cPanel File Manager):" -ForegroundColor Green
 Write-Host "  $ReleaseDir\version.json"
 Write-Host "  $ZipPath"
 Write-Host ""

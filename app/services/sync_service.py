@@ -13,73 +13,26 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from app.extensions import db
 from app.models import (
-    AccountBalance,
-    AccountAmountTaken,
-    AccountCashSetup,
-    AuditLog,
-    CashBookEntry,
-    Category,
     Customer,
-    CustomerReceiving,
     CustomerType,
-    Expense,
-    ExpenseCategory,
-    ExpenseSettlement,
-    InventoryAdjustment,
     LedgerEntry,
-    Notification,
-    Product,
-    Purchase,
-    PurchaseItem,
-    Sale,
-    SaleItem,
-    Salesman,
-    Setting,
-    StockLayer,
-    StockMovement,
     SyncLog,
     SyncQueue,
-    Unit,
-    UnitType,
     User,
     Vendor,
-    VendorPayment,
 )
 from app.models.mixins import utcnow
 
 logger = logging.getLogger(__name__)
 
-# Parent tables before children (foreign keys)
+# Online portal only needs customers, vendors, and their ledgers (+ user logo branding).
+# Do not push inventory/sales/purchases/expenses/etc. — offline SQLite stays the full ERP.
 SYNC_MODELS = [
-    UnitType,
-    Unit,
-    ExpenseCategory,
-    CustomerType,
-    User,
-    Setting,
-    AccountBalance,
-    Category,
-    Product,
+    CustomerType,  # FK parent for customers when present
+    User,  # company_name / company_logo_data for portal branding
     Customer,
     Vendor,
-    Salesman,
-    Expense,
-    ExpenseSettlement,
-    Purchase,
-    PurchaseItem,
-    Sale,
-    SaleItem,
-    CustomerReceiving,
-    VendorPayment,
-    LedgerEntry,
-    StockLayer,
-    StockMovement,
-    InventoryAdjustment,
-    CashBookEntry,
-    AccountCashSetup,
-    AccountAmountTaken,
-    Notification,
-    AuditLog,
+    LedgerEntry,  # party_type customer|vendor only (see _model_rows)
 ]
 
 # Process-wide guards — keep UI / request threads free
@@ -180,12 +133,12 @@ def _serialize_value(value):
 
 
 def _model_rows(model):
-    if model is Category:
-        return (
-            model.query.filter(model.is_deleted.is_(False))
-            .order_by(model.parent_id.is_(None).desc(), model.id)
-            .all()
-        )
+    if model is LedgerEntry:
+        # Portal ledgers are customer/vendor only
+        q = model.query.filter(model.party_type.in_(("customer", "vendor")))
+        if hasattr(model, "is_deleted"):
+            q = q.filter(model.is_deleted.is_(False))
+        return q.order_by(model.id).all()
     if hasattr(model, "is_deleted"):
         return model.query.filter(model.is_deleted.is_(False)).all()
     return model.query.all()
@@ -363,7 +316,8 @@ def push_sqlite_to_mysql() -> tuple[int, str]:
         connect_args={"connect_timeout": max(1, connect_timeout)},
     )
     try:
-        db.metadata.create_all(remote_engine)
+        for model in SYNC_MODELS:
+            model.__table__.create(remote_engine, checkfirst=True)
 
         total = 0
         branding = 0
@@ -416,7 +370,9 @@ def _run_sync_body(user_id=None) -> SyncLog:
             item.attempts += 1
         log.status = "success"
         log.records_synced = count
-        log.message = f"Pushed {count} records from SQLite to {target}."
+        log.message = (
+            f"Pushed {count} customer/vendor ledger records from SQLite to {target}."
+        )
     except Exception as exc:
         logger.exception("Sync failed")
         log.status = "failed"
