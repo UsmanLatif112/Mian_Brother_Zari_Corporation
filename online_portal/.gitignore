@@ -14,3 +14,7 @@ uploads/
 *.log
 *.zip
 *.rar
+# cPanel/LiteSpeed serves /static from app root — create on server:
+#   ln -sfn portal/static static
+# Do not commit a duplicate tree; source of truth is portal/static/
+/static/
