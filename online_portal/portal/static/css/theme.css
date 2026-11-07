@@ -215,40 +215,14 @@ p { margin-bottom: 0.45rem; }
   to { transform: rotate(360deg); }
 }
 
-/* Page filters live in erp-filters-bar (not cramped into the topbar) */
+/* Page filters sit in the header bar (between search and user actions) */
 .topbar-right {
   flex-wrap: nowrap;
   min-width: 0;
 }
-.erp-filters-bar {
-  position: sticky;
-  top: 56px;
-  z-index: 1030;
-  background: var(--erp-card);
-  border-bottom: 1px solid var(--erp-border);
-  padding: 0.45rem 1rem;
-}
-.erp-filters-bar-inner {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.45rem 0.65rem;
-  min-width: 0;
-}
-.erp-filters-bar-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex-shrink: 0;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--erp-muted);
-  margin-right: 0.15rem;
-}
-.erp-filters-bar-label i {
-  font-size: 0.75rem;
+.erp-topbar.has-page-filters {
+  flex-wrap: nowrap;
+  gap: 0.65rem !important;
 }
 .topbar-page-filters {
   display: flex;
@@ -256,7 +230,9 @@ p { margin-bottom: 0.45rem; }
   flex-wrap: wrap;
   gap: 0.4rem;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  overflow: visible;
 }
 .topbar-page-filters:empty {
   display: none;
@@ -516,11 +492,18 @@ p { margin-bottom: 0.45rem; }
   .topbar-right {
     gap: 0.35rem !important;
   }
-  .erp-filters-bar {
-    padding: 0.4rem 0.75rem;
+  .erp-topbar.has-page-filters {
+    flex-wrap: wrap;
+    row-gap: 0.45rem;
+    padding-top: 0.45rem;
+    padding-bottom: 0.45rem;
   }
-  .erp-filters-bar-label {
-    width: 100%;
+  .erp-topbar.has-page-filters .topbar-page-filters {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    padding-top: 0.15rem;
+    border-top: 1px solid var(--erp-border);
   }
   .header-filter-toggle-label {
     max-width: 5.5rem;

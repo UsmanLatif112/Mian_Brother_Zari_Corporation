@@ -129,11 +129,8 @@ body.erp-body {
     top: 0;
     flex-shrink: 0;
   }
-  .erp-filters-bar {
-    position: relative !important;
-    top: auto !important;
-    z-index: 2;
-    flex-shrink: 0;
+  .erp-topbar.has-page-filters .topbar-page-filters {
+    max-width: 100%;
   }
 
   .erp-content {
@@ -187,7 +184,6 @@ body.erp-body {
 @media print {
   .erp-sidebar,
   .erp-topbar,
-  .erp-filters-bar,
   .sidebar-backdrop,
   .dt-toolbar,
   .dt-footer,
