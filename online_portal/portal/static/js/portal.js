@@ -12,7 +12,22 @@
     sidebar?.classList.toggle("open", open);
     sidebar?.classList.toggle("show", open);
     backdrop.classList.toggle("show", open);
-    document.body.style.overflow = open ? "hidden" : "";
+    // Only lock body scroll while the drawer is open; always restore afterward
+    if (open) {
+      document.body.dataset.portalScrollY = String(window.scrollY || 0);
+      document.body.style.overflow = "hidden";
+      document.body.style.position = "fixed";
+      document.body.style.width = "100%";
+      document.body.style.top = `-${document.body.dataset.portalScrollY}px`;
+    } else {
+      const y = Number(document.body.dataset.portalScrollY || 0);
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.width = "";
+      document.body.style.top = "";
+      delete document.body.dataset.portalScrollY;
+      window.scrollTo(0, y);
+    }
   }
 
   document.getElementById("sidebar-toggle")?.addEventListener("click", () => {

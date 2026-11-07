@@ -1,12 +1,34 @@
 /* Keep desktop theme; portal layout glue + mobile fixes */
+html {
+  height: auto;
+  overflow-x: clip;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+body.erp-body {
+  height: auto;
+  min-height: 100%;
+  overflow-x: clip;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+.erp-wrapper {
+  display: flex;
+  min-height: 100%;
+  overflow: visible;
+}
 .erp-main {
   margin-left: var(--erp-sidebar-width);
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--erp-bg);
   display: flex;
   flex-direction: column;
   width: calc(100% - var(--erp-sidebar-width));
   min-width: 0;
+  overflow: visible;
+  height: auto;
 }
 .erp-sidebar .nav-link.active {
   background: rgba(255, 255, 255, 0.06);
@@ -35,15 +57,20 @@
   display: inline-flex;
 }
 
-/* Chart height comes from theme.css (.dashboard-page .dash-chart-wrap) */
 .party-hero {
   min-width: 0;
 }
+/* Do NOT set overflow-x:hidden here — it breaks vertical scroll on iOS Safari */
 .erp-content {
-  overflow-x: hidden;
+  overflow: visible;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-bottom: 2.5rem !important;
 }
 .table-responsive {
+  overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  max-width: 100%;
 }
 
 /* Mobile: sidebar above header; content full width; backdrop */
@@ -71,28 +98,77 @@
   .erp-main {
     margin-left: 0 !important;
     width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
+
+  /* Sticky topbar only — filters stay in document flow so they never cover titles/lists */
   .erp-topbar {
     z-index: 1040;
     position: sticky;
     top: 0;
+    flex-shrink: 0;
   }
   .erp-filters-bar {
-    position: relative;
-    z-index: 1020;
+    position: relative !important;
+    top: auto !important;
+    z-index: 2;
+    flex-shrink: 0;
   }
+
   .erp-content {
     padding-left: 0.75rem !important;
     padding-right: 0.75rem !important;
+    padding-top: 0.85rem !important;
+    padding-bottom: 3.5rem !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
   }
-  .dash-hero h1 {
-    font-size: 1.25rem;
+
+  .dash-hero {
+    margin-top: 0.15rem;
+    margin-bottom: 0.9rem;
+    padding-top: 0.1rem;
   }
+  .dash-hero h1,
+  .dash-hero .h3 {
+    font-size: 1.2rem !important;
+    line-height: 1.3;
+  }
+
+  /* Shorter charts so the listing below is reachable without a long scroll */
+  .dashboard-page .dash-chart-wrap {
+    height: 200px !important;
+    min-height: 180px !important;
+  }
+  .dashboard-page .dash-pie-wrap {
+    height: 180px !important;
+    min-height: 160px !important;
+  }
+  .dashboard-page .party-detail-pie-wrap {
+    max-width: 180px;
+    margin-left: 0;
+    margin-right: auto;
+  }
+
   .stat-card h3 {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
   }
   .table-actions {
     justify-content: flex-end;
+  }
+
+  /* Wide ledger/list tables: swipe horizontally without trapping page scroll */
+  .dash-panel .table-responsive,
+  .table-responsive {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  .portal-search-table {
+    min-width: 640px;
   }
 }
 
