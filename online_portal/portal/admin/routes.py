@@ -102,6 +102,11 @@ def _save_logo(file_storage, company: Company) -> bool:
     company.logo_path = f"logos/{name}"
     company.logo_data = data
     flag_modified(company, "logo_data")
+    # Helpful when MySQL still has old 64KB BLOB (should be LONGBLOB after migrate)
+    if len(data) > 65000:
+        current_app.logger.info(
+            "Saving company %s logo (%s bytes) to %s", company.id, len(data), path
+        )
     return True
 
 

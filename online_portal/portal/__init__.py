@@ -54,8 +54,6 @@ def create_app(config_object: type = Config) -> Flask:
         brand_is_suite = True
 
         if current_user.is_authenticated and not current_user.is_super_admin():
-            from portal.services.branding_sync import hydrate_company_logo
-
             company = getattr(current_user, "company", None)
             display = (company.name if company else "") or ""
             brand_name = display.strip() or "Business"
@@ -63,11 +61,10 @@ def create_app(config_object: type = Config) -> Flask:
             brand_is_suite = False
             brand_logo = None
             brand_favicon = suite_favicon
-            if company and company.id:
-                hydrate_company_logo(company, getattr(current_user, "username", None))
-                if company.logo_data or company.logo_path:
-                    brand_logo = url_for("company_logo", company_id=company.id)
-                    brand_favicon = brand_logo
+            # Logos are managed only by Super Admin on the portal (no desktop/registry hydrate)
+            if company and company.id and (company.logo_data or company.logo_path):
+                brand_logo = url_for("company_logo", company_id=company.id)
+                brand_favicon = brand_logo
 
         return {
             "app_name": suite_name,
@@ -86,57 +83,86 @@ def create_app(config_object: type = Config) -> Flask:
 
     @app.route("/media/company-logo/<int:company_id>")
     def company_logo(company_id: int):
-        from io import BytesIO
-
-        from flask import make_response
+        from flask import Response
 
         from portal.models import Company
-        from portal.services.branding_sync import hydrate_company_logo
 
-        company = db.session.get(Company, company_id)
-        if company and not company.logo_data:
-            username = None
-            if current_user.is_authenticated and getattr(current_user, "company_id", None) == company_id:
-                username = current_user.username
-            hydrate_company_logo(company, username)
+        def _mime_for(data: bytes, logo_path: str | None) -> str | None:
+            if data.startswith(b"\xff\xd8\xff"):
+                return "image/jpeg"
+            if data.startswith(b"\x89PNG\r\n\x1a\n"):
+                return "image/png"
+            if data.startswith((b"GIF87a", b"GIF89a")):
+                return "image/gif"
+            if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+                return "image/webp"
+            ext = (Path(logo_path or "").suffix or "").lstrip(".").lower()
+            return {
+                "jpg": "image/jpeg",
+                "jpeg": "image/jpeg",
+                "png": "image/png",
+                "webp": "image/webp",
+                "gif": "image/gif",
+            }.get(ext)
 
-        data = None
-        logo_path = getattr(company, "logo_path", None) if company else None
-        if company and company.logo_data:
-            data = bytes(company.logo_data)
-        elif company and logo_path:
-            disk = Path(app.config["UPLOAD_FOLDER"]) / logo_path
-            if disk.is_file():
-                data = disk.read_bytes()
-                # Heal DB blob from disk so future requests stay fast
-                try:
-                    company.logo_data = data
-                    db.session.commit()
-                except Exception:
-                    db.session.rollback()
+        def _is_truncated_jpeg(data: bytes) -> bool:
+            # Old MySQL BLOB capped at 64KiB-1; truncated JPEGs usually lack EOI marker
+            if not data.startswith(b"\xff\xd8\xff"):
+                return False
+            if len(data) >= 65535 and not data.rstrip(b"\x00").endswith(b"\xff\xd9"):
+                return True
+            return False
 
-        if not data:
-            # Admin preview uses ?strict=1 so missing logos 404 (img onerror). Elsewhere fall back to suite logo.
+        try:
+            company = db.session.get(Company, company_id)
+            logo_path = getattr(company, "logo_path", None) if company else None
+            disk = None
+            if company and logo_path:
+                candidate = Path(app.config["UPLOAD_FOLDER"]) / logo_path
+                if candidate.is_file():
+                    disk = candidate
+
+            blob = bytes(company.logo_data) if company and company.logo_data else None
+            data = None
+            # Prefer full disk file over a truncated DB blob
+            if disk is not None:
+                disk_bytes = disk.read_bytes()
+                if disk_bytes and not _is_truncated_jpeg(disk_bytes):
+                    data = disk_bytes
+                    if not blob or len(disk_bytes) > len(blob) or _is_truncated_jpeg(blob):
+                        try:
+                            company.logo_data = data
+                            db.session.commit()
+                        except Exception:
+                            db.session.rollback()
+            if data is None and blob and not _is_truncated_jpeg(blob):
+                data = blob
+
+            if not data:
+                if request.args.get("strict"):
+                    return ("", 404)
+                return redirect(url_for("static", filename="img/logo.png"))
+
+            mime = _mime_for(data, logo_path) or "application/octet-stream"
+            if not mime.startswith("image/"):
+                if request.args.get("strict"):
+                    return ("", 404)
+                return redirect(url_for("static", filename="img/logo.png"))
+
+            return Response(
+                data,
+                mimetype=mime,
+                headers={
+                    "Cache-Control": "no-cache, max-age=0, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Content-Length": str(len(data)),
+                },
+            )
+        except Exception:
+            app.logger.exception("company_logo failed for id=%s", company_id)
             if request.args.get("strict"):
                 return ("", 404)
             return redirect(url_for("static", filename="img/logo.png"))
-
-        ext = (Path(logo_path or "logo.png").suffix or ".png").lstrip(".")
-        mime = {
-            "jpg": "image/jpeg",
-            "jpeg": "image/jpeg",
-            "png": "image/png",
-            "webp": "image/webp",
-            "gif": "image/gif",
-        }.get(ext.lower(), "image/png")
-        buf = BytesIO(data)
-        buf.seek(0)
-        resp = make_response(
-            send_file(buf, mimetype=mime, download_name=f"company_{company_id}.{ext or 'png'}")
-        )
-        resp.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
-        resp.headers["Pragma"] = "no-cache"
-        return resp
 
     # Public update channel (desktop apps + CDN-style path on agribooks domain)
     @app.route("/updates/version.json")
