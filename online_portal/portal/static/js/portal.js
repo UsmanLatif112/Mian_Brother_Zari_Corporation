@@ -49,7 +49,7 @@
     btn.setAttribute("title", show ? "Hide password" : "Show password");
     const icon = btn.querySelector("i");
     if (icon) {
-      icon.className = show ? "fa-regular fa-eye-slash" : "fa-regular fa-eye";
+      icon.className = show ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
     }
   });
 })();
