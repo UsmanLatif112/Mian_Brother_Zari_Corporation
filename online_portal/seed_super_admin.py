@@ -16,6 +16,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 load_dotenv(os.path.join(ROOT, ".env"))
 
+from sqlalchemy import text
+
 from portal import create_app
 from portal.extensions import db
 from portal.models import PortalRole, PortalUser
@@ -34,15 +36,17 @@ def main() -> int:
         print("ERROR: Set MYSQL_DATABASE_URI in online_portal/.env")
         return 1
 
+    # Schema must already exist — run scripts/migrate_schema.py first (not on worker start).
     app = create_app()
     with app.app_context():
         try:
-            db.create_all()
+            db.session.execute(text("SELECT 1"))
         except Exception as exc:
-            print("ERROR: Cannot reach MySQL / create tables:")
+            print("ERROR: Cannot reach MySQL (or tables missing).")
             print(" ", exc)
             print()
-            print("Fix in hosting panel:")
+            print("Run once:  python scripts/migrate_schema.py")
+            print("Then fix hosting if needed:")
             print("  1) Confirm DB user + password")
             print("  2) Remote MySQL → allow your PC IP (or %)")
             print("  3) User has ALL PRIVILEGES on the database")

@@ -20,23 +20,33 @@ Credentials live in `online_portal/.env` (never commit).
 
 ## Setup on server (new folder)
 
-1. Upload the whole `online_portal` folder (e.g. `public_html/mbf-portal` or a subdomain app root).
-2. Create Python app / Passenger pointing at this folder (`passenger_wsgi.py`).
+1. Upload the whole `online_portal` folder to the agribooks domain app root.
+2. **Setup Python App** → entry `passenger_wsgi.py`.
 3. Install deps: `pip install -r requirements.txt`
-4. Confirm Remote MySQL allows the server (and your PC for seeding).
-5. Seed Super Admin:
+4. **Migrate schema once** (do not put `create_all` on worker start):
 
 ```bash
 cd online_portal
+python scripts/migrate_schema.py
 python seed_super_admin.py
 ```
 
-Default Super Admin (from `.env`):
+5. In Setup Python App → Environment variables, set:
 
-- Username: `U. Technologies`
-- Password: from `SUPER_ADMIN_PASSWORD`
+```
+LSAPI_CHILDREN=3
+LSAPI_MAX_IDLE=120
+LSAPI_MAX_IDLE_CHILDREN=3
+LSAPI_PGRP_MAX_IDLE=300
+```
 
-6. Open the site → login page.
+Then **Stop** and **Start** the Python app.
+
+6. `.env`: MySQL URI, `USE_LOCAL_SQLITE=false`, Super Admin password.
+
+Default Super Admin username: `U. Technologies`
+
+**Important:** `db.create_all()` must never run inside `create_app()` / Passenger workers — that pattern suspended the account before. Schema only via `scripts/migrate_schema.py`.
 
 ## Local run
 

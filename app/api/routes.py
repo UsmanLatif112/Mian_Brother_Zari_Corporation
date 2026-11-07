@@ -264,7 +264,15 @@ def customers_lookup():
                     "name": c.name,
                     "phone": c.phone or "",
                     "type": getattr(c, "customer_type", "good"),
-                    "label": f"{c.name}" + (f" ({c.phone})" if c.phone else ""),
+                    "balance": float(c.balance or 0),
+                    "credit_limit": float(c.credit_limit or 0),
+                    "label": f"{c.name}"
+                    + (f" ({c.phone})" if c.phone else "")
+                    + (
+                        f" · bal {float(c.balance or 0):.0f}"
+                        if float(c.balance or 0)
+                        else ""
+                    ),
                 }
                 for c in rows
             ]

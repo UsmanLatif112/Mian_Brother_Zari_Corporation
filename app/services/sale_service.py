@@ -79,6 +79,40 @@ def generate_invoice_no():
     return f"INV-{num:06d}"
 
 
+def assert_customer_credit_ok(customer_id, grand_total, amount_paid) -> None:
+    """
+    Block credit/partial sales that would push balance above credit_limit.
+
+    credit_limit <= 0 means unlimited (no check).
+    Receivable balance > 0 means customer owes us; new due adds to that.
+    """
+    if not customer_id:
+        return
+    from app.models import Customer
+
+    customer = db.session.get(Customer, int(customer_id))
+    if not customer or customer.is_deleted:
+        raise ValueError("Customer not found.")
+    limit = Decimal(str(customer.credit_limit or 0))
+    if limit <= 0:
+        return
+    grand = Decimal(str(grand_total or 0))
+    paid = Decimal(str(amount_paid or 0))
+    due = grand - min(paid, grand)
+    if due <= 0:
+        return
+    balance = Decimal(str(customer.balance or 0))
+    # Only enforce when customer already owes or this sale creates receivable
+    projected = balance + due
+    if projected > limit:
+        raise ValueError(
+            f"Credit limit exceeded for {customer.name}. "
+            f"Limit {limit:.2f}, current balance {balance:.2f}, "
+            f"this sale due {due:.2f} → would be {projected:.2f}. "
+            f"Reduce credit, collect more cash, or raise the limit."
+        )
+
+
 def create_sale(data, items, user_id, prefer_layer_ids=None):
     """Create sale and update customer credit/advance from payment vs total."""
     from datetime import date as date_cls
@@ -219,6 +253,11 @@ def create_sale(data, items, user_id, prefer_layer_ids=None):
     applied = min(cash_received, grand) if cash_received > 0 else Decimal("0")
     due = grand - applied
     excess = cash_received - applied if cash_received > applied else Decimal("0")
+
+    # Enforce credit limit before posting ledger / stock is already deducted —
+    # check as early as we know grand/due (stock already reserved; rollback undoes).
+    if sale.customer_id and due > 0:
+        assert_customer_credit_ok(sale.customer_id, grand, cash_received)
 
     # Store full cash received (Total Paid). Applied vs advance is handled in ledger.
     sale.amount_paid = cash_received

@@ -260,6 +260,8 @@
                     data-address="{{ c.address or '' }}"
                     data-old-book="{{ c.old_book_no or '' }}"
                     data-opening="{{ c.opening_balance or 0 }}"
+                    data-credit-limit="{{ c.credit_limit or 0 }}"
+                    data-notes="{{ (c.notes or '')|e }}"
                     data-joined="{{ c.joined_date.isoformat() if c.joined_date else '' }}"
                     data-type="{{ c.customer_type or 'good' }}"
                     data-active="{{ '1' if c.is_active else '0' }}"
@@ -328,6 +330,15 @@
           <i class="fa-solid fa-plus"></i>
         </button>
       </div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">{{ form.credit_limit.label.text }}</label>
+      {{ form.credit_limit(class='form-control', placeholder='0 = no limit') }}
+      <div class="form-text">Credit sales blocked if balance + new due exceeds this. 0 = unlimited.</div>
+    </div>
+    <div class="col-12">
+      <label class="form-label">{{ form.notes.label.text }}</label>
+      {{ form.notes(class='form-control', rows=2, placeholder='Internal notes about this customer') }}
     </div>
   </div>
 </form>
@@ -485,6 +496,15 @@
                 <option value="0">Inactive</option>
               </select>
             </div>
+            <div class="col-md-6">
+              <label class="form-label">Credit Limit</label>
+              <input type="number" step="0.01" name="credit_limit" class="form-control" placeholder="0 = no limit">
+              <div class="form-text">Credit sales blocked if balance + new due exceeds this.</div>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notes</label>
+              <textarea name="notes" class="form-control" rows="2" placeholder="Internal notes"></textarea>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -496,6 +516,7 @@
   </div>
 </div>
 {% endblock %}
+
 
 {% block extra_js %}
 <script>
@@ -608,6 +629,10 @@ document.addEventListener('click', (e) => {
   form.querySelector('[name=joined_date]').value = btn.dataset.joined || '';
   form.querySelector('[name=customer_type]').value = btn.dataset.type || 'good';
   form.querySelector('[name=is_active]').value = btn.dataset.active === '0' ? '0' : '1';
+  const creditEl = form.querySelector('[name=credit_limit]');
+  if (creditEl) creditEl.value = btn.dataset.creditLimit || '0';
+  const notesEl = form.querySelector('[name=notes]');
+  if (notesEl) notesEl.value = btn.dataset.notes || '';
   window.CustomerPhotos?.loadExisting(form, JSON.parse(btn.dataset.photos || '[]'));
   bootstrap.Modal.getOrCreateInstance(document.getElementById('editCustomerModal')).show();
 });

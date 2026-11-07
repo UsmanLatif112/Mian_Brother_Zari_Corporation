@@ -19,6 +19,12 @@
             <dd class="col-7 mb-0">{{ party_active_badge(party) }}</dd>
             <dt class="col-5 text-muted">Balance{% if balance_as_of %} <span class="fw-normal">(as of {{ balance_as_of }})</span>{% endif %}</dt>
             <dd class="col-7 mb-0 fw-bold">{{ '%.2f'|format(display_balance|float) }}</dd>
+            <dt class="col-5 text-muted">Credit limit</dt>
+            <dd class="col-7 mb-0">{% if (party.credit_limit or 0)|float > 0 %}{{ '%.2f'|format(party.credit_limit|float) }}{% else %}Unlimited{% endif %}</dd>
+            {% if party.notes %}
+            <dt class="col-5 text-muted">Notes</dt>
+            <dd class="col-7 mb-0">{{ party.notes }}</dd>
+            {% endif %}
           </dl>
           {% else %}
           <dl class="row g-2 mb-0 small">

@@ -594,6 +594,11 @@ def edit(customer_id):
         customer.opening_balance = (
             Decimal("0") if opening in (None, "") else Decimal(str(opening))
         )
+        raw_limit = request.form.get("credit_limit")
+        customer.credit_limit = (
+            Decimal("0") if raw_limit in (None, "") else Decimal(str(raw_limit))
+        )
+        customer.notes = (request.form.get("notes") or "").strip() or None
         customer.is_active = request.form.get("is_active", "1") == "1"
         _apply_customer_photos(customer)
         sync_party_opening_entry(

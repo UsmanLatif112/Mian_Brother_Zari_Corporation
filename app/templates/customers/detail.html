@@ -269,6 +269,16 @@
                 <option value="0" {% if not customer.is_active %}selected{% endif %}>Inactive</option>
               </select>
             </div>
+            <div class="col-md-6">
+              <label class="form-label">Credit Limit</label>
+              <input type="number" step="0.01" name="credit_limit" class="form-control"
+                     value="{{ customer.credit_limit or 0 }}" placeholder="0 = no limit">
+              <div class="form-text">0 = unlimited. Credit sales blocked above this.</div>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notes</label>
+              <textarea name="notes" class="form-control" rows="2" placeholder="Internal notes">{{ customer.notes or '' }}</textarea>
+            </div>
           </div>
         </div>
         <div class="modal-footer">

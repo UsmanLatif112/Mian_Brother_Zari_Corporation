@@ -124,10 +124,8 @@ def create_app(config_object: type = Config) -> Flask:
             return redirect(url_for("company.dashboard"))
         return redirect(url_for("auth.login"))
 
-    with app.app_context():
-        try:
-            db.create_all()
-        except Exception as exc:  # pragma: no cover
-            app.logger.warning("Could not create tables yet: %s", exc)
+    # Do NOT call db.create_all() here. LiteSpeed/Passenger starts many workers;
+    # each create_all() hits MySQL and can lock/suspend the cPanel account.
+    # Run schema once:  python scripts/migrate_schema.py
 
     return app
