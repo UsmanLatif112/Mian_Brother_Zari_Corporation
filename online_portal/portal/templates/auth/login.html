@@ -35,7 +35,12 @@
         </div>
         <div class="mb-3">
           {{ form.password.label(class='form-label fw-semibold') }}
-          {{ form.password(class='form-control', autocomplete='current-password', placeholder='Enter password') }}
+          <div class="input-group">
+            {{ form.password(class='form-control', autocomplete='current-password', placeholder='Enter password') }}
+            <button type="button" class="btn btn-outline-secondary password-toggle-btn" tabindex="-1" aria-label="Show password" title="Show password">
+              <i class="fa-regular fa-eye"></i>
+            </button>
+          </div>
         </div>
         <div class="form-check mb-3">
           {{ form.remember(class='form-check-input') }}

@@ -36,4 +36,20 @@
   };
 
   syncCustomDates();
+
+  document.addEventListener("click", (event) => {
+    const btn = event.target.closest(".password-toggle-btn");
+    if (!btn) return;
+    const group = btn.closest(".input-group");
+    const input = group?.querySelector('input[type="password"], input[type="text"]');
+    if (!input) return;
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+    btn.setAttribute("title", show ? "Hide password" : "Show password");
+    const icon = btn.querySelector("i");
+    if (icon) {
+      icon.className = show ? "fa-regular fa-eye-slash" : "fa-regular fa-eye";
+    }
+  });
 })();
