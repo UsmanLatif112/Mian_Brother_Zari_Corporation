@@ -28,13 +28,17 @@
             <div class="mb-3">
               {{ form.logo.label(class='form-label') }}
               <p class="text-muted small mb-2">Upload the shop’s desktop app logo for this company (sidebar + favicon for their online login).</p>
-              {% if company.logo_data or company.logo_path %}
               <div class="d-flex align-items-center gap-3 mb-2 p-2 border rounded bg-light">
-                <img src="{{ url_for('company_logo', company_id=company.id) }}" alt="Current logo" style="max-height:56px;max-width:120px;object-fit:contain">
-                <span class="small text-muted">Current logo — choose a new file below to replace</span>
+                <img src="{{ url_for('company_logo', company_id=company.id) }}?v={{ company.updated_at }}"
+                     alt="Current logo"
+                     style="max-height:64px;max-width:140px;object-fit:contain;background:#fff"
+                     onerror="this.style.display='none'; this.nextElementSibling.textContent='No logo saved yet — upload below.';">
+                <span class="small text-muted">{% if company.logo_data or company.logo_path %}Current logo — choose a new file below to replace{% else %}No logo saved yet — upload a JPG/PNG below{% endif %}</span>
               </div>
+              {{ form.logo(class='form-control', accept='image/png,image/jpeg,image/webp,image/gif') }}
+              {% if form.logo.errors %}
+              <div class="text-danger small mt-1">{{ form.logo.errors[0] }}</div>
               {% endif %}
-              {{ form.logo(class='form-control') }}
             </div>
             <div class="form-check mb-3">{{ form.is_active(class='form-check-input') }}{{ form.is_active.label(class='form-check-label') }}</div>
             {{ form.submit(class='btn btn-success') }}

@@ -86,6 +86,10 @@ def create_app(config_object: type = Config) -> Flask:
 
     @app.route("/media/company-logo/<int:company_id>")
     def company_logo(company_id: int):
+        from io import BytesIO
+
+        from flask import make_response
+
         from portal.models import Company
         from portal.services.branding_sync import hydrate_company_logo
 
@@ -95,11 +99,26 @@ def create_app(config_object: type = Config) -> Flask:
             if current_user.is_authenticated and getattr(current_user, "company_id", None) == company_id:
                 username = current_user.username
             hydrate_company_logo(company, username)
-        if not company or not company.logo_data:
-            return redirect(url_for("static", filename="img/logo.png"))
-        from io import BytesIO
 
-        ext = (Path(company.logo_path or "logo.png").suffix or ".png").lstrip(".")
+        data = None
+        logo_path = getattr(company, "logo_path", None) if company else None
+        if company and company.logo_data:
+            data = bytes(company.logo_data)
+        elif company and logo_path:
+            disk = Path(app.config["UPLOAD_FOLDER"]) / logo_path
+            if disk.is_file():
+                data = disk.read_bytes()
+                # Heal DB blob from disk so future requests stay fast
+                try:
+                    company.logo_data = data
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+
+        if not data:
+            return redirect(url_for("static", filename="img/logo.png"))
+
+        ext = (Path(logo_path or "logo.png").suffix or ".png").lstrip(".")
         mime = {
             "jpg": "image/jpeg",
             "jpeg": "image/jpeg",
@@ -107,7 +126,9 @@ def create_app(config_object: type = Config) -> Flask:
             "webp": "image/webp",
             "gif": "image/gif",
         }.get(ext.lower(), "image/png")
-        return send_file(BytesIO(bytes(company.logo_data)), mimetype=mime)
+        resp = make_response(send_file(BytesIO(data), mimetype=mime))
+        resp.headers["Cache-Control"] = "no-cache, max-age=0"
+        return resp
 
     # Public update channel (desktop apps + CDN-style path on agribooks domain)
     @app.route("/updates/version.json")

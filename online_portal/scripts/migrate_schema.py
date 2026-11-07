@@ -104,6 +104,32 @@ def main() -> int:
         else:
             print("OK: no new columns needed")
 
+        # Ensure company logos can be larger than MySQL's 64KB BLOB
+        print("Ensuring portal_companies.logo_data is LONGBLOB…")
+        try:
+            from sqlalchemy import inspect, text
+
+            with db.engine.begin() as conn:
+                tables = set(inspect(conn).get_table_names())
+                if "portal_companies" in tables:
+                    cols = {c["name"] for c in inspect(conn).get_columns("portal_companies")}
+                    if "logo_data" not in cols:
+                        conn.execute(
+                            text(
+                                "ALTER TABLE portal_companies ADD COLUMN logo_data LONGBLOB NULL"
+                            )
+                        )
+                        print("OK: added logo_data LONGBLOB")
+                    else:
+                        conn.execute(
+                            text(
+                                "ALTER TABLE portal_companies MODIFY COLUMN logo_data LONGBLOB NULL"
+                            )
+                        )
+                        print("OK: logo_data is LONGBLOB")
+        except Exception as exc:
+            print("WARN: could not MODIFY logo_data (may already be LONGBLOB):", exc)
+
         tables = sorted(db.metadata.tables.keys())
         print("OK: tables ready:", ", ".join(tables) if tables else "(none registered)")
     return 0

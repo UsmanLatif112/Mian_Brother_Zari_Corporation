@@ -214,8 +214,8 @@
           <th>Phone</th>
           <th>Address</th>
           <th>Status</th>
-          <th class="text-end">Balance</th>
           <th class="text-end">Profit / Loss</th>
+          <th class="text-end">Balance</th>
           <th class="col-actions">Action</th>
         </tr>
       </thead>
@@ -227,6 +227,10 @@
           <td>{{ v.phone or '—' }}</td>
           <td class="text-truncate" style="max-width:160px" title="{{ v.address or '' }}">{{ v.address or '—' }}</td>
           <td>{{ party_active_badge(v) }}</td>
+          <td class="text-end fw-semibold {% if profit > 0 %}text-success{% elif profit < 0 %}text-danger{% else %}text-muted{% endif %}"
+              title="Sale − FIFO cost − returns on products mainly supplied by this vendor">
+            {% if profit < 0 %}Loss {{ '%.2f'|format((-profit)|float) }}{% elif profit > 0 %}+{{ '%.2f'|format(profit) }}{% else %}0.00{% endif %}
+          </td>
           <td class="text-end {% if v.balance|float > 0 %}text-warning{% elif v.balance|float < 0 %}text-success{% endif %}"
               {% if v.balance|float > 0 %}title="We pay (payable)"{% elif v.balance|float < 0 %}title="Get from vendor"{% endif %}>
             {% if v.balance|float > 0 %}
@@ -236,10 +240,6 @@
             {% else %}
               0.00
             {% endif %}
-          </td>
-          <td class="text-end fw-semibold {% if profit > 0 %}text-success{% elif profit < 0 %}text-danger{% else %}text-muted{% endif %}"
-              title="Sale − FIFO cost − returns on products mainly supplied by this vendor">
-            {% if profit < 0 %}Loss {{ '%.2f'|format((-profit)|float) }}{% elif profit > 0 %}+{{ '%.2f'|format(profit) }}{% else %}0.00{% endif %}
           </td>
           <td class="col-actions">
             <div class="table-actions">

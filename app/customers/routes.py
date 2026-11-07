@@ -278,10 +278,7 @@ def _customer_page(form=None, open_modal=False):
 
     query = Customer.query.options(joinedload(Customer.photos)).filter_by(is_deleted=False)
     query = apply_party_active_filter(query, Customer, active_filter)
-    if range_start:
-        query = query.filter(Customer.joined_date >= range_start)
-    if range_end:
-        query = query.filter(Customer.joined_date <= range_end)
+    # Period filter applies to profit / balance as-of — not which customers are listed
     if ctype and ctype != "all":
         query = query.filter(Customer.customer_type == ctype)
 
@@ -294,7 +291,7 @@ def _customer_page(form=None, open_modal=False):
         period=period,
         start_date=period_start,
         end_date=period_end,
-        customer_ids=[c.id for c in customers] if customers else [],
+        customer_ids=[c.id for c in customers] if customers else None,
     )
     for c in customers:
         c.period_profit = profit_map.get(c.id, Decimal("0"))

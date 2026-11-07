@@ -86,8 +86,6 @@ def _parse_date(value):
 
 
 def _vendor_page(form=None, open_modal=False):
-    from datetime import datetime, time
-
     from app.services.dashboard_service import _range_for_filter
 
     period = request.args.get("period", "all")
@@ -104,10 +102,7 @@ def _vendor_page(form=None, open_modal=False):
 
     query = Vendor.query.filter_by(is_deleted=False)
     query = apply_party_active_filter(query, Vendor, active_filter)
-    if range_start and range_end:
-        start_dt = datetime.combine(range_start, time.min)
-        end_dt = datetime.combine(range_end, time.max)
-        query = query.filter(Vendor.created_at >= start_dt, Vendor.created_at <= end_dt)
+    # Period filter applies to profit / balance as-of — not which vendors are listed
     if status == "payable":
         query = query.filter(Vendor.balance > 0)
     elif status == "prepaid":
@@ -123,7 +118,7 @@ def _vendor_page(form=None, open_modal=False):
         period=period,
         start_date=period_start,
         end_date=period_end,
-        vendor_ids=[v.id for v in vendors] if vendors else [],
+        vendor_ids=[v.id for v in vendors] if vendors else None,
     )
     for v in vendors:
         v.period_profit = profit_map.get(v.id, Decimal("0"))

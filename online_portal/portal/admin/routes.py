@@ -12,6 +12,8 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required
+from sqlalchemy.orm.attributes import flag_modified
+from werkzeug.utils import secure_filename
 
 from portal.admin.forms import CompanyForm, CompanyUserForm
 from portal.extensions import db
@@ -19,6 +21,8 @@ from portal.models import Company, PortalRole, PortalUser
 from portal.services.registry_mirror import mirror_user_to_registry
 
 admin_bp = Blueprint("admin", __name__)
+
+_ALLOWED_LOGO_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
 def super_admin_required(view):
@@ -37,18 +41,68 @@ def _new_sync_code() -> str:
     return secrets.token_hex(4).upper()
 
 
-def _save_logo(file_storage, company: Company) -> None:
-    if not file_storage or not file_storage.filename:
-        return
+def _flash_form_errors(form) -> None:
+    for field_name, errs in form.errors.items():
+        label = getattr(getattr(form, field_name, None), "label", None)
+        title = label.text if label is not None else field_name
+        for err in errs:
+            flash(f"{title}: {err}", "danger")
+
+
+def _save_logo(file_storage, company: Company) -> bool:
+    """
+    Persist uploaded logo to disk + company.logo_data.
+    Returns True if a new logo was saved.
+    """
+    if not file_storage:
+        return False
+    filename = (getattr(file_storage, "filename", None) or "").strip()
+    if not filename:
+        return False
+
+    safe = secure_filename(filename) or "logo.png"
+    ext = Path(safe).suffix.lower()
+    if ext not in _ALLOWED_LOGO_EXT:
+        flash("Logo must be JPG, PNG, WEBP, or GIF.", "danger")
+        return False
+
+    # Prefer stream from request; FileStorage may already be partially read
+    try:
+        if hasattr(file_storage, "stream") and hasattr(file_storage.stream, "seek"):
+            file_storage.stream.seek(0)
+        data = file_storage.read()
+    except Exception as exc:
+        flash(f"Could not read logo file: {exc}", "danger")
+        return False
+
+    if not data:
+        flash("Logo file was empty.", "danger")
+        return False
+
+    # Soft cap (portal branding) — keep under a few MB
+    if len(data) > 8 * 1024 * 1024:
+        flash("Logo is too large (max 8 MB).", "danger")
+        return False
+
     upload_root = Path(current_app.config["UPLOAD_FOLDER"]) / "logos"
-    upload_root.mkdir(parents=True, exist_ok=True)
-    ext = Path(file_storage.filename).suffix.lower() or ".png"
-    name = f"company_{company.id or 'new'}{ext}"
+    try:
+        upload_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        flash(f"Could not create upload folder: {exc}", "danger")
+        return False
+
+    name = f"company_{company.id}{ext}"
     path = upload_root / name
-    data = file_storage.read()
-    path.write_bytes(data)
+    try:
+        path.write_bytes(data)
+    except OSError as exc:
+        flash(f"Could not write logo file: {exc}", "danger")
+        return False
+
     company.logo_path = f"logos/{name}"
     company.logo_data = data
+    flag_modified(company, "logo_data")
+    return True
 
 
 @admin_bp.route("/")
@@ -90,10 +144,16 @@ def company_new():
         )
         db.session.add(company)
         db.session.flush()
-        _save_logo(form.logo.data, company)
+        logo_file = request.files.get("logo") or form.logo.data
+        saved = _save_logo(logo_file, company)
         db.session.commit()
-        flash(f"Company “{company.name}” created.", "success")
+        if saved:
+            flash(f"Company “{company.name}” created with logo.", "success")
+        else:
+            flash(f"Company “{company.name}” created.", "success")
         return redirect(url_for("admin.company_detail", company_id=company.id))
+    if request.method == "POST":
+        _flash_form_errors(form)
     return render_template("admin/company_form.html", form=form, company=None)
 
 
@@ -109,13 +169,22 @@ def company_detail(company_id: int):
             company.name = form.name.data.strip()
             company.notes = (form.notes.data or "").strip() or None
             company.is_active = bool(form.is_active.data)
-            _save_logo(form.logo.data, company)
-            db.session.commit()
-            # Mirror logo + flags so offline packages / registry stay in sync
+            logo_file = request.files.get("logo") or form.logo.data
+            saved = _save_logo(logo_file, company)
+            try:
+                db.session.commit()
+            except Exception as exc:
+                db.session.rollback()
+                flash(f"Could not save company (logo column may be too small). Run migrate_schema.py. ({exc})", "danger")
+                return redirect(url_for("admin.company_detail", company_id=company.id))
             for u in company.users:
                 mirror_user_to_registry(u)
-            flash("Company updated. Logo applies to their online portal branding.", "success")
+            if saved:
+                flash("Company updated — logo saved for online portal branding.", "success")
+            else:
+                flash("Company updated.", "success")
             return redirect(url_for("admin.company_detail", company_id=company.id))
+        _flash_form_errors(form)
     users = company.users.order_by(PortalUser.full_name).all()
     return render_template(
         "admin/company_detail.html",
@@ -193,7 +262,7 @@ def users():
 def user_toggle(user_id: int):
     user = db.get_or_404(PortalUser, user_id)
     if user.is_super_admin():
-        flash("Cannot deactivate Super Admin.", "danger")
+        flash("Cannot deactivate Super Admin here.", "danger")
         return redirect(url_for("admin.users"))
     user.is_active_user = not user.is_active_user
     db.session.commit()

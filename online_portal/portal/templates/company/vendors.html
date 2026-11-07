@@ -158,8 +158,8 @@
           <th>Phone</th>
           <th>Address</th>
           <th>Status</th>
-          <th class="text-end">Balance</th>
           <th class="text-end">Profit / Loss</th>
+          <th class="text-end">Balance</th>
           <th class="col-actions">Action</th>
         </tr>
       </thead>
@@ -177,11 +177,11 @@
             <span class="badge bg-secondary-subtle text-secondary border">Inactive</span>
             {% endif %}
           </td>
-          <td class="text-end {% if (v.balance or 0)|float > 0 %}text-warning{% elif (v.balance or 0)|float < 0 %}text-success{% endif %}">
-            {{ '%.2f'|format((v.balance or 0)|float) }}
-          </td>
           <td class="text-end fw-semibold {% if profit > 0 %}text-success{% elif profit < 0 %}text-danger{% else %}text-muted{% endif %}">
             {% if profit < 0 %}Loss {{ '%.2f'|format((-profit)|float) }}{% elif profit > 0 %}+{{ '%.2f'|format(profit) }}{% else %}0.00{% endif %}
+          </td>
+          <td class="text-end {% if (v.balance or 0)|float > 0 %}text-warning{% elif (v.balance or 0)|float < 0 %}text-success{% endif %}">
+            {{ '%.2f'|format((v.balance or 0)|float) }}
           </td>
           <td class="col-actions">
             <div class="table-actions">

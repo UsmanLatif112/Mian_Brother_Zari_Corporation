@@ -217,9 +217,8 @@
           <th>Date Added</th>
           <th>Type</th>
           <th>Status</th>
-          <th class="text-end">Old Balance</th>
-          <th class="text-end">Total Balance</th>
           <th class="text-end">Profit / Loss</th>
+          <th class="text-end">Balance</th>
           <th class="col-actions">Action</th>
         </tr>
       </thead>
@@ -238,13 +237,12 @@
           <td>{{ c.joined_date or (c.created_at.date() if c.created_at else '—') }}</td>
           <td><span class="badge bg-light text-dark border">{{ c.customer_type_label }}</span></td>
           <td>{{ party_active_badge(c) }}</td>
-          <td class="text-end">{{ '%.2f'|format((c.opening_balance or 0)|float) }}</td>
-          <td class="text-end {% if c.balance|float > 0 %}text-warning{% elif c.balance|float < 0 %}text-success{% endif %}">
-            {{ '%.2f'|format(c.balance|float) }}
-          </td>
           <td class="text-end fw-semibold {% if profit > 0 %}text-success{% elif profit < 0 %}text-danger{% else %}text-muted{% endif %}"
               title="Sale − FIFO cost − returns for selected period">
             {% if profit < 0 %}Loss {{ '%.2f'|format((-profit)|float) }}{% elif profit > 0 %}+{{ '%.2f'|format(profit) }}{% else %}0.00{% endif %}
+          </td>
+          <td class="text-end {% if c.balance|float > 0 %}text-warning{% elif c.balance|float < 0 %}text-success{% endif %}">
+            {{ '%.2f'|format(c.balance|float) }}
           </td>
           <td class="col-actions">
             <div class="table-actions">
