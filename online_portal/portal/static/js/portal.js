@@ -1,7 +1,29 @@
 (function () {
   const sidebar = document.getElementById("erp-sidebar");
+  let backdrop = document.getElementById("sidebar-backdrop");
+  if (!backdrop) {
+    backdrop = document.createElement("div");
+    backdrop.id = "sidebar-backdrop";
+    backdrop.className = "sidebar-backdrop";
+    document.body.appendChild(backdrop);
+  }
+
+  function setSidebarOpen(open) {
+    sidebar?.classList.toggle("open", open);
+    sidebar?.classList.toggle("show", open);
+    backdrop.classList.toggle("show", open);
+    document.body.style.overflow = open ? "hidden" : "";
+  }
+
   document.getElementById("sidebar-toggle")?.addEventListener("click", () => {
-    sidebar?.classList.toggle("open");
+    const open = !(sidebar?.classList.contains("open") || sidebar?.classList.contains("show"));
+    setSidebarOpen(open);
+  });
+  backdrop.addEventListener("click", () => setSidebarOpen(false));
+  sidebar?.querySelectorAll("a.nav-link").forEach((link) => {
+    link.addEventListener("click", () => {
+      if (window.matchMedia("(max-width: 991.98px)").matches) setSidebarOpen(false);
+    });
   });
 
   const search = document.getElementById("global-search-input");

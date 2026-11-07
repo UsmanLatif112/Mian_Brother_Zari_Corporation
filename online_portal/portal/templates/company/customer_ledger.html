@@ -1,36 +1,102 @@
 {% extends 'base.html' %}
-{% block title %}Ledger — {{ customer.name }}{% endblock %}
+{% block title %}{{ customer.name }} — Ledger{% endblock %}
 {% block search_placeholder %}Search ledger…{% endblock %}
 {% block page_filters %}
-{% include 'partials/period_filter.html' %}
+{% include 'partials/period_filter.html' with context %}
 {% endblock %}
 {% block content %}
 <div class="dashboard-page">
-  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 dash-hero mb-3">
-    <div>
-      <a class="small text-decoration-none" href="{{ url_for('company.customers') }}"><i class="fa-solid fa-arrow-left me-1"></i>Customers</a>
-      <h1 class="h3 mb-1">{{ customer.name }}</h1>
-      <p class="text-muted mb-0">Balance {{ '%.2f'|format(customer.balance or 0) }}</p>
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
+    <div class="party-hero">
+      <div>
+        <a href="{{ url_for('company.customers') }}" class="text-muted small text-decoration-none">
+          <i class="fa-solid fa-arrow-left me-1"></i> Customers
+        </a>
+        <h1 class="h3 mb-1 mt-1 d-flex flex-wrap align-items-center gap-2">
+          {{ customer.name }}
+          {% if customer.is_active is none or customer.is_active %}
+          <span class="badge bg-success-subtle text-success border">Active</span>
+          {% else %}
+          <span class="badge bg-secondary-subtle text-secondary border">Inactive</span>
+          {% endif %}
+          <span class="badge customer-status-badge">{{ (customer.customer_type or 'good')|replace('_',' ')|title }}</span>
+        </h1>
+        <p class="text-muted mb-0">
+          {% if customer.phone %}{{ customer.phone }} · {% endif %}
+          {% if customer.cnic %}CNIC {{ customer.cnic }} · {% endif %}
+          {% if customer.old_book_no %}Book {{ customer.old_book_no }} · {% endif %}
+          View only
+        </p>
+      </div>
     </div>
   </div>
-  <div class="card dash-panel border-0 shadow-sm">
+
+  <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-body py-3">
+      <div class="row align-items-center g-3">
+        <div class="col-md-5">
+          <dl class="row g-2 mb-3 small">
+            <dt class="col-5 text-muted">Phone</dt>
+            <dd class="col-7 mb-0 fw-semibold">{{ customer.phone or '—' }}</dd>
+            <dt class="col-5 text-muted">CNIC</dt>
+            <dd class="col-7 mb-0">{{ customer.cnic or '—' }}</dd>
+            <dt class="col-5 text-muted">Balance</dt>
+            <dd class="col-7 mb-0 fw-bold">{{ '%.2f'|format(display_balance|float) }}</dd>
+            <dt class="col-5 text-muted">Credit limit</dt>
+            <dd class="col-7 mb-0">{% if (customer.credit_limit or 0)|float > 0 %}{{ '%.2f'|format(customer.credit_limit|float) }}{% else %}Unlimited{% endif %}</dd>
+          </dl>
+          {% if account_pie.pie.rows %}
+          <ul class="list-unstyled mb-0 small">
+            {% for item in account_pie.pie.rows %}
+            <li class="d-flex justify-content-between border-bottom py-1">
+              <span>{{ item.name }}</span>
+              <strong>{{ '%.2f'|format(item.value|float) }}</strong>
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+        <div class="col-md-7">
+          {% if account_pie.pie.rows %}
+          <div class="dash-chart-wrap" style="min-height:220px">
+            <canvas id="partyAccountPie" aria-label="Account summary chart"></canvas>
+          </div>
+          {% else %}
+          <p class="text-muted small mb-0">No account activity in this period to chart.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card dash-panel border-0 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <strong>Ledger</strong>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-print-ledger" title="Print ledger">
+        <i class="fa-solid fa-print me-1"></i> Print
+      </button>
+    </div>
     <div class="table-responsive">
-      <table class="table mb-0 portal-search-table w-100">
+      <table class="table mb-0 portal-search-table w-100" id="customer-ledger-table">
         <thead>
           <tr>
-            <th>Date</th><th>Type</th><th>Particulars</th>
-            <th class="text-end">Debit</th><th class="text-end">Credit</th><th class="text-end">Balance</th>
+            <th>Date</th>
+            <th>Particulars</th>
+            <th>Type</th>
+            <th class="text-end">Debit</th>
+            <th class="text-end">Credit</th>
+            <th class="text-end">Balance</th>
           </tr>
         </thead>
         <tbody>
           {% for e in entries %}
           <tr>
             <td>{{ e.entry_date }}</td>
-            <td>{{ e.entry_type }}</td>
             <td class="small">{{ e.notes or '—' }}</td>
-            <td class="text-end">{{ '%.2f'|format(e.debit or 0) }}</td>
-            <td class="text-end">{{ '%.2f'|format(e.credit or 0) }}</td>
-            <td class="text-end fw-semibold">{{ '%.2f'|format(e.balance_after or 0) }}</td>
+            <td>{{ entry_type_label(e.entry_type) }}</td>
+            <td class="text-end">{{ '%.2f'|format((e.debit or 0)|float) }}</td>
+            <td class="text-end">{{ '%.2f'|format((e.credit or 0)|float) }}</td>
+            <td class="text-end fw-semibold">{{ '%.2f'|format((e.balance_after or 0)|float) }}</td>
           </tr>
           {% else %}
           <tr><td colspan="6" class="text-muted p-3">No ledger entries for this period.</td></tr>
@@ -40,4 +106,31 @@
     </div>
   </div>
 </div>
+{% endblock %}
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const pie = {{ account_pie.pie|tojson }};
+  const canvas = document.getElementById('partyAccountPie');
+  if (canvas && window.Chart && pie && pie.rows && pie.rows.length) {
+    new Chart(canvas, {
+      type: 'doughnut',
+      data: {
+        labels: pie.rows.map((r) => r.name),
+        datasets: [{
+          data: pie.rows.map((r) => r.value),
+          backgroundColor: ['#1f7a4d', '#2563eb', '#f59e0b', '#64748b'],
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' } },
+      },
+    });
+  }
+  document.getElementById('btn-print-ledger')?.addEventListener('click', () => window.print());
+})();
+</script>
 {% endblock %}

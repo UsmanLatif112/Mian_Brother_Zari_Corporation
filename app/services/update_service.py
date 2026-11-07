@@ -115,17 +115,52 @@ def check_for_update(*, respect_skip: bool = True) -> dict[str, Any]:
             "message": "Update server is not configured.",
         }
 
+    # Do not treat a missing/broken update URL as "no internet"
+    from app.services.network_service import is_internet_available
+
+    internet_ok = is_internet_available(timeout=5.0)
+
     try:
         manifest = _parse_manifest(_fetch_json(url))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
-        logger.info("Update check failed: %s", exc)
+    except urllib.error.HTTPError as exc:
+        logger.info("Update check HTTP %s: %s", exc.code, exc)
+        if exc.code == 404:
+            err = (
+                "Update manifest not published yet on the server "
+                "(upload App release / version.json). You are online."
+                if internet_ok
+                else "Could not reach update server. Check your internet connection."
+            )
+        else:
+            err = (
+                f"Update server returned HTTP {exc.code}. Try again later."
+                if internet_ok
+                else "Could not reach update server. Check your internet connection."
+            )
         return {
             **base,
             "ok": False,
             "configured": True,
-            "online": False,
+            "online": internet_ok,
             "update_available": False,
-            "error": "Could not reach update server. Check your internet connection.",
+            "error": err,
+        }
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as exc:
+        logger.info("Update check failed: %s", exc)
+        if internet_ok:
+            err = (
+                "Internet is OK, but the update server did not respond. "
+                "Publish a release on agribooks or try again later."
+            )
+        else:
+            err = "Could not reach update server. Check your internet connection."
+        return {
+            **base,
+            "ok": False,
+            "configured": True,
+            "online": internet_ok,
+            "update_available": False,
+            "error": err,
         }
 
     latest_build = int(manifest["build"])

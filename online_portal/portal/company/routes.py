@@ -173,36 +173,57 @@ def dashboard():
     )
 
 
+def _party_where(table: str) -> tuple[str, dict]:
+    where = "WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+    params: dict = {}
+    if _column_exists(table, "company_id") and _company_id():
+        where += " AND company_id = :cid"
+        params["cid"] = _company_id()
+    return where, params
+
+
 @company_bp.route("/customers")
 @company_admin_required
 def customers():
+    from portal.services.party_view import list_balance_stats, list_chart_payload
+
     rows = []
     error = None
     if not _table_exists("customers"):
         error = "No customer data synced yet. Use Sync in the offline app."
     else:
-        has_cid = _column_exists("customers", "company_id")
-        where = "WHERE (is_deleted = 0 OR is_deleted IS NULL)"
-        params = {}
-        if has_cid and _company_id():
-            where += " AND company_id = :cid"
-            params["cid"] = _company_id()
+        where, params = _party_where("customers")
+        cols = [
+            "id",
+            "name",
+            "phone",
+            "address",
+            "opening_balance",
+            "balance",
+            "old_book_no",
+            "joined_date",
+            "customer_type",
+            "is_active",
+            "cnic",
+            "credit_limit",
+            "notes",
+            "created_at",
+        ]
+        select_cols = ", ".join(c for c in cols if _column_exists("customers", c))
         rows = db.session.execute(
-            text(
-                f"""
-                SELECT id, name, phone, address, opening_balance, balance
-                FROM customers {where}
-                ORDER BY name
-                LIMIT 5000
-                """
-            ),
+            text(f"SELECT {select_cols} FROM customers {where} ORDER BY name LIMIT 5000"),
             params,
         ).mappings().all()
+    stats = list_balance_stats(rows)
+    chart = list_chart_payload(rows, party_label="Customers")
     return render_template(
         "company/customers.html",
         customers=rows,
         error=error,
         company=current_user.company,
+        total_credit=stats["total_credit"],
+        total_advance=stats["total_advance"],
+        list_chart=chart,
         **_period_context("company.customers"),
     )
 
@@ -210,11 +231,20 @@ def customers():
 @company_bp.route("/customers/<int:customer_id>/ledger")
 @company_admin_required
 def customer_ledger(customer_id: int):
+    from portal.services.party_view import entry_type_label, ledger_account_pie
+
     if not _table_exists("ledger_entries"):
         flash("Ledger data not synced yet.", "warning")
         return redirect(url_for("company.customers"))
     customer = db.session.execute(
-        text("SELECT id, name, phone, balance FROM customers WHERE id = :id"),
+        text(
+            """
+            SELECT id, name, phone, cnic, address, opening_balance, balance,
+                   old_book_no, joined_date, customer_type, is_active,
+                   credit_limit, notes, created_at
+            FROM customers WHERE id = :id
+            """
+        ),
         {"id": customer_id},
     ).mappings().first()
     if not customer:
@@ -225,19 +255,25 @@ def customer_ledger(customer_id: int):
     entries = db.session.execute(
         text(
             f"""
-            SELECT entry_date, notes, debit, credit, balance_after, entry_type
+            SELECT id, entry_date, notes, debit, credit, balance_after, entry_type,
+                   reference_type, reference_id
             FROM ledger_entries
             WHERE party_type = 'customer' AND party_id = :cid {period_sql}
-            ORDER BY entry_date, id
+            ORDER BY entry_date DESC, id DESC
             """
         ),
         params,
     ).mappings().all()
+    display_balance = float(customer["balance"] or 0)
+    account_pie = ledger_account_pie(entries, display_balance)
     return render_template(
         "company/customer_ledger.html",
         customer=customer,
         entries=entries,
         company=current_user.company,
+        display_balance=display_balance,
+        account_pie=account_pie,
+        entry_type_label=entry_type_label,
         **_period_context("company.customer_ledger", customer_id=customer_id),
     )
 
@@ -245,33 +281,41 @@ def customer_ledger(customer_id: int):
 @company_bp.route("/vendors")
 @company_admin_required
 def vendors():
+    from portal.services.party_view import list_balance_stats, list_chart_payload
+
     rows = []
     error = None
     if not _table_exists("vendors"):
         error = "No vendor data synced yet. Use Sync in the offline app."
     else:
-        has_cid = _column_exists("vendors", "company_id")
-        where = "WHERE (is_deleted = 0 OR is_deleted IS NULL)"
-        params = {}
-        if has_cid and _company_id():
-            where += " AND company_id = :cid"
-            params["cid"] = _company_id()
+        where, params = _party_where("vendors")
+        cols = [
+            "id",
+            "name",
+            "phone",
+            "address",
+            "opening_balance",
+            "balance",
+            "cnic",
+            "is_active",
+            "notes",
+            "created_at",
+        ]
+        select_cols = ", ".join(c for c in cols if _column_exists("vendors", c))
         rows = db.session.execute(
-            text(
-                f"""
-                SELECT id, name, phone, address, opening_balance, balance
-                FROM vendors {where}
-                ORDER BY name
-                LIMIT 5000
-                """
-            ),
+            text(f"SELECT {select_cols} FROM vendors {where} ORDER BY name LIMIT 5000"),
             params,
         ).mappings().all()
+    stats = list_balance_stats(rows)
+    chart = list_chart_payload(rows, party_label="Vendors")
     return render_template(
         "company/vendors.html",
         vendors=rows,
         error=error,
         company=current_user.company,
+        total_credit=stats["total_credit"],
+        total_advance=stats["total_advance"],
+        list_chart=chart,
         **_period_context("company.vendors"),
     )
 
@@ -279,11 +323,19 @@ def vendors():
 @company_bp.route("/vendors/<int:vendor_id>/ledger")
 @company_admin_required
 def vendor_ledger(vendor_id: int):
+    from portal.services.party_view import entry_type_label, ledger_account_pie
+
     if not _table_exists("ledger_entries"):
         flash("Ledger data not synced yet.", "warning")
         return redirect(url_for("company.vendors"))
     vendor = db.session.execute(
-        text("SELECT id, name, phone, balance FROM vendors WHERE id = :id"),
+        text(
+            """
+            SELECT id, name, phone, cnic, address, opening_balance, balance,
+                   is_active, notes, created_at
+            FROM vendors WHERE id = :id
+            """
+        ),
         {"id": vendor_id},
     ).mappings().first()
     if not vendor:
@@ -294,18 +346,24 @@ def vendor_ledger(vendor_id: int):
     entries = db.session.execute(
         text(
             f"""
-            SELECT entry_date, notes, debit, credit, balance_after, entry_type
+            SELECT id, entry_date, notes, debit, credit, balance_after, entry_type,
+                   reference_type, reference_id
             FROM ledger_entries
             WHERE party_type = 'vendor' AND party_id = :vid {period_sql}
-            ORDER BY entry_date, id
+            ORDER BY entry_date DESC, id DESC
             """
         ),
         params,
     ).mappings().all()
+    display_balance = float(vendor["balance"] or 0)
+    account_pie = ledger_account_pie(entries, display_balance)
     return render_template(
         "company/vendor_ledger.html",
         vendor=vendor,
         entries=entries,
         company=current_user.company,
+        display_balance=display_balance,
+        account_pie=account_pie,
+        entry_type_label=entry_type_label,
         **_period_context("company.vendor_ledger", vendor_id=vendor_id),
     )

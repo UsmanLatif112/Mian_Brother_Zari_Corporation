@@ -1,4 +1,4 @@
-/* Keep desktop theme; only layout glue for portal */
+/* Keep desktop theme; portal layout glue + mobile fixes */
 .erp-main {
   margin-left: var(--erp-sidebar-width);
   min-height: 100vh;
@@ -6,6 +6,7 @@
   display: flex;
   flex-direction: column;
   width: calc(100% - var(--erp-sidebar-width));
+  min-width: 0;
 }
 .erp-sidebar .nav-link.active {
   background: rgba(255, 255, 255, 0.06);
@@ -33,8 +34,84 @@
 #period-filter option[value="custom"]:checked ~ .custom-date-field {
   display: inline-flex;
 }
+
+.dash-chart-wrap {
+  position: relative;
+  width: 100%;
+  min-height: 180px;
+  max-height: 260px;
+}
+.party-hero {
+  min-width: 0;
+}
+.erp-content {
+  overflow-x: hidden;
+}
+.table-responsive {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Mobile: sidebar above header; content full width; backdrop */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 1045;
+}
+.sidebar-backdrop.show {
+  display: block;
+}
+
 @media (max-width: 991.98px) {
-  .erp-sidebar { transform: translateX(-100%); }
-  .erp-sidebar.open { transform: translateX(0); }
-  .erp-main { margin-left: 0; width: 100%; }
+  .erp-sidebar {
+    transform: translateX(-100%);
+    z-index: 1050 !important;
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.25);
+  }
+  .erp-sidebar.open,
+  .erp-sidebar.show {
+    transform: translateX(0);
+  }
+  .erp-main {
+    margin-left: 0 !important;
+    width: 100% !important;
+  }
+  .erp-topbar {
+    z-index: 1040;
+    position: sticky;
+    top: 0;
+  }
+  .erp-filters-bar {
+    position: relative;
+    z-index: 1020;
+  }
+  .erp-content {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+  .dash-hero h1 {
+    font-size: 1.25rem;
+  }
+  .stat-card h3 {
+    font-size: 1.1rem;
+  }
+  .table-actions {
+    justify-content: flex-end;
+  }
+}
+
+@media print {
+  .erp-sidebar,
+  .erp-topbar,
+  .erp-filters-bar,
+  .sidebar-backdrop,
+  #btn-print-list,
+  #btn-print-ledger {
+    display: none !important;
+  }
+  .erp-main {
+    margin: 0 !important;
+    width: 100% !important;
+  }
 }

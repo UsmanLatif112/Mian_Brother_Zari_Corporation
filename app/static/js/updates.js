@@ -166,6 +166,7 @@
 
     try {
       const data = await fetchUpdateStatus(respectSkip);
+      // Only show "No Internet" when the PC is actually offline
       if (!data.ok && data.online === false) {
         setModalState({
           title: 'No internet connection',
@@ -184,12 +185,14 @@
         return;
       }
 
+      // Online but update server / version.json missing or failed — not "no internet"
       if (!data.ok) {
         setModalState({
           title: 'Could not check updates',
-          message: data.error || 'Try again later.',
+          message: data.error || 'Update server is not available yet. You can keep using the app.',
           mode: 'ok',
         });
+        // Auto-check: stay quiet when online but no published release
         if (!auto) showUpdateModal();
         return;
       }
