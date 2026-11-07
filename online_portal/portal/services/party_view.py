@@ -217,12 +217,18 @@ def vendor_list_chart(entries, *, period: str = "all", start_date: str = "", end
         et = str(_entry_field(e, "entry_type") or "").lower()
         debit = _f(_entry_field(e, "debit"))
         credit = _f(_entry_field(e, "credit"))
-        if et == "purchase":
+        if et in ("purchase", "opening", "old_book", "vendor_opening"):
+            total_map[key] += debit
+            paid_map[key] += credit
+            if debit or credit:
+                count_map[key] += 1
+        elif et in ("account_settle", "advance", "purchase_advance"):
+            paid_map[key] += credit
+        elif debit or credit:
+            # Any other vendor movement still feeds the trend line
             total_map[key] += debit
             paid_map[key] += credit
             count_map[key] += 1
-        elif et in ("account_settle", "advance"):
-            paid_map[key] += credit
 
     keys = _iter_bucket_keys(chart_start, chart_end, daily=daily)
     if daily and len(keys) > 62:
@@ -328,10 +334,17 @@ def customer_account_pie(entries, display_balance: float, *, ranged: bool = Fals
 def vendor_account_pie(entries, display_balance: float, *, ranged: bool = False) -> dict:
     """Pie slices match desktop: Total Purchase, Total Paid, Prepaid Credit, Payable."""
     period_hint = "In period" if ranged else "All time"
-    total_purchase = _sum_debit(entries, "purchase")
-    total_paid = _sum_credit(entries, "account_settle", "advance")
+    total_purchase = _sum_debit(entries, "purchase", "opening", "old_book", "vendor_opening")
+    # Include any leftover vendor debits so the doughnut is never blank when data exists
+    typed = {"purchase", "opening", "old_book", "vendor_opening", "account_settle", "advance", "purchase_advance"}
     for e in entries:
-        if str(_entry_field(e, "entry_type") or "").lower() == "purchase":
+        et = str(_entry_field(e, "entry_type") or "").lower()
+        if et not in typed:
+            total_purchase += Decimal(str(_entry_field(e, "debit") or 0))
+    total_paid = _sum_credit(entries, "account_settle", "advance", "purchase_advance")
+    for e in entries:
+        et = str(_entry_field(e, "entry_type") or "").lower()
+        if et in ("purchase", "opening", "old_book", "vendor_opening"):
             total_paid += Decimal(str(_entry_field(e, "credit") or 0))
     bal = Decimal(str(display_balance or 0))
     total_payable = max(bal, Decimal("0"))
@@ -346,6 +359,23 @@ def vendor_account_pie(entries, display_balance: float, *, ranged: bool = False)
         rows.append({"name": "Prepaid Credit", "value": float(total_credit), "detail": "Advance with vendor"})
     if total_payable > 0:
         rows.append({"name": "Total Payable", "value": float(total_payable), "detail": "Outstanding"})
+
+    # Last resort: show raw debit/credit so detail graph still renders
+    if not rows and entries:
+        raw_debit = sum((_f(_entry_field(e, "debit")) for e in entries), 0.0)
+        raw_credit = sum((_f(_entry_field(e, "credit")) for e in entries), 0.0)
+        if raw_debit > 0:
+            rows.append({"name": "Debit", "value": round(raw_debit, 2), "detail": period_hint})
+        if raw_credit > 0:
+            rows.append({"name": "Credit", "value": round(raw_credit, 2), "detail": period_hint})
+        if abs(_f(display_balance)) > 0.0001:
+            rows.append(
+                {
+                    "name": "Balance",
+                    "value": round(abs(_f(display_balance)), 2),
+                    "detail": "Payable" if _f(display_balance) > 0 else "Prepaid",
+                }
+            )
 
     return {
         "pie": _pie_payload(rows),

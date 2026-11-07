@@ -107,6 +107,50 @@ def _period_context(clear_endpoint: str, **url_kwargs):
     }
 
 
+LIST_PAGE_SIZE = 15
+
+
+def _list_filter_args(**extra):
+    """Query args to preserve period filter across pagination links."""
+    period, start, end = _period_bounds()
+    args = {}
+    if period and period != "all":
+        args["period"] = period
+        if period == "custom":
+            if start:
+                args["start_date"] = start
+            if end:
+                args["end_date"] = end
+    for key, value in extra.items():
+        if value is not None and value != "":
+            args[key] = value
+    return args
+
+
+def _paginate(rows, *, page: int | None = None, per_page: int = LIST_PAGE_SIZE):
+    total = len(rows)
+    pages = max(1, (total + per_page - 1) // per_page) if total else 1
+    try:
+        page = int(page or request.args.get("page") or 1)
+    except (TypeError, ValueError):
+        page = 1
+    page = max(1, min(page, pages))
+    start = (page - 1) * per_page
+    slice_rows = rows[start : start + per_page]
+    return slice_rows, {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": pages,
+        "has_prev": page > 1,
+        "has_next": page < pages,
+        "prev_page": page - 1,
+        "next_page": page + 1,
+        "from_idx": (start + 1) if total else 0,
+        "to_idx": min(start + per_page, total),
+    }
+
+
 def _period_clause(column: str = "created_at"):
     """Return SQL fragment + params for optional date filters (default = all)."""
     period, start, end = _period_bounds()
@@ -239,14 +283,18 @@ def customers():
         start_date=start,
         end_date=end,
     )
+    page_rows, pagination = _paginate(rows)
     return render_template(
         "company/customers.html",
-        customers=rows,
+        customers=page_rows,
         error=error,
         company=current_user.company,
         total_credit=stats["total_credit"],
         total_advance=stats["total_advance"],
         list_chart=chart,
+        pagination=pagination,
+        list_filter_args=_list_filter_args(),
+        total_records=stats["count"],
         **_period_context("company.customers"),
     )
 
@@ -340,14 +388,36 @@ def vendors():
         start_date=start,
         end_date=end,
     )
+    # If ledger has no purchasable history, still show current payable/advance on the chart
+    if not any(chart.get("total") or []) and not any(chart.get("paid") or []) and not any(
+        chart.get("payable") or []
+    ):
+        chart = {
+            "labels": ["Current"],
+            "total": [0.0],
+            "paid": [0.0],
+            "payable": [round(stats["total_credit"], 2)],
+            "count": [float(stats["count"])],
+            "granularity": "day",
+        }
+        if stats["total_advance"]:
+            chart["labels"] = ["Payable", "Advance"]
+            chart["total"] = [0.0, 0.0]
+            chart["paid"] = [0.0, 0.0]
+            chart["payable"] = [round(stats["total_credit"], 2), round(stats["total_advance"], 2)]
+            chart["count"] = [0.0, 0.0]
+    page_rows, pagination = _paginate(rows)
     return render_template(
         "company/vendors.html",
-        vendors=rows,
+        vendors=page_rows,
         error=error,
         company=current_user.company,
         total_credit=stats["total_credit"],
         total_advance=stats["total_advance"],
         list_chart=chart,
+        pagination=pagination,
+        list_filter_args=_list_filter_args(),
+        total_records=stats["count"],
         **_period_context("company.vendors"),
     )
 
@@ -392,6 +462,21 @@ def vendor_ledger(vendor_id: int):
     account_pie = vendor_account_pie(
         entries, display_balance, ranged=(period != "all")
     )
+    # If period filter emptied the pie, rebuild from all-time ledger so detail graph still shows
+    if not account_pie["pie"]["rows"]:
+        all_entries = db.session.execute(
+            text(
+                """
+                SELECT id, entry_date, notes, debit, credit, balance_after, entry_type,
+                       reference_type, reference_id
+                FROM ledger_entries
+                WHERE party_type = 'vendor' AND party_id = :vid
+                ORDER BY entry_date DESC, id DESC
+                """
+            ),
+            {"vid": vendor_id},
+        ).mappings().all()
+        account_pie = vendor_account_pie(all_entries, display_balance, ranged=False)
     return render_template(
         "company/vendor_ledger.html",
         vendor=vendor,

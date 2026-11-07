@@ -67,7 +67,7 @@
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
       <strong>Vendor List</strong>
       <div class="d-flex align-items-center gap-2">
-        <span class="text-muted small">{{ vendors|length }} records</span>
+        <span class="text-muted small">{{ total_records }} records</span>
         <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-print-list" title="Print list">
           <i class="fa-solid fa-print me-1"></i> Print
         </button>
@@ -117,6 +117,9 @@
         </tbody>
       </table>
     </div>
+    {% with endpoint='company.vendors' %}
+    {% include 'partials/list_pagination.html' %}
+    {% endwith %}
   </div>
   {% endif %}
 </div>
@@ -124,7 +127,7 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>window.vendorListChart = {{ list_chart|tojson }};</script>
-<script src="{{ url_for('static', filename='js/list-page-charts.js') }}?v=1"></script>
+<script src="{{ url_for('static', filename='js/list-page-charts.js') }}?v=2"></script>
 <script>
   document.getElementById('btn-print-list')?.addEventListener('click', () => window.print());
 </script>

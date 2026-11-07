@@ -119,7 +119,7 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>window.partyAccountPie = {{ account_pie.pie|tojson }};</script>
-<script src="{{ url_for('static', filename='js/party-detail.js') }}?v=1"></script>
+<script src="{{ url_for('static', filename='js/party-detail.js') }}?v=2"></script>
 <script>
   document.getElementById('btn-print-ledger')?.addEventListener('click', () => window.print());
 </script>
