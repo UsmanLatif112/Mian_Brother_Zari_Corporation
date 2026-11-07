@@ -116,7 +116,17 @@
   {% endif %}
 
   <div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
-  <div class="loading-overlay d-none" id="global-loader"><div class="spinner-border text-success"></div></div>
+  <div class="loading-overlay d-none" id="global-loader" aria-live="polite" aria-busy="true">
+    <div class="loading-overlay-card text-center px-4 py-3">
+      <div class="spinner-border text-success mb-2" role="status"></div>
+      <div class="fw-semibold" id="global-loader-title">Working…</div>
+      <div class="progress mt-3 mx-auto" style="height: 10px; width: min(260px, 70vw);" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" id="global-loader-bar" style="width: 0%"></div>
+      </div>
+      <div class="small text-muted mt-2" id="global-loader-pct">0%</div>
+      <div class="small text-muted mt-1" id="global-loader-detail"></div>
+    </div>
+  </div>
   {% if current_user.is_authenticated %}
   {% include 'partials/confirm_modal.html' %}
   {% include 'partials/offline_modal.html' %}
@@ -134,7 +144,7 @@
   <script src="{{ url_for('static', filename='vendor/cropperjs/cropper.min.js') }}"></script>
   <script src="{{ url_for('static', filename='js/modal-nesting.js') }}?v=2"></script>
   <script src="{{ url_for('static', filename='js/page-windows.js') }}?v=1"></script>
-  <script src="{{ url_for('static', filename='js/app.js') }}?v=9"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}?v=10"></script>
   <script>
     window.CSRF_TOKEN = document.querySelector('meta[name=csrf-token]')?.content;
   </script>

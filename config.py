@@ -54,7 +54,8 @@ class Config:
     SYNC_AUTO_ENABLED = os.environ.get("SYNC_AUTO_ENABLED", "false").lower() == "true"
     SYNC_INTERVAL_MINUTES = int(os.environ.get("SYNC_INTERVAL_MINUTES", "15"))
     # Short MySQL probe — keeps Sync page + cron from hanging when offline
-    SYNC_MYSQL_CONNECT_TIMEOUT = int(os.environ.get("SYNC_MYSQL_CONNECT_TIMEOUT", "2"))
+    # Remote MySQL often needs >2s from shop networks; short timeouts look like "no internet"
+    SYNC_MYSQL_CONNECT_TIMEOUT = int(os.environ.get("SYNC_MYSQL_CONNECT_TIMEOUT", "10"))
     SYNC_MYSQL_CACHE_SECONDS = int(os.environ.get("SYNC_MYSQL_CACHE_SECONDS", "45"))
     # Separate cron: SQLite auto-backup every N hours.
     # Retention: last BACKUP_UI_LIMIT backups for today + 1 day-end copy for each
@@ -69,6 +70,8 @@ class Config:
     GOOGLE_DRIVE_REDIRECT_URI = os.environ.get("GOOGLE_DRIVE_REDIRECT_URI", "")
     GOOGLE_DRIVE_AUTO_UPLOAD = os.environ.get("GOOGLE_DRIVE_AUTO_UPLOAD", "true").lower() == "true"
     GOOGLE_DRIVE_RETENTION = int(os.environ.get("GOOGLE_DRIVE_RETENTION", "10"))
+    # Pending offline uploads kept locally before Drive is connected
+    GOOGLE_DRIVE_QUEUE_MAX = int(os.environ.get("GOOGLE_DRIVE_QUEUE_MAX", "5"))
     GOOGLE_DRIVE_QUEUE_INTERVAL_MINUTES = int(os.environ.get("GOOGLE_DRIVE_QUEUE_INTERVAL_MINUTES", "5"))
     UPLOAD_FOLDER = os.path.join(basedir, "app", "static", "uploads")
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024

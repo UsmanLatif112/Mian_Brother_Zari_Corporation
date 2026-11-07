@@ -39,7 +39,7 @@ SYNC_MODELS = [
 _sync_lock = threading.Lock()
 _mysql_cache = {"ok": False, "checked_at": 0.0}
 _MYSQL_CACHE_TTL_SEC = 45.0
-_MYSQL_CONNECT_TIMEOUT_SEC = 2
+_MYSQL_CONNECT_TIMEOUT_SEC = 10
 
 
 def is_local_sqlite() -> bool:

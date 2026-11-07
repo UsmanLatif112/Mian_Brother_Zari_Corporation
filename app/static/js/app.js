@@ -881,3 +881,63 @@
     true
   );
 })();
+
+/** Full-page busy overlay with optional progress % (sync / uploads). */
+(function () {
+  let tickTimer = null;
+
+  function els() {
+    return {
+      overlay: document.getElementById('global-loader'),
+      title: document.getElementById('global-loader-title'),
+      bar: document.getElementById('global-loader-bar'),
+      pct: document.getElementById('global-loader-pct'),
+      detail: document.getElementById('global-loader-detail'),
+    };
+  }
+
+  window.setGlobalLoaderProgress = function setGlobalLoaderProgress(percent, detail) {
+    const { bar, pct, detail: detailEl } = els();
+    const n = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+    if (bar) {
+      bar.style.width = `${n}%`;
+      bar.parentElement?.setAttribute('aria-valuenow', String(n));
+    }
+    if (pct) pct.textContent = `${n}%`;
+    if (detailEl && detail != null) detailEl.textContent = detail;
+  };
+
+  window.showGlobalLoader = function showGlobalLoader(title, options) {
+    const opts = options || {};
+    const { overlay, title: titleEl } = els();
+    if (titleEl) titleEl.textContent = title || 'Working…';
+    window.setGlobalLoaderProgress(opts.percent || 0, opts.detail || '');
+    overlay?.classList.remove('d-none');
+    document.body.classList.add('erp-busy');
+
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = null;
+    }
+    if (opts.autoTick) {
+      let p = Number(opts.percent) || 0;
+      const cap = Number(opts.autoCap) || 90;
+      tickTimer = setInterval(() => {
+        if (p >= cap) return;
+        p += p < 40 ? 2.5 : p < 70 ? 1.2 : 0.4;
+        window.setGlobalLoaderProgress(Math.min(cap, p));
+      }, 400);
+    }
+  };
+
+  window.hideGlobalLoader = function hideGlobalLoader() {
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = null;
+    }
+    const { overlay } = els();
+    overlay?.classList.add('d-none');
+    document.body.classList.remove('erp-busy');
+    window.setGlobalLoaderProgress(0, '');
+  };
+})();

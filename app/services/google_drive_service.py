@@ -411,7 +411,52 @@ def _save_queue(data: dict[str, Any]) -> None:
         json.dump(data, fh, indent=2)
 
 
+def _queue_max_pending() -> int:
+    try:
+        return max(1, int(current_app.config.get("GOOGLE_DRIVE_QUEUE_MAX", 5) or 5))
+    except (TypeError, ValueError):
+        return 5
+
+
+def _trim_queue_items(items: list[dict[str, Any]], keep: int | None = None) -> list[dict[str, Any]]:
+    """Keep only the newest N pending backups; drop older queue entries."""
+    limit = keep if keep is not None else _queue_max_pending()
+    if len(items) <= limit:
+        return items
+    ranked = sorted(
+        items,
+        key=lambda x: (
+            _stamp_from_name(x.get("backup_name") or "") or "",
+            x.get("queued_at") or "",
+        ),
+        reverse=True,
+    )
+    kept = ranked[:limit]
+    dropped = len(ranked) - len(kept)
+    if dropped:
+        logger.info(
+            "Trimmed Google Drive upload queue: kept %s newest, dropped %s older",
+            len(kept),
+            dropped,
+        )
+    return kept
+
+
+def prune_upload_queue(keep: int | None = None) -> int:
+    """Drop oldest pending uploads so the queue stays within the limit. Returns dropped count."""
+    data = _load_queue()
+    items = list(data.get("items") or [])
+    before = len(items)
+    trimmed = _trim_queue_items(items, keep=keep)
+    if len(trimmed) == before:
+        return 0
+    data["items"] = trimmed
+    _save_queue(data)
+    return before - len(trimmed)
+
+
 def list_upload_queue() -> list[dict[str, Any]]:
+    prune_upload_queue()
     items: list[dict[str, Any]] = []
     for raw in _load_queue().get("items") or []:
         name = (raw.get("backup_name") or "").strip()
@@ -433,7 +478,7 @@ def list_upload_queue() -> list[dict[str, Any]]:
 
 
 def enqueue_backup(backup_name: str, *, reason: str | None = None) -> bool:
-    """Add a local backup folder name to the upload queue (no duplicates)."""
+    """Add a local backup folder name to the upload queue (no duplicates; max pending)."""
     backup_name = os.path.basename(backup_name.strip())
     if not backup_name.startswith("sqlite_backup_"):
         return False
@@ -452,7 +497,7 @@ def enqueue_backup(backup_name: str, *, reason: str | None = None) -> bool:
             "last_error": reason,
         }
     )
-    data["items"] = items
+    data["items"] = _trim_queue_items(items)
     _save_queue(data)
     logger.info("Queued Google Drive upload: %s", backup_name)
     return True

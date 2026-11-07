@@ -6,32 +6,40 @@
   <p class="text-muted mb-4">
     Your data stays on local SQLite for fast offline work. Backups are saved on this PC and can be
     copied to <strong>Google Drive</strong> so you can restore after a crash or on a new computer.
-    Use <strong>Sync to MySQL</strong> to push customer/vendor ledgers and your company logo to the online portal.
   </p>
 
   {% if can_sync %}
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
       <strong><i class="fa-solid fa-cloud-arrow-up me-1 text-success"></i> Sync to online portal (MySQL)</strong>
-      <span class="badge {% if mysql_online %}bg-success{% else %}bg-secondary{% endif %}">
-        {% if mysql_online %}{{ sync_target_label }} reachable{% else %}{{ sync_target_label }} offline{% endif %}
+      <span class="d-flex flex-wrap gap-2">
+        <span class="badge {% if internet_ok %}bg-success{% else %}bg-secondary{% endif %}" id="sync-internet-badge">
+          {% if internet_ok %}Internet OK{% else %}No internet{% endif %}
+        </span>
+        <span class="badge {% if mysql_online %}bg-success{% else %}bg-secondary{% endif %}" id="sync-mysql-badge">
+          {% if mysql_online %}{{ sync_target_label }} reachable{% else %}{{ sync_target_label }} offline{% endif %}
+        </span>
       </span>
     </div>
     <div class="card-body">
-      <p class="small text-muted mb-3">
-        Pushes <strong>customers</strong>, <strong>vendors</strong>, their <strong>ledgers</strong>, and your
-        <strong>company logo</strong> to MySQL for the online portal (view-only). Inventory, sales, and
-        other ERP data stay on this PC only. Requires internet + MySQL in <code>.env</code>.
-      </p>
-      <form method="post" action="{{ url_for('maintenance.push_mysql') }}">
+      <form method="post" action="{{ url_for('maintenance.push_mysql') }}" id="sync-mysql-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn btn-success" type="submit" {% if not mysql_online %}disabled{% endif %}>
-          <i class="fa-solid fa-cloud-arrow-up me-1"></i> Sync now — customers, vendors &amp; logo
+        <input type="hidden" name="ajax" value="1">
+        <button class="btn btn-success" type="submit" id="btn-sync-mysql" {% if not internet_ok %}disabled{% endif %}>
+          <i class="fa-solid fa-cloud-arrow-up me-1"></i> Sync now
+        </button>
+        <button class="btn btn-outline-secondary" type="button" id="btn-recheck-sync" title="Recheck connection">
+          <i class="fa-solid fa-arrows-rotate"></i> Recheck
         </button>
       </form>
-      {% if not mysql_online %}
-      <p class="small text-warning mt-2 mb-0">Connect to the internet and refresh this page to enable sync.</p>
-      {% endif %}
+      <p class="small text-warning mt-2 mb-0 {% if internet_ok %}d-none{% endif %}" id="sync-offline-hint">
+        No internet connection. Connect to the internet, then click Recheck or Sync.
+      </p>
+      <p class="small text-info mt-2 mb-0 {% if not internet_ok or mysql_online %}d-none{% endif %}" id="sync-mysql-hint">
+        Internet is OK, but {{ sync_target_label }} did not respond yet. You can still try Sync — or wait and Recheck.
+      </p>
+      <div class="small text-danger mt-2 d-none" id="sync-error"></div>
+      <div class="small text-success mt-2 d-none" id="sync-ok"></div>
     </div>
   </div>
   {% endif %}
@@ -86,7 +94,8 @@
               <p class="small text-muted mb-3">
                 Connect once with your Google account. The app will upload backup ZIP files automatically
                 {% if drive_auto_upload %}after each backup{% else %}when you click Upload{% endif %}.
-                Only the last <strong>{{ drive_retention }}</strong> files are kept on Drive.
+                Only the last <strong>{{ drive_queue_max }}</strong> pending uploads are kept (older queue items are removed).
+                Drive keeps the last <strong>{{ drive_retention }}</strong> uploaded files.
               </p>
               <button type="button" class="btn btn-primary" id="btn-google-connect"
                 data-connect-url="{{ url_for('maintenance.google_connect_url') }}"
@@ -110,7 +119,9 @@
         </div>
         <div class="card-body">
           <p class="small text-muted mb-3">
-            When offline, backups are saved locally and added here. The app checks every
+            When offline, backups are saved locally and added here (max
+            <strong>{{ drive_queue_max }}</strong> pending — oldest are dropped).
+            The app checks every
             <strong>{{ drive_queue_interval_minutes }} minute{{ 's' if drive_queue_interval_minutes != 1 else '' }}</strong>
             and uploads queued backups when internet is back.
           </p>
@@ -266,6 +277,123 @@
 <script>
 (function () {
   const csrf = document.querySelector('meta[name="csrf-token"]')?.content || window.CSRF_TOKEN || '';
+
+  // —— Sync to MySQL (progress overlay + connectivity) ——
+  const syncForm = document.getElementById('sync-mysql-form');
+  const syncBtn = document.getElementById('btn-sync-mysql');
+  const recheckBtn = document.getElementById('btn-recheck-sync');
+
+  function setSyncHints({ internet, mysql }) {
+    const offlineHint = document.getElementById('sync-offline-hint');
+    const mysqlHint = document.getElementById('sync-mysql-hint');
+    const netBadge = document.getElementById('sync-internet-badge');
+    const mysqlBadge = document.getElementById('sync-mysql-badge');
+    if (netBadge) {
+      netBadge.textContent = internet ? 'Internet OK' : 'No internet';
+      netBadge.className = `badge ${internet ? 'bg-success' : 'bg-secondary'}`;
+    }
+    if (mysqlBadge) {
+      const label = {{ sync_target_label|tojson }};
+      mysqlBadge.textContent = mysql ? `${label} reachable` : `${label} offline`;
+      mysqlBadge.className = `badge ${mysql ? 'bg-success' : 'bg-secondary'}`;
+    }
+    offlineHint?.classList.toggle('d-none', !!internet);
+    mysqlHint?.classList.toggle('d-none', !(internet && !mysql));
+    if (syncBtn) syncBtn.disabled = !internet;
+  }
+
+  async function recheckConnectivity() {
+    recheckBtn?.setAttribute('disabled', 'disabled');
+    try {
+      const res = await fetch('{{ url_for("maintenance.connectivity") }}', {
+        headers: { 'X-Requested-With': 'fetch' },
+      });
+      const data = await res.json().catch(() => ({}));
+      setSyncHints({ internet: !!data.internet, mysql: !!data.mysql });
+      if (!data.internet) {
+        window.showErpToast?.('warning', data.message || 'No internet connection.');
+      } else if (!data.mysql) {
+        window.showErpToast?.('info', data.message || 'MySQL not reachable yet.');
+      } else {
+        window.showErpToast?.('success', 'Internet and sync server are ready.');
+      }
+      return data;
+    } catch (_) {
+      setSyncHints({ internet: false, mysql: false });
+      window.showErpToast?.('danger', 'Could not check connection.');
+      return { internet: false, mysql: false };
+    } finally {
+      recheckBtn?.removeAttribute('disabled');
+    }
+  }
+
+  recheckBtn?.addEventListener('click', () => recheckConnectivity());
+
+  syncForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('sync-error');
+    const okEl = document.getElementById('sync-ok');
+    errEl?.classList.add('d-none');
+    okEl?.classList.add('d-none');
+
+    if (syncBtn) syncBtn.disabled = true;
+    window.showGlobalLoader?.('Checking internet…', { percent: 5, detail: 'Please wait' });
+
+    const conn = await recheckConnectivity();
+    if (!conn.internet) {
+      window.hideGlobalLoader?.();
+      if (errEl) {
+        errEl.textContent = 'No internet connection. Connect to the internet, then try again.';
+        errEl.classList.remove('d-none');
+      }
+      if (syncBtn) syncBtn.disabled = false;
+      return;
+    }
+
+    window.showGlobalLoader?.('Syncing to MySQL…', {
+      percent: 12,
+      detail: 'Pushing customers, vendors, ledgers & logo',
+      autoTick: true,
+      autoCap: 92,
+    });
+
+    try {
+      const fd = new FormData(syncForm);
+      const res = await fetch(syncForm.action, {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'fetch', 'X-CSRFToken': csrf, Accept: 'application/json' },
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) {
+        window.hideGlobalLoader?.();
+        if (errEl) {
+          errEl.textContent = data.error || data.message || 'Sync failed.';
+          errEl.classList.remove('d-none');
+        }
+        window.showErpToast?.('danger', data.error || data.message || 'Sync failed.');
+        if (syncBtn) syncBtn.disabled = false;
+        return;
+      }
+      window.setGlobalLoaderProgress?.(100, 'Done');
+      if (okEl) {
+        okEl.textContent = data.message || 'Sync completed.';
+        okEl.classList.remove('d-none');
+      }
+      window.showErpToast?.('success', data.message || 'Sync completed.');
+      setTimeout(() => {
+        window.hideGlobalLoader?.();
+        window.location.reload();
+      }, 700);
+    } catch (_) {
+      window.hideGlobalLoader?.();
+      if (errEl) {
+        errEl.textContent = 'Network error during sync. Check internet and try again.';
+        errEl.classList.remove('d-none');
+      }
+      if (syncBtn) syncBtn.disabled = false;
+    }
+  });
 
   function showErr(msg) {
     const errEl = document.getElementById('backup-error');

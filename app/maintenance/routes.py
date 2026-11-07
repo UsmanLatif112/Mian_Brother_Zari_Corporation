@@ -1,7 +1,17 @@
 from datetime import date
 import os
 
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 from flask_login import current_user, login_required
 
 from app.extensions import db
@@ -17,6 +27,7 @@ from app.services.backup_service import (
     zip_backup_folder,
 )
 from app.services import google_drive_service as drive
+from app.services.network_service import is_internet_available
 from app.services.sync_service import get_sync_target_label, is_mysql_available, run_sync
 from app.utils.decorators import permission_required
 
@@ -82,12 +93,17 @@ def index():
     can_sync = current_user.has_permission("sync.view") or current_user.has_permission(
         "backup.view"
     )
-    mysql_online = is_mysql_available() if can_sync else False
+    internet_ok = is_internet_available(timeout=5.0) if can_sync else False
+    # Force probe with longer timeout — cached "offline" was a common false negative
+    mysql_online = (
+        is_mysql_available(force=True, timeout=10.0) if can_sync and internet_ok else False
+    )
 
     return render_template(
         "maintenance/index.html",
         can_backup=can_backup,
         can_sync=can_sync,
+        internet_ok=internet_ok,
         mysql_online=mysql_online,
         sync_target_label=get_sync_target_label(),
         backups=backups,
@@ -99,6 +115,7 @@ def index():
         drive=drive_info,
         drive_backups=drive_backups,
         drive_retention=int(current_app.config.get("GOOGLE_DRIVE_RETENTION", 10) or 10),
+        drive_queue_max=int(current_app.config.get("GOOGLE_DRIVE_QUEUE_MAX", 5) or 5),
         drive_auto_upload=_drive_auto_upload_enabled(),
         drive_queue=drive_queue,
         drive_queue_interval_minutes=int(
@@ -109,20 +126,76 @@ def index():
     )
 
 
+@maintenance_bp.route("/connectivity", methods=["GET"])
+@login_required
+def connectivity():
+    """Live internet + MySQL probe for Sync button / overlays."""
+    internet_ok = is_internet_available(timeout=5.0)
+    mysql_ok = is_mysql_available(force=True, timeout=10.0) if internet_ok else False
+    return jsonify(
+        {
+            "ok": True,
+            "internet": internet_ok,
+            "mysql": mysql_ok,
+            "sync_target_label": get_sync_target_label(),
+            "message": (
+                "Ready to sync."
+                if mysql_ok
+                else (
+                    "No internet connection. Connect to the internet, then try again."
+                    if not internet_ok
+                    else f"{get_sync_target_label()} is not reachable. Check MySQL host/firewall, then retry."
+                )
+            ),
+        }
+    )
+
+
 @maintenance_bp.route("/push-mysql", methods=["POST"])
 @login_required
 def push_mysql():
     """Push SQLite → MySQL (ledgers + company logo for online portal)."""
+    wants_json = (
+        request.headers.get("X-Requested-With") == "fetch"
+        or request.accept_mimetypes.best == "application/json"
+        or (request.form.get("ajax") or "").strip() == "1"
+    )
+
+    def _fail(msg: str, code: int = 400):
+        if wants_json:
+            return jsonify({"ok": False, "error": msg}), code
+        flash(msg, "danger")
+        return redirect(url_for("maintenance.index"))
+
     if not (
         current_user.has_permission("sync.view")
         or current_user.has_permission("backup.view")
     ):
-        flash("You do not have permission to sync.", "danger")
-        return redirect(url_for("maintenance.index"))
+        return _fail("You do not have permission to sync.", 403)
+
+    if not is_internet_available(timeout=5.0):
+        return _fail("No internet connection. Connect to the internet, then try Sync again.")
+
+    if not is_mysql_available(force=True, timeout=10.0):
+        return _fail(
+            f"{get_sync_target_label()} is not reachable right now. "
+            "You are online, but the sync server did not respond. Try again in a moment."
+        )
+
     log = run_sync(current_user.id)
     log_audit("sync", "database", log.id, log.message)
     db.session.commit()
-    flash(log.message or "Sync completed.", "success" if log.status == "success" else "warning")
+    ok = log.status == "success"
+    if wants_json:
+        return jsonify(
+            {
+                "ok": ok,
+                "status": log.status,
+                "message": log.message or ("Sync completed." if ok else "Sync failed."),
+                "records_synced": log.records_synced,
+            }
+        )
+    flash(log.message or "Sync completed.", "success" if ok else "warning")
     return redirect(url_for("maintenance.index"))
 
 

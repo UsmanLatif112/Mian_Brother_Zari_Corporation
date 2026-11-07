@@ -109,24 +109,24 @@ def is_cloud_registry_reachable(timeout: float = 3.0, *, mysql_fallback: bool = 
     return False
 
 
-def is_internet_available(timeout: float = 3.0) -> bool:
+def is_internet_available(timeout: float = 5.0) -> bool:
     """
-    Best-effort check that the PC can reach the public internet / Google OAuth.
+    Best-effort check that the PC can reach the public internet.
 
-    Used before opening Google sign-in so the desktop app stays on the ERP page when offline.
+    Tries fast IPs first (no DNS), then common hosts. MySQL reachability is
+    checked separately — shops can be online while MySQL port is blocked.
     """
-    targets: list[tuple[str, int]] = []
-
+    targets: list[tuple[str, int]] = [
+        ("1.1.1.1", 443),
+        ("8.8.8.8", 53),
+        ("1.1.1.1", 53),
+        ("208.67.222.222", 53),
+        ("www.google.com", 443),
+        ("accounts.google.com", 443),
+        ("cloudflare.com", 443),
+    ]
+    # MySQL host as extra signal (not required)
     mysql = _mysql_host_port()
     if mysql:
         targets.append(mysql)
-
-    targets.extend(
-        (
-            ("1.1.1.1", 443),
-            ("8.8.8.8", 53),
-            ("www.google.com", 443),
-            ("accounts.google.com", 443),
-        )
-    )
     return _any_tcp_reachable(targets, timeout)
