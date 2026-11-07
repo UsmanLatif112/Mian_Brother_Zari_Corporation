@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Super Admin — {{ suite_name }}{% endblock %}
+{% block content %}
+<div class="dashboard-page pt-3">
+  <div class="dash-hero mb-4">
+    <h1 class="h3 mb-1">Super Admin</h1>
+    <p class="text-muted mb-0">Manage companies, users, keys, and active status</p>
+  </div>
+  <div class="row g-3 mb-4">
+    <div class="col-md-4"><div class="portal-kpi"><div class="label">Companies</div><div class="value">{{ company_count }}</div></div></div>
+    <div class="col-md-4"><div class="portal-kpi"><div class="label">Active companies</div><div class="value">{{ active_companies }}</div></div></div>
+    <div class="col-md-4"><div class="portal-kpi"><div class="label">Users</div><div class="value">{{ user_count }}</div></div></div>
+  </div>
+  <div class="card border-0 shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Companies</strong>
+      <a class="btn btn-sm btn-success" href="{{ url_for('admin.company_new') }}"><i class="fa-solid fa-plus me-1"></i>Add</a>
+    </div>
+    <div class="table-responsive">
+      <table class="table mb-0">
+        <thead><tr><th>Name</th><th>Sync code</th><th>Status</th><th>Last sync</th><th></th></tr></thead>
+        <tbody>
+          {% for c in companies %}
+          <tr>
+            <td>{{ c.name }}</td>
+            <td><code>{{ c.sync_code }}</code></td>
+            <td>{% if c.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Inactive</span>{% endif %}</td>
+            <td class="small text-muted">{{ c.last_sync_at or '—' }}</td>
+            <td class="text-end"><a href="{{ url_for('admin.company_detail', company_id=c.id) }}">Open</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-muted">No companies yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

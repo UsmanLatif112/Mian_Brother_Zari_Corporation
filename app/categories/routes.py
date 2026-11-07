@@ -91,6 +91,8 @@ def index():
             }
         )
 
+    from app.services.customer_type_service import list_customer_types
+
     return render_template(
         "categories/index.html",
         rows=rows,
@@ -98,6 +100,8 @@ def index():
         open_modal=request.args.get("open_modal") == "1",
         total=len(rows),
         selected_status=status,
+        customer_types=list_customer_types(),
+        open_ctype_modal=request.args.get("open_ctype_modal") == "1",
     )
 
 
@@ -283,3 +287,65 @@ def create_subcategory(category_id):
 
     flash("Please fix the form errors.", "danger")
     return redirect(url_for("categories.detail", category_id=parent.id, open_modal=1))
+
+
+@categories_bp.route("/customer-types/create", methods=["POST"])
+@login_required
+@permission_required("inventory.*")
+def create_customer_type():
+    from app.services.customer_type_service import create_customer_type as create_ctype
+
+    name = (request.form.get("name") or "").strip()
+    try:
+        due_days = int(request.form.get("due_days") or 30)
+    except (TypeError, ValueError):
+        due_days = 30
+    try:
+        row = create_ctype(name, due_days=due_days)
+        log_audit("create", "customer_type", row.id, row.name)
+        db.session.commit()
+        flash(f'Customer type "{row.name}" added.', "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("categories.index", open_ctype_modal=1))
+    return redirect(url_for("categories.index"))
+
+
+@categories_bp.route("/customer-types/<int:type_id>/edit", methods=["POST"])
+@login_required
+@permission_required("inventory.*")
+def edit_customer_type(type_id):
+    from app.services.customer_type_service import update_customer_type
+
+    name = (request.form.get("name") or "").strip()
+    try:
+        due_days = int(request.form.get("due_days") or 30)
+    except (TypeError, ValueError):
+        due_days = 30
+    try:
+        row = update_customer_type(type_id, name, due_days=due_days)
+        log_audit("update", "customer_type", row.id, row.name)
+        db.session.commit()
+        flash("Customer type updated.", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    return redirect(url_for("categories.index"))
+
+
+@categories_bp.route("/customer-types/<int:type_id>/delete", methods=["POST"])
+@login_required
+@permission_required("inventory.*")
+def delete_customer_type(type_id):
+    from app.services.customer_type_service import delete_customer_type as delete_ctype
+
+    try:
+        row = delete_ctype(type_id)
+        log_audit("delete", "customer_type", type_id, row.name)
+        db.session.commit()
+        flash("Customer type deleted.", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    return redirect(url_for("categories.index"))

@@ -12,7 +12,14 @@ from app.utils.working_date import default_entry_date
 # License types stored in users.license_type / erp_user_registry.license_type
 LICENSE_TRIAL = "trial"
 LICENSE_LIFETIME = "lifetime"
-LICENSE_MONTHLY = "monthly"  # reserved for future paid subscriptions
+LICENSE_MONTHLY = "monthly"
+LICENSE_YEARLY = "yearly"
+
+# What the serial key unlocks after trial (set by Super Admin)
+PLAN_LIFETIME = "lifetime"
+PLAN_1_MONTH = "1_month"
+PLAN_1_YEAR = "1_year"
+PLAN_CUSTOM = "custom"
 
 TRIAL_DAYS = 7
 
@@ -96,10 +103,12 @@ class User(UserMixin, TimestampMixin, SoftDeleteMixin, db.Model):
     registration_key = db.Column(db.String(32), nullable=True)
     registered_at = db.Column(db.DateTime, nullable=True)
     device_id = db.Column(db.String(64), nullable=True)
-    # trial | lifetime | monthly (monthly reserved for future releases)
+    # trial | lifetime | monthly | yearly
     license_type = db.Column(db.String(20), nullable=True)
-    # Trial / monthly end date; null for lifetime
+    # Trial / paid end date; null for lifetime
     license_expires_at = db.Column(db.DateTime, nullable=True)
+    # After key: lifetime | 1_month | 1_year | custom (Super Admin chooses)
+    subscription_plan = db.Column(db.String(20), nullable=True)
     # Per-tenant branding (set by Super Admin when creating the user)
     company_name = db.Column(db.String(200), nullable=True)
     company_logo = db.Column(db.String(255), nullable=True)
@@ -210,6 +219,74 @@ class User(UserMixin, TimestampMixin, SoftDeleteMixin, db.Model):
         self.is_registered = True
         self.license_type = LICENSE_LIFETIME
         self.license_expires_at = None
+        self.subscription_plan = PLAN_LIFETIME
+
+    def _delta_for_unit(self, amount: int, unit: str) -> timedelta:
+        unit = (unit or "days").strip().lower()
+        amount = max(1, int(amount or 1))
+        if unit in ("minute", "minutes", "min", "m"):
+            return timedelta(minutes=amount)
+        if unit in ("hour", "hours", "hr", "h"):
+            return timedelta(hours=amount)
+        if unit in ("week", "weeks", "w"):
+            return timedelta(weeks=amount)
+        if unit in ("month", "months", "mo"):
+            return timedelta(days=amount * 30)
+        if unit in ("year", "years", "y"):
+            return timedelta(days=amount * 365)
+        return timedelta(days=amount)
+
+    def set_subscription_plan(self, plan: str | None) -> None:
+        plan = (plan or PLAN_LIFETIME).strip().lower()
+        if plan not in {PLAN_LIFETIME, PLAN_1_MONTH, PLAN_1_YEAR, PLAN_CUSTOM}:
+            plan = PLAN_LIFETIME
+        self.subscription_plan = plan
+
+    def activate_with_plan(
+        self,
+        plan: str | None = None,
+        *,
+        amount: int | None = None,
+        unit: str | None = None,
+        from_dt: datetime | None = None,
+    ) -> None:
+        """
+        After serial key (or Super Admin extend): start paid access window.
+        lifetime → no expiry; 1_month / 1_year / custom → blocks when expired.
+        """
+        plan = (plan or self.subscription_plan or PLAN_LIFETIME).strip().lower()
+        self.subscription_plan = plan
+        self.is_registered = True
+        start = from_dt or utcnow()
+        if plan == PLAN_1_MONTH:
+            self.license_type = LICENSE_MONTHLY
+            self.license_expires_at = start + timedelta(days=30)
+        elif plan == PLAN_1_YEAR:
+            self.license_type = LICENSE_YEARLY
+            self.license_expires_at = start + timedelta(days=365)
+        elif plan == PLAN_CUSTOM:
+            self.license_type = LICENSE_MONTHLY
+            self.license_expires_at = start + self._delta_for_unit(
+                amount if amount is not None else 30,
+                unit or "days",
+            )
+        else:
+            self.license_type = LICENSE_LIFETIME
+            self.license_expires_at = None
+            self.subscription_plan = PLAN_LIFETIME
+
+    def is_paid_license_expired(self) -> bool:
+        """Registered with a timed plan that has ended."""
+        if self.role in PRIVILEGED_ROLES:
+            return False
+        if not self.is_registered:
+            return False
+        if (self.license_type or "") == LICENSE_LIFETIME:
+            return False
+        expires = self._license_expires_naive()
+        if not expires:
+            return False
+        return expires <= utcnow()
 
     def trial_remaining_parts(self) -> tuple[int, int, int, int] | None:
         """(days, hours, minutes, seconds) remaining, or None if not on active trial."""
@@ -249,26 +326,47 @@ class User(UserMixin, TimestampMixin, SoftDeleteMixin, db.Model):
     def is_registration_complete(self) -> bool:
         if self.role in PRIVILEGED_ROLES:
             return True
-        if self.is_registered:
+        # Active trial unlocks the app (local SQLite clock — works offline)
+        if self.is_on_trial():
             return True
-        # Active trial unlocks the app the same as registered (local SQLite clock — works offline)
-        return self.is_on_trial()
+        # Paid key active and not expired
+        if self.is_registered and not self.is_paid_license_expired():
+            return True
+        return False
 
     @property
     def registration_status_label(self) -> str:
         if self.role in PRIVILEGED_ROLES:
             return "Registered"
         if self.is_registered:
-            if (self.license_type or "") == LICENSE_MONTHLY:
-                return "Monthly"
+            if self.is_paid_license_expired():
+                return "License Expired"
             if (self.license_type or "") == LICENSE_LIFETIME:
                 return "Lifetime"
+            if (self.license_type or "") == LICENSE_YEARLY:
+                return f"1 Year · {self._paid_remaining_label()}"
+            if (self.license_type or "") == LICENSE_MONTHLY:
+                return f"Timed · {self._paid_remaining_label()}"
+
             return "Registered"
         if self.is_on_trial():
             return f"Trial · {self.trial_remaining_label()}"
         if self.is_trial_expired():
             return "Trial Expired"
         return "Not Registered"
+
+    def _paid_remaining_label(self) -> str:
+        if self.is_paid_license_expired():
+            return "Expired"
+        expires = self._license_expires_naive()
+        if not expires:
+            return "—"
+        total = max(0, int((expires - utcnow()).total_seconds()))
+        days = total // 86400
+        if days >= 1:
+            return f"{days}d left"
+        hours = total // 3600
+        return f"{hours}h left"
 
     @property
     def trial_ends_label(self) -> str:
@@ -319,6 +417,13 @@ class Notification(db.Model):
     category = db.Column(db.String(50), default="info")
     is_read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    # Due reminders: sale | customer_loan
+    reference_type = db.Column(db.String(50), nullable=True, index=True)
+    reference_id = db.Column(db.Integer, nullable=True, index=True)
+    # tomorrow | due | overdue
+    stage = db.Column(db.String(20), nullable=True, index=True)
+    # Working date the notification was generated for (dedupe key)
+    notify_date = db.Column(db.Date, nullable=True, index=True)
 
     user = db.relationship("User", backref="notifications")
 

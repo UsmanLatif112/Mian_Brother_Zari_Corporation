@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{% block title %}{{ suite_name }}{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon-32.png') }}">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/theme.css') }}?v=22" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/portal.css') }}?v=3" rel="stylesheet">
+  {% block extra_css %}{% endblock %}
+</head>
+<body class="erp-body">
+{% if current_user.is_authenticated %}
+{% set _page_filters %}{% block page_filters %}{% endblock %}{% endset %}
+<div class="erp-wrapper">
+  {% include 'partials/sidebar.html' %}
+  <div class="erp-main">
+    <header class="erp-topbar d-flex align-items-center justify-content-between px-3 gap-2">
+      <div class="d-flex align-items-center gap-2 topbar-left min-w-0">
+        <button class="btn btn-sm btn-outline-secondary d-lg-none" id="sidebar-toggle" type="button" aria-label="Menu">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <form class="global-search" action="#" onsubmit="return false;">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
+            <input type="search" class="form-control" id="global-search-input" placeholder="{% block search_placeholder %}Search…{% endblock %}" autocomplete="off">
+          </div>
+        </form>
+      </div>
+      <div class="d-flex align-items-center gap-2 topbar-right flex-shrink-0">
+        <button type="button" class="btn btn-sm btn-outline-secondary page-refresh-btn" id="page-refresh-btn" title="Refresh" onclick="location.reload()">
+          <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+        <div class="dropdown">
+          <button class="btn btn-sm btn-light dropdown-toggle" data-bs-toggle="dropdown" type="button" title="User menu">
+            <i class="fa-solid fa-user-circle"></i>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><span class="dropdown-item-text fw-semibold">{{ current_user.full_name }}</span></li>
+            <li><span class="dropdown-item-text text-muted small">{{ current_user.role_label }}</span></li>
+            {% if not current_user.is_super_admin() and current_user.company %}
+            <li><span class="dropdown-item-text text-muted small">{{ current_user.company.name }}</span></li>
+            {% endif %}
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Logout</a></li>
+          </ul>
+        </div>
+      </div>
+    </header>
+    {% if _page_filters|trim %}
+    <div class="erp-filters-bar" id="erp-filters-bar">
+      <div class="erp-filters-bar-inner">
+        <span class="erp-filters-bar-label"><i class="fa-solid fa-filter"></i> Filters</span>
+        <div class="topbar-page-filters">
+          {{ _page_filters|safe }}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+    <main class="erp-content container-fluid py-3">
+      {% include 'partials/flash.html' %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% else %}
+  {% block auth_content %}{% endblock %}
+{% endif %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/portal.js') }}?v=1"></script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

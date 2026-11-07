@@ -1,0 +1,299 @@
+{% extends 'base.html' %}
+{% from 'partials/macros.html' import header_period_filter, header_category_filter %}
+{% block title %}Inventory Profitability{% endblock %}
+{% block page_filters %}
+{{ header_period_filter(
+  form_id='profit-period-form',
+  persist_key='inventory-profit-period',
+  clear_url=url_for(
+    'inventory.profitability',
+    category_id=selected_category if selected_category else None,
+    period='all'
+  ),
+  selected_period=selected_period,
+  start_date=start_date,
+  end_date=end_date,
+  onchange='onProfitPeriodChange()',
+  variant='dashboard',
+  preserve={
+    'category_id': selected_category if selected_category else '',
+  }
+) }}
+{{ header_category_filter(
+  categories=categories,
+  selected_category=selected_category,
+  clear_url=url_for(
+    'inventory.profitability',
+    period=selected_period or 'all',
+    start_date=start_date if selected_period == 'custom' else None,
+    end_date=end_date if selected_period == 'custom' else None
+  ),
+  persist_key='inventory-profit-category',
+  preserve={
+    'period': selected_period or 'all',
+    'start_date': start_date if selected_period == 'custom' else '',
+    'end_date': end_date if selected_period == 'custom' else '',
+  }
+) }}
+{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
+    <div>
+      <h1 class="h3 mb-1">Inventory Profitability</h1>
+      <p class="text-muted mb-0">
+        {% if selected_category_name %}
+          Products in <strong>{{ selected_category_name }}</strong> — ranked by gross profit for the selected period
+        {% else %}
+          Which categories earn the most — sale minus FIFO cost and inventory loss
+        {% endif %}
+      </p>
+    </div>
+    <a href="{{ url_for('inventory.index') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="fa-solid fa-boxes-stacked me-1"></i> Inventory
+    </a>
+  </div>
+
+  {% set gp = (metrics.gross_profit or 0)|float %}
+  {% set gross_profit_amt = gp if gp > 0 else 0 %}
+  {% set gross_loss_amt = (-gp) if gp < 0 else 0 %}
+  <div class="row g-3 mb-4">
+    {% set kpis = [
+      ('Net Sale', metrics.total_sale, 'fa-chart-pie', 'primary', false),
+      ('COGS (FIFO)', metrics.total_cost, 'fa-boxes-packing', 'secondary', false),
+      ('Inventory Loss', metrics.inventory_loss, 'fa-triangle-exclamation', 'danger', false),
+      ('Gross Profit', gross_profit_amt, 'fa-chart-line', 'success', false),
+      ('Gross Loss', gross_loss_amt, 'fa-arrow-trend-down', 'danger', false),
+      ('Profit Margin', metrics.margin_pct if gp >= 0 else 0, 'fa-percent', 'info', true),
+    ] %}
+    {% for title, value, icon, color, is_pct in kpis %}
+    <div class="col-6 col-md">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <p class="text-muted small mb-1">{{ title }}</p>
+              {% if is_pct %}
+              <h3 class="mb-0 fw-bold">{{ '%.1f'|format((value or 0)|float) }}%</h3>
+              {% else %}
+              <h3 class="mb-0 fw-bold {% if title == 'Gross Loss' and (value or 0)|float > 0 %}text-danger{% elif title == 'Gross Profit' and (value or 0)|float > 0 %}text-success{% endif %}">
+                {{ '%.2f'|format((value or 0)|float) }}
+              </h3>
+              {% endif %}
+            </div>
+            <div class="stat-icon bg-{{ color }}-subtle text-{{ color }}"><i class="fa-solid {{ icon }}"></i></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if metrics.most_profitable or metrics.least_profitable %}
+  <div class="row g-3 mb-4">
+    {% if metrics.most_profitable %}
+    <div class="col-md-6">
+      <div class="card border-0 shadow-sm h-100 border-start border-4 border-success">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Most profitable {{ 'product' if metrics.mode == 'product' else 'category' }}</p>
+          <h2 class="h5 mb-1">{{ metrics.most_profitable.name }}</h2>
+          <div class="d-flex flex-wrap gap-3 small">
+            <span class="text-success fw-semibold">Profit {{ '%.2f'|format(metrics.most_profitable.profit) }}</span>
+            <span class="text-muted">Margin {{ '%.1f'|format(metrics.most_profitable.margin_pct) }}%</span>
+            <span class="text-muted">Sale {{ '%.2f'|format(metrics.most_profitable.sale) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+    {% if metrics.least_profitable %}
+    <div class="col-md-6">
+      <div class="card border-0 shadow-sm h-100 border-start border-4 border-danger">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Lowest profit {{ 'product' if metrics.mode == 'product' else 'category' }}</p>
+          <h2 class="h5 mb-1">{{ metrics.least_profitable.name }}</h2>
+          <div class="d-flex flex-wrap gap-3 small">
+            {% if metrics.least_profitable.profit < 0 %}
+            <span class="text-danger fw-semibold">Loss {{ '%.2f'|format((-metrics.least_profitable.profit)|float) }}</span>
+            {% else %}
+            <span class="text-muted fw-semibold">Profit {{ '%.2f'|format(metrics.least_profitable.profit) }}</span>
+            {% endif %}
+            <span class="text-muted">Margin {{ '%.1f'|format(metrics.least_profitable.margin_pct) }}%</span>
+            <span class="text-muted">Sale {{ '%.2f'|format(metrics.least_profitable.sale) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="card dash-panel border-0 shadow-sm mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Sale · Cost · Loss · Gross Profit</strong>
+      <span class="text-muted small">Trend for selected period</span>
+    </div>
+    <div class="card-body pt-3 pb-2">
+      <div class="dash-chart-wrap">
+        <canvas id="profitTrendChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mb-4">
+    <div class="col-lg-7">
+      <div class="card dash-panel border-0 shadow-sm h-100">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+          <strong>{{ 'Product' if metrics.mode == 'product' else 'Category' }} profit comparison</strong>
+          <span class="text-muted small">Top by gross profit</span>
+        </div>
+        <div class="card-body pt-3 pb-2">
+          {% if metrics.category_chart.labels %}
+          <div class="dash-chart-wrap" style="min-height: 280px;">
+            <canvas id="profitBarChart"></canvas>
+          </div>
+          {% else %}
+          <p class="text-muted small mb-0">No sales in this period.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="card dash-panel border-0 shadow-sm h-100">
+        <div class="card-header bg-white">
+          <strong>Profit share</strong>
+        </div>
+        <div class="card-body py-3">
+          {% if metrics.pie.rows %}
+          <div class="row align-items-center g-3 dash-pie-row">
+            <div class="col-md-6">
+              <ul class="dash-pie-list list-unstyled mb-0">
+                {% for item in metrics.pie.rows %}
+                <li class="dash-pie-list-item">
+                  <span class="dash-pie-swatch" data-color-idx="{{ loop.index0 }}"></span>
+                  <div class="dash-pie-list-text">
+                    <div class="dash-pie-list-name text-truncate" title="{{ item.name }}">{{ item.name }}</div>
+                    {% if item.detail %}
+                    <div class="dash-pie-list-meta text-muted small">{{ item.detail }}</div>
+                    {% endif %}
+                  </div>
+                  <div class="dash-pie-list-value">{{ '%.2f'|format(item.value|float) }}</div>
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <div class="dash-pie-wrap">
+                <canvas id="profitPieChart" aria-label="Profit share chart"></canvas>
+              </div>
+            </div>
+          </div>
+          {% else %}
+          <p class="text-muted small mb-0">No profitable {{ 'products' if metrics.mode == 'product' else 'categories' }} in this period.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <strong>{{ 'Products' if metrics.mode == 'product' else 'Categories' }} report</strong>
+      <span class="text-muted small">{{ metrics.row_count }} row{{ 's' if metrics.row_count != 1 else '' }}</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>#</th>
+            <th>{{ 'Product' if metrics.mode == 'product' else 'Category' }}</th>
+            <th class="text-end">Qty sold</th>
+            <th class="text-end">Net sale</th>
+            <th class="text-end">COGS</th>
+            <th class="text-end">Loss</th>
+            <th class="text-end">Gross profit</th>
+            <th class="text-end">Margin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in metrics.rows %}
+          <tr>
+            <td class="text-muted">{{ loop.index }}</td>
+            <td>
+              {% if row.url %}
+              <a href="{{ row.url }}" class="text-decoration-none fw-semibold">{{ row.name }}</a>
+              {% else %}
+              <span class="fw-semibold">{{ row.name }}</span>
+              {% endif %}
+              {% if metrics.mode == 'category' %}
+              <div class="small">
+                <a href="{{ url_for('inventory.profitability', category_id=row.id, period=selected_period, start_date=start_date if selected_period == 'custom' else None, end_date=end_date if selected_period == 'custom' else None) }}"
+                   class="text-muted text-decoration-none">
+                  View products <i class="fa-solid fa-chevron-right fa-xs"></i>
+                </a>
+              </div>
+              {% endif %}
+            </td>
+            <td class="text-end">{{ '%.2f'|format(row.qty) }}</td>
+            <td class="text-end">{{ '%.2f'|format(row.sale) }}</td>
+            <td class="text-end">{{ '%.2f'|format(row.cost) }}</td>
+            <td class="text-end {% if row.loss > 0 %}text-danger{% endif %}">{{ '%.2f'|format(row.loss) }}</td>
+            <td class="text-end fw-semibold {% if row.profit < 0 %}text-danger{% elif row.profit > 0 %}text-success{% endif %}">
+              {% if row.profit < 0 %}Loss {{ '%.2f'|format((-row.profit)|float) }}{% elif row.profit > 0 %}+{{ '%.2f'|format(row.profit) }}{% else %}0.00{% endif %}
+            </td>
+            <td class="text-end">
+              <span class="{% if row.margin_pct < 0 %}text-danger{% endif %}">{{ '%.1f'|format(row.margin_pct) }}%</span>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="8" class="text-center text-muted py-4">No inventory sales in this period.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% if metrics.rows %}
+        <tfoot class="table-light">
+          <tr>
+            <th></th>
+            <th>Total</th>
+            <th></th>
+            <th class="text-end">{{ '%.2f'|format(metrics.total_sale|float) }}</th>
+            <th class="text-end">{{ '%.2f'|format(metrics.total_cost|float) }}</th>
+            <th class="text-end">{{ '%.2f'|format(metrics.inventory_loss|float) }}</th>
+            <th class="text-end {% if gp < 0 %}text-danger{% elif gp > 0 %}text-success{% endif %}">
+              {% if gp < 0 %}Loss {{ '%.2f'|format(gross_loss_amt) }}{% else %}{{ '%.2f'|format(gross_profit_amt) }}{% endif %}
+            </th>
+            <th class="text-end">{% if gp >= 0 %}{{ '%.1f'|format(metrics.margin_pct|float) }}%{% else %}—{% endif %}</th>
+          </tr>
+        </tfoot>
+        {% endif %}
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleCustomDates() {
+  const isCustom = document.getElementById('period-filter')?.value === 'custom';
+  document.querySelectorAll('.custom-date-field').forEach((el) => {
+    el.style.display = isCustom ? '' : 'none';
+  });
+}
+function onProfitPeriodChange() {
+  toggleCustomDates();
+  if (document.getElementById('period-filter')?.value !== 'custom') {
+    document.getElementById('profit-period-form')?.submit();
+  }
+}
+toggleCustomDates();
+
+window.inventoryProfitReport = {
+  trend: {{ metrics.trend|tojson }},
+  categoryChart: {{ metrics.category_chart|tojson }},
+  pie: {{ metrics.pie|tojson }},
+};
+</script>
+<script src="{{ url_for('static', filename='js/inventory-profitability.js') }}"></script>
+{% endblock %}

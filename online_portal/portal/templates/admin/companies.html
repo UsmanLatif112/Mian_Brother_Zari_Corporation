@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Companies{% endblock %}
+{% block content %}
+<div class="pt-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h3 mb-1">Companies</h1>
+      <p class="text-muted mb-0">Create companies, logos, and mark inactive to stop work on next sync</p>
+    </div>
+    <a class="btn btn-success" href="{{ url_for('admin.company_new') }}"><i class="fa-solid fa-plus me-1"></i>New company</a>
+  </div>
+  <div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+      <table class="table mb-0 align-middle">
+        <thead><tr><th>Company</th><th>Sync code</th><th>Status</th><th>Users</th><th class="text-end">Actions</th></tr></thead>
+        <tbody>
+          {% for c in companies %}
+          <tr>
+            <td class="fw-semibold">{{ c.name }}</td>
+            <td><code>{{ c.sync_code }}</code></td>
+            <td>{% if c.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Inactive</span>{% endif %}</td>
+            <td>{{ c.users.count() }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.company_detail', company_id=c.id) }}">Manage</a>
+              <form class="d-inline" method="post" action="{{ url_for('admin.company_toggle', company_id=c.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-secondary" type="submit">{% if c.is_active %}Deactivate{% else %}Activate{% endif %}</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-muted p-3">No companies yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -9,7 +9,8 @@
     'customers.index',
     period='all',
     type=selected_type if selected_type != 'all' else None,
-    active=selected_active if selected_active != 'all' else None
+    active=selected_active if selected_active != 'all' else None,
+    profit=selected_profit if selected_profit != 'all' else None
   ),
   selected_period=selected_period,
   start_date=start_date,
@@ -17,6 +18,8 @@
   onchange='onCustomersPeriodChange()',
   preserve={
     'type': selected_type if selected_type != 'all' else '',
+    'active': selected_active if selected_active != 'all' else '',
+    'profit': selected_profit if selected_profit != 'all' else '',
   }
 ) }}
 {{ header_status_filter(
@@ -27,25 +30,20 @@
     period=selected_period or 'all',
     start_date=start_date if selected_period == 'custom' else None,
     end_date=end_date if selected_period == 'custom' else None,
-    active=selected_active if selected_active != 'all' else None
+    active=selected_active if selected_active != 'all' else None,
+    profit=selected_profit if selected_profit != 'all' else None
   ),
   selected=selected_type,
   label='Type',
   field_name='type',
   icon='fa-user-tag',
-  options=[
-    ('all', 'All types'),
-    ('good', 'Good'),
-    ('bad', 'Bad'),
-    ('1_year', '1 Year'),
-    ('6_month', '6 Month'),
-    ('late_pay', 'Late Pay'),
-  ],
+  options=[('all', 'All types')] + (customer_type_choices or []),
   preserve={
     'period': selected_period or 'all',
     'start_date': start_date if selected_period == 'custom' else '',
     'end_date': end_date if selected_period == 'custom' else '',
     'active': selected_active if selected_active != 'all' else '',
+    'profit': selected_profit if selected_profit != 'all' else '',
   }
 ) }}
 {{ header_status_filter(
@@ -56,7 +54,8 @@
     period=selected_period or 'all',
     start_date=start_date if selected_period == 'custom' else None,
     end_date=end_date if selected_period == 'custom' else None,
-    type=selected_type if selected_type != 'all' else None
+    type=selected_type if selected_type != 'all' else None,
+    profit=selected_profit if selected_profit != 'all' else None
   ),
   selected=selected_active,
   label='Status',
@@ -73,6 +72,37 @@
     'start_date': start_date if selected_period == 'custom' else '',
     'end_date': end_date if selected_period == 'custom' else '',
     'type': selected_type if selected_type != 'all' else '',
+    'profit': selected_profit if selected_profit != 'all' else '',
+  }
+) }}
+{{ header_status_filter(
+  form_id='customers-profit-form',
+  persist_key='customers-profit',
+  clear_url=url_for(
+    'customers.index',
+    period=selected_period or 'all',
+    start_date=start_date if selected_period == 'custom' else None,
+    end_date=end_date if selected_period == 'custom' else None,
+    type=selected_type if selected_type != 'all' else None,
+    active=selected_active if selected_active != 'all' else None
+  ),
+  selected=selected_profit,
+  label='Profit / Loss',
+  field_name='profit',
+  icon='fa-chart-line',
+  default='all',
+  options=[
+    ('all', 'All'),
+    ('profit', 'Profit'),
+    ('loss', 'Loss'),
+    ('zero', 'No sales / zero'),
+  ],
+  preserve={
+    'period': selected_period or 'all',
+    'start_date': start_date if selected_period == 'custom' else '',
+    'end_date': end_date if selected_period == 'custom' else '',
+    'type': selected_type if selected_type != 'all' else '',
+    'active': selected_active if selected_active != 'all' else '',
   }
 ) }}
 {% endblock %}
@@ -94,7 +124,7 @@
   </div>
 
   <div class="row g-3 mb-3">
-    <div class="col-md-4">
+    <div class="col-6 col-md-4 col-xl">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body d-flex justify-content-between align-items-start">
           <div>
@@ -105,7 +135,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-6 col-md-4 col-xl">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body d-flex justify-content-between align-items-start">
           <div>
@@ -116,7 +146,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-6 col-md-4 col-xl">
       <div class="card stat-card border-0 shadow-sm h-100">
         <div class="card-body d-flex justify-content-between align-items-start">
           <div>
@@ -124,6 +154,33 @@
             <h3 class="mb-0 fw-bold">{{ '%.2f'|format(total_advance|float) }}</h3>
           </div>
           <div class="stat-icon bg-primary-subtle text-primary"><i class="fa-solid fa-wallet"></i></div>
+        </div>
+      </div>
+    </div>
+    {% set list_gp = (total_period_profit or 0)|float %}
+    {% set list_profit = list_gp if list_gp > 0 else 0 %}
+    {% set list_loss = (-list_gp) if list_gp < 0 else 0 %}
+    <div class="col-6 col-md-4 col-xl">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Gross Profit <span class="fw-normal">(listed)</span></p>
+            <h3 class="mb-0 fw-bold {% if list_profit > 0 %}text-success{% endif %}">{{ '%.2f'|format(list_profit) }}</h3>
+            <div class="small text-muted mt-1">{{ profit_customer_count }} profit · {{ loss_customer_count }} loss</div>
+          </div>
+          <div class="stat-icon bg-success-subtle text-success"><i class="fa-solid fa-chart-line"></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl">
+      <div class="card stat-card border-0 shadow-sm h-100">
+        <div class="card-body d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Gross Loss <span class="fw-normal">(listed)</span></p>
+            <h3 class="mb-0 fw-bold {% if list_loss > 0 %}text-danger{% endif %}">{{ '%.2f'|format(list_loss) }}</h3>
+            <div class="small text-muted mt-1">Shown only when listed total is a loss</div>
+          </div>
+          <div class="stat-icon bg-danger-subtle text-danger"><i class="fa-solid fa-arrow-trend-down"></i></div>
         </div>
       </div>
     </div>
@@ -141,9 +198,14 @@
   </div>
 
   <div class="card dash-panel border-0 shadow-sm">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
       <strong>Customer List</strong>
-      <span class="text-muted small">{{ customers|length }} records</span>
+      <div class="d-flex align-items-center gap-2">
+        <span class="text-muted small">{{ customers|length }} records</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-print-customers" title="Print searched / filtered customers">
+          <i class="fa-solid fa-print me-1"></i> Print
+        </button>
+      </div>
     </div>
     <table class="table datatable mb-0 w-100" id="customers-table">
       <thead>
@@ -157,12 +219,18 @@
           <th>Status</th>
           <th class="text-end">Old Balance</th>
           <th class="text-end">Total Balance</th>
+          <th class="text-end">Profit / Loss</th>
           <th class="col-actions">Action</th>
         </tr>
       </thead>
       <tbody>
         {% for c in customers %}
-        <tr>
+        {% set profit = (c.period_profit or 0)|float %}
+        <tr data-name="{{ c.name|e }}"
+            data-phone="{{ (c.phone or '')|e }}"
+            data-address="{{ (c.address or '')|e }}"
+            data-balance="{{ '%.2f'|format(c.balance|float) }}"
+            data-profit="{{ '%.2f'|format(profit) }}">
           <td class="fw-semibold">{{ c.name }}</td>
           <td>{{ c.phone or '—' }}</td>
           <td class="text-truncate" style="max-width:160px" title="{{ c.address or '' }}">{{ c.address or '—' }}</td>
@@ -173,6 +241,10 @@
           <td class="text-end">{{ '%.2f'|format((c.opening_balance or 0)|float) }}</td>
           <td class="text-end {% if c.balance|float > 0 %}text-warning{% elif c.balance|float < 0 %}text-success{% endif %}">
             {{ '%.2f'|format(c.balance|float) }}
+          </td>
+          <td class="text-end fw-semibold {% if profit > 0 %}text-success{% elif profit < 0 %}text-danger{% else %}text-muted{% endif %}"
+              title="Sale − FIFO cost − returns for selected period">
+            {% if profit < 0 %}Loss {{ '%.2f'|format((-profit)|float) }}{% elif profit > 0 %}+{{ '%.2f'|format(profit) }}{% else %}0.00{% endif %}
           </td>
           <td class="col-actions">
             <div class="table-actions">
@@ -250,7 +322,12 @@
     </div>
     <div class="col-md-6">
       <label class="form-label">{{ form.customer_type.label.text }}</label>
-      {{ form.customer_type(class='form-select') }}
+      <div class="input-group customer-type-cell">
+        {{ form.customer_type(class='form-select customer-type-select', id='add-customer-type') }}
+        <button type="button" class="btn erp-btn-quick-add btn-quick-customer-type" title="Add customer type">
+          <i class="fa-solid fa-plus"></i>
+        </button>
+      </div>
     </div>
   </div>
 </form>
@@ -293,6 +370,38 @@
               <label class="form-label">Amount</label>
               <input type="number" step="0.01" min="0.01" name="amount" id="pay-amount" class="form-control" required placeholder="0.00">
             </div>
+            <div class="col-12 d-none" id="pay-due-wrap">
+              <input type="hidden" name="due_enabled" id="pay-due-enabled-value" value="0">
+              <label class="form-label d-flex align-items-center justify-content-between gap-2">
+                <span>Loan due date</span>
+                <span class="form-check form-switch m-0">
+                  <input class="form-check-input" type="checkbox" id="pay-due-enabled" title="Enable due date">
+                </span>
+              </label>
+              <input type="date" name="due_date" id="pay-due-date" class="form-control" disabled title="Turn on the switch to set a due date">
+            </div>
+            <div class="col-12" id="pay-calc-box">
+              <div class="rounded border bg-light px-3 py-2 small">
+                <div class="d-flex justify-content-between gap-2">
+                  <span class="text-muted">Balance</span>
+                  <span class="fw-semibold" id="pay-balance-value">—</span>
+                </div>
+                <div class="d-flex justify-content-between gap-2">
+                  <span class="text-muted">Paid</span>
+                  <span class="fw-semibold" id="pay-paid-display">0</span>
+                </div>
+                <div class="d-flex justify-content-between gap-2" id="pay-remain-wrap">
+                  <span class="text-muted" id="pay-remain-label">Remain</span>
+                  <span class="fw-semibold text-warning" id="pay-remain-value">—</span>
+                </div>
+                <div class="d-flex justify-content-end mt-1">
+                  <button type="button" class="btn btn-link btn-sm p-0 text-primary" id="btn-open-unpaid-dues" disabled
+                          title="Select unpaid sales / loans" aria-label="Unpaid entries">
+                    <i class="fa-solid fa-up-right-from-square"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
             <div class="col-12">
               <label class="form-label">Remarks</label>
               <textarea name="remarks" id="pay-remarks" class="form-control" rows="2" placeholder="Optional"></textarea>
@@ -310,6 +419,8 @@
     </div>
   </div>
 </div>
+
+{% include 'partials/customer_unpaid_dues_modal.html' %}
 
 {# Edit customer #}
 <div class="modal fade erp-form-modal" id="editCustomerModal" tabindex="-1" aria-hidden="true">
@@ -355,14 +466,17 @@
               <input type="date" name="joined_date" class="form-control">
             </div>
             <div class="col-md-6">
-              <label class="form-label">Customer Type</label>
-              <select name="customer_type" class="form-select">
-                <option value="good">Good</option>
-                <option value="bad">Bad</option>
-                <option value="1_year">1 Year</option>
-                <option value="6_month">6 Month</option>
-                <option value="late_pay">Late Pay</option>
-              </select>
+              <label class="form-label" for="edit-customer-type">Customer Type</label>
+              <div class="input-group customer-type-cell">
+                <select name="customer_type" id="edit-customer-type" class="form-select customer-type-select" required>
+                  {% for val, label in customer_type_choices %}
+                  <option value="{{ val }}">{{ label }}</option>
+                  {% endfor %}
+                </select>
+                <button type="button" class="btn erp-btn-quick-add btn-quick-customer-type" title="Add customer type">
+                  <i class="fa-solid fa-plus"></i>
+                </button>
+              </div>
             </div>
             <div class="col-md-6">
               <label class="form-label">Status</label>
@@ -406,9 +520,65 @@ function onCustomersPeriodChange() {
 }
 toggleCustomDates();
 
+document.getElementById('btn-print-customers')?.addEventListener('click', () => {
+  const tableEl = document.getElementById('customers-table');
+  if (!tableEl || !window.jQuery || !window.PrintFiltered?.printRows) {
+    alert('Print is not available right now.');
+    return;
+  }
+  const $ = window.jQuery;
+  if (!$.fn.dataTable.isDataTable(tableEl)) {
+    alert('Customer list is still loading. Try again.');
+    return;
+  }
+  const dt = $(tableEl).DataTable();
+  const rows = [];
+  dt.rows({ search: 'applied' }).every(function () {
+    const tr = this.node();
+    if (!tr) return;
+    const name = (tr.dataset.name || '').trim();
+    const phone = (tr.dataset.phone || '').trim();
+    const address = (tr.dataset.address || '').trim();
+    const bal = parseFloat(tr.dataset.balance || '0');
+    const profit = parseFloat(tr.dataset.profit || '0');
+    const owes = Number.isFinite(bal) && bal > 0 ? bal.toFixed(2) : '0.00';
+    const profitTxt = Number.isFinite(profit) ? profit.toFixed(2) : '0.00';
+    rows.push(['', name || '—', address || '—', phone || '', owes, profitTxt]);
+  });
+  if (!rows.length) {
+    alert('No rows to print. Adjust your search and try again.');
+    return;
+  }
+  const period = document.getElementById('period-filter');
+  const periodLabel = period?.options?.[period.selectedIndex]?.text || 'All';
+  const profitSel = document.querySelector('#customers-profit-form [name=profit]');
+  const profitLabel = profitSel?.options?.[profitSel.selectedIndex]?.text || 'All';
+  const q = document.getElementById('global-search-input')?.value?.trim();
+  const parts = [
+    'Period: ' + periodLabel,
+    'Profit filter: ' + profitLabel,
+    rows.length + ' customer' + (rows.length === 1 ? '' : 's'),
+  ];
+  if (q) parts.push('Search: ' + q);
+  window.PrintFiltered.printRows({
+    title: 'Customer List',
+    subtitle: parts.join(' · '),
+    sectionTitle: 'Customers',
+    headers: ['', 'Name', 'Address', 'Phone', 'Amount Owes', 'Profit / Loss'],
+    rows,
+    checkboxFirst: true,
+    numColumns: [4, 5],
+    sumColumns: [4, 5],
+  });
+});
+
 document.querySelectorAll('.btn-pay-customer').forEach((btn) => {
   btn.addEventListener('click', () => {
-    document.getElementById('pay-customer').value = btn.dataset.id;
+    const sel = document.getElementById('pay-customer');
+    if (sel) {
+      sel.value = btn.dataset.id;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('paymentModal')).show();
   });
 });
@@ -442,5 +612,8 @@ document.addEventListener('click', (e) => {
   bootstrap.Modal.getOrCreateInstance(document.getElementById('editCustomerModal')).show();
 });
 </script>
+{% include 'partials/quick_customer_type_modal.html' %}
 <script src="{{ url_for('static', filename='js/customer-photos.js') }}"></script>
+<script src="{{ url_for('static', filename='js/customer-payment.js') }}?v=7"></script>
+<script src="{{ url_for('static', filename='js/customer-type-quick.js') }}?v=2"></script>
 {% endblock %}

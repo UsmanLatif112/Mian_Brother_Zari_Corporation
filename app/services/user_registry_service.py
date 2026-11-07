@@ -90,6 +90,7 @@ def _ensure_mysql_license_columns(conn) -> None:
         ("company_name", "company_name VARCHAR(200) NULL"),
         ("company_logo", "company_logo VARCHAR(255) NULL"),
         ("company_logo_data", "company_logo_data LONGBLOB NULL"),
+        ("subscription_plan", "subscription_plan VARCHAR(20) NULL"),
     ):
         exists = conn.execute(
             text(
@@ -155,6 +156,7 @@ def save_user_to_mysql(user, *, registration_key: str) -> int:
         "company_name": getattr(user, "company_name", None),
         "company_logo": getattr(user, "company_logo", None),
         "company_logo_data": getattr(user, "company_logo_data", None),
+        "subscription_plan": getattr(user, "subscription_plan", None) or "lifetime",
         "is_active": 1 if user.is_active_user else 0,
         "created_at": now,
         "updated_at": now,
@@ -176,6 +178,7 @@ def save_user_to_mysql(user, *, registration_key: str) -> int:
                         license_expires_at=:license_expires_at,
                         company_name=:company_name, company_logo=:company_logo,
                         company_logo_data=:company_logo_data,
+                        subscription_plan=:subscription_plan,
                         is_active=:is_active, updated_at=:updated_at
                     WHERE username=:username
                     """
@@ -190,12 +193,12 @@ def save_user_to_mysql(user, *, registration_key: str) -> int:
                     INSERT INTO {REGISTRY_TABLE}
                     (username, email, full_name, role, password_hash, registration_key,
                      is_registered, registered_at, device_id, license_type, license_expires_at,
-                     company_name, company_logo, company_logo_data,
+                     company_name, company_logo, company_logo_data, subscription_plan,
                      is_active, created_at, updated_at)
                     VALUES
                     (:username, :email, :full_name, :role, :password_hash, :registration_key,
                      :is_registered, :registered_at, :device_id, :license_type, :license_expires_at,
-                     :company_name, :company_logo, :company_logo_data,
+                     :company_name, :company_logo, :company_logo_data, :subscription_plan,
                      :is_active, :created_at, :updated_at)
                     """
                 ),
@@ -206,8 +209,24 @@ def save_user_to_mysql(user, *, registration_key: str) -> int:
     return cloud_id
 
 
+def _plan_license_fields(plan: str | None) -> tuple[str, datetime | None]:
+    """Return (license_type, license_expires_at) for a subscription plan."""
+    from datetime import timedelta
+
+    plan = (plan or "lifetime").strip().lower()
+    now = datetime.utcnow()
+    if plan == "1_month":
+        return "monthly", now + timedelta(days=30)
+    if plan == "1_year":
+        return "yearly", now + timedelta(days=365)
+    if plan == "custom":
+        # Custom length is applied locally by Super Admin; cloud default 30 days
+        return "monthly", now + timedelta(days=30)
+    return "lifetime", None
+
+
 def activate_user_on_mysql(username: str, key: str, machine_id: str) -> dict[str, Any]:
-    """Verify registration key in MySQL and mark user lifetime-registered (one PC per key)."""
+    """Verify registration key in MySQL and apply Super Admin paid plan (one PC per key)."""
     eng = _engine()
     if not eng:
         raise ValueError("MySQL is not configured.")
@@ -216,7 +235,7 @@ def activate_user_on_mysql(username: str, key: str, machine_id: str) -> dict[str
         row = conn.execute(
             text(
                 f"""
-                SELECT id, registration_key, is_registered, device_id
+                SELECT id, registration_key, is_registered, device_id, subscription_plan
                 FROM {REGISTRY_TABLE}
                 WHERE LOWER(username) = LOWER(:username) AND is_active = 1
                 """
@@ -225,12 +244,15 @@ def activate_user_on_mysql(username: str, key: str, machine_id: str) -> dict[str
         ).fetchone()
         if not row:
             return {"ok": False, "error": "User not found in cloud registry. Contact admin."}
-        cloud_id, db_key, is_registered, bound_device = row
+        cloud_id, db_key, is_registered, bound_device, sub_plan = row
         if (db_key or "").strip().upper() != (key or "").strip().upper():
             return {"ok": False, "error": "Invalid registration key."}
         if is_registered and bound_device and bound_device != machine_id:
             return {"ok": False, "error": "This key is already used on another computer."}
+        plan = (sub_plan or "lifetime").strip().lower()
+        license_type, expires = _plan_license_fields(plan)
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        expires_s = expires.strftime("%Y-%m-%d %H:%M:%S") if expires else None
         conn.execute(
             text(
                 f"""
@@ -238,16 +260,31 @@ def activate_user_on_mysql(username: str, key: str, machine_id: str) -> dict[str
                 SET is_registered = 1,
                     registered_at = :now,
                     device_id = :device_id,
-                    license_type = 'lifetime',
-                    license_expires_at = NULL,
+                    license_type = :license_type,
+                    license_expires_at = :expires,
+                    subscription_plan = :plan,
                     updated_at = :now
                 WHERE id = :id
                 """
             ),
-            {"now": now, "device_id": machine_id, "id": cloud_id},
+            {
+                "now": now,
+                "device_id": machine_id,
+                "license_type": license_type,
+                "expires": expires_s,
+                "plan": plan,
+                "id": cloud_id,
+            },
         )
         conn.commit()
-    return {"ok": True, "cloud_id": cloud_id, "registration_key": db_key}
+    return {
+        "ok": True,
+        "cloud_id": cloud_id,
+        "registration_key": db_key,
+        "subscription_plan": plan,
+        "license_type": license_type,
+        "license_expires_at": expires,
+    }
 
 
 def fetch_registry_user_full(username: str, *, ensure_table: bool = True) -> dict[str, Any] | None:
@@ -434,6 +471,8 @@ def ensure_user_registration_columns() -> None:
             alters.append("ALTER TABLE users ADD COLUMN company_logo VARCHAR(255)")
         if "company_logo_data" not in cols:
             alters.append("ALTER TABLE users ADD COLUMN company_logo_data BLOB")
+        if "subscription_plan" not in cols:
+            alters.append("ALTER TABLE users ADD COLUMN subscription_plan VARCHAR(20)")
         if alters:
             with db.engine.begin() as conn:
                 for stmt in alters:

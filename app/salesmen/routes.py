@@ -10,7 +10,10 @@ from app.extensions import db
 from app.forms import SalesmanForm
 from app.models import LedgerEntry, Sale, Salesman
 from app.services.audit_service import log_audit
-from app.services.ledger_service import delete_ledger_entry, post_ledger_entry
+from app.services.ledger_service import (
+    delete_ledger_entry,
+    sync_party_opening_entry,
+)
 from app.utils.decorators import permission_required
 from app.utils.uploads import delete_image, save_image
 from app.utils.working_date import get_working_date
@@ -58,9 +61,11 @@ def _sales_totals_by_salesman(salesman_ids, range_start=None, range_end=None):
 
 
 def _salesman_page(form=None, open_modal=False):
-    from datetime import datetime, time
-
     from app.services.dashboard_service import _range_for_filter
+
+    form = form or SalesmanForm()
+    if not form.joined_date.data:
+        form.joined_date.data = get_working_date()
 
     period = request.args.get("period", "all")
     period_start = _parse_date(request.args.get("start_date"))
@@ -68,10 +73,10 @@ def _salesman_page(form=None, open_modal=False):
     range_start, range_end = _range_for_filter(period, period_start, period_end)
 
     query = Salesman.query.filter_by(is_deleted=False)
-    if range_start and range_end:
-        start_dt = datetime.combine(range_start, time.min)
-        end_dt = datetime.combine(range_end, time.max)
-        query = query.filter(Salesman.created_at >= start_dt, Salesman.created_at <= end_dt)
+    if range_start:
+        query = query.filter(Salesman.joined_date >= range_start)
+    if range_end:
+        query = query.filter(Salesman.joined_date <= range_end)
 
     salesmen = query.order_by(Salesman.name).all()
 
@@ -112,7 +117,7 @@ def _salesman_page(form=None, open_modal=False):
     return render_template(
         "salesmen/index.html",
         salesmen=salesmen,
-        form=form or SalesmanForm(),
+        form=form,
         open_modal=open_modal or request.args.get("open_modal") == "1",
         today=get_working_date().isoformat(),
         total_sales_all=total_sales_all,
@@ -143,11 +148,13 @@ def create():
         try:
             opening_raw = form.opening_balance.data
             opening = Decimal("0") if opening_raw in (None, "") else Decimal(str(opening_raw))
+            joined = form.joined_date.data or get_working_date()
             salesman = Salesman(
                 name=form.name.data.strip(),
                 phone=(form.phone.data or "").strip() or None,
                 company=(form.company.data or "").strip() or None,
                 address=(form.address.data or "").strip() or None,
+                joined_date=joined,
                 opening_balance=opening,
                 balance=opening,
                 notes=(form.notes.data or "").strip() or None,
@@ -155,19 +162,13 @@ def create():
             _apply_salesman_photo(salesman)
             db.session.add(salesman)
             db.session.flush()
-            if opening:
-                opening_d = Decimal(str(opening))
-                debit = opening_d if opening_d > 0 else Decimal("0")
-                credit = abs(opening_d) if opening_d < 0 else Decimal("0")
-                post_ledger_entry(
-                    "salesman",
-                    salesman.id,
-                    "opening",
-                    debit=debit,
-                    credit=credit,
-                    entry_date=get_working_date(),
-                    notes="Opening balance",
-                )
+            sync_party_opening_entry(
+                "salesman",
+                salesman.id,
+                opening,
+                entry_date=joined,
+                notes="Opening balance",
+            )
             log_audit("create", "salesman", None, salesman.name)
             db.session.commit()
             flash("Salesman created.", "success")
@@ -197,11 +198,23 @@ def edit(salesman_id):
         salesman.company = (request.form.get("company") or "").strip() or None
         salesman.address = (request.form.get("address") or "").strip() or None
         salesman.notes = (request.form.get("notes") or "").strip() or None
+        joined = request.form.get("joined_date")
+        if joined:
+            salesman.joined_date = date_cls.fromisoformat(joined)
+        elif not salesman.joined_date:
+            salesman.joined_date = get_working_date()
         opening = request.form.get("opening_balance")
         salesman.opening_balance = (
             Decimal("0") if opening in (None, "") else Decimal(str(opening))
         )
         _apply_salesman_photo(salesman)
+        sync_party_opening_entry(
+            "salesman",
+            salesman.id,
+            salesman.opening_balance,
+            entry_date=salesman.joined_date or get_working_date(),
+            notes="Opening balance",
+        )
         log_audit("update", "salesman", salesman.id, salesman.name)
         db.session.commit()
         flash("Salesman updated.", "success")
@@ -258,8 +271,6 @@ def delete_ledger(entry_id):
 @login_required
 @permission_required("salesmen.view")
 def detail(salesman_id):
-    from datetime import datetime, time
-
     from app.services.dashboard_service import _range_for_filter
 
     salesman = db.session.get(Salesman, salesman_id)

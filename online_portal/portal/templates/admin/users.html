@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<div class="pt-3">
+  <h1 class="h3 mb-1">All users</h1>
+  <p class="text-muted mb-3">Company admins (online) and shop clerks (offline). Mark inactive or regenerate PC keys.</p>
+  <div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+      <table class="table mb-0 align-middle">
+        <thead>
+          <tr>
+            <th>Name</th><th>Username</th><th>Company</th><th>Role</th><th>Key</th><th>Status</th><th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>{{ u.full_name }}</td>
+            <td>{{ u.username }}</td>
+            <td>{{ u.company.name if u.company else '—' }}</td>
+            <td>{{ u.role_label }}</td>
+            <td><code class="small">{{ u.registration_key or '—' }}</code></td>
+            <td>
+              {% if u.is_active_user and (not u.company or u.company.is_active) %}
+              <span class="badge text-bg-success">Active</span>
+              {% else %}
+              <span class="badge text-bg-secondary">Inactive</span>
+              {% endif %}
+            </td>
+            <td class="text-end text-nowrap">
+              <form class="d-inline" method="post" action="{{ url_for('admin.user_regen_key', user_id=u.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-primary" type="submit">Regen key</button>
+              </form>
+              <form class="d-inline" method="post" action="{{ url_for('admin.user_toggle', user_id=u.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-secondary" type="submit">{% if u.is_active_user %}Deactivate{% else %}Activate{% endif %}</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-muted p-3">No users yet. Create a company first.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

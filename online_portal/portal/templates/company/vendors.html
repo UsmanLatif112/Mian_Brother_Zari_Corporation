@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Vendors{% endblock %}
+{% block search_placeholder %}Search vendors…{% endblock %}
+{% block page_filters %}
+{% include 'partials/period_filter.html' %}
+{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 dash-hero">
+    <div>
+      <h1 class="h3 mb-1">Vendors</h1>
+      <p class="text-muted mb-0">Suppliers and payable balances</p>
+    </div>
+  </div>
+  {% if error %}
+  <div class="alert alert-warning">{{ error }}</div>
+  {% endif %}
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="table-responsive">
+      <table class="table mb-0 align-middle portal-search-table w-100">
+        <thead>
+          <tr>
+            <th>Name</th><th>Phone</th><th>Address</th>
+            <th class="text-end">Opening</th><th class="text-end">Balance</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in vendors %}
+          <tr>
+            <td class="fw-semibold">{{ v.name }}</td>
+            <td>{{ v.phone or '—' }}</td>
+            <td class="small text-muted">{{ v.address or '—' }}</td>
+            <td class="text-end">{{ '%.2f'|format(v.opening_balance or 0) }}</td>
+            <td class="text-end fw-semibold">{{ '%.2f'|format(v.balance or 0) }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('company.vendor_ledger', vendor_id=v.id) }}">Ledger</a>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-muted p-3">No vendors.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

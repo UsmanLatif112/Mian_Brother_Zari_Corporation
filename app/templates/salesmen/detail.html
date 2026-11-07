@@ -161,6 +161,11 @@
               <label class="form-label">Opening Balance</label>
               <input type="number" step="0.01" name="opening_balance" class="form-control" value="{{ salesman.opening_balance or 0 }}">
             </div>
+            <div class="col-md-6">
+              <label class="form-label">Date Added</label>
+              <input type="date" name="joined_date" class="form-control erp-entry-date" data-erp-entry-date
+                     value="{{ salesman.joined_date.isoformat() if salesman.joined_date else today }}">
+            </div>
             <div class="col-12">
               <label class="form-label">Address</label>
               <textarea name="address" class="form-control" rows="2">{{ salesman.address or '' }}</textarea>

@@ -1,0 +1,24 @@
+{# Customer type select + quick-add (+)
+   Usage: {% include 'partials/customer_type_field.html' %}
+   Optional: selected_type, field_name, select_id, wrap_class
+#}
+{% set _name = field_name or 'customer_type' %}
+{% set _id = select_id or 'customer-type-select' %}
+{% set _sel = selected_type or 'good' %}
+{% set _choices = customer_type_choices if customer_type_choices is defined else [] %}
+<div class="{{ wrap_class or 'col-md-6' }}">
+  <label class="form-label" for="{{ _id }}">Customer Type</label>
+  <div class="input-group customer-type-cell">
+    <select name="{{ _name }}" id="{{ _id }}" class="form-select customer-type-select" required>
+      {% for val, label in _choices %}
+      <option value="{{ val }}" {% if _sel == val %}selected{% endif %}>{{ label }}</option>
+      {% else %}
+      <option value="good" {% if _sel == 'good' %}selected{% endif %}>Good</option>
+      <option value="bad" {% if _sel == 'bad' %}selected{% endif %}>Bad</option>
+      {% endfor %}
+    </select>
+    <button type="button" class="btn erp-btn-quick-add btn-quick-customer-type" title="Add customer type">
+      <i class="fa-solid fa-plus"></i>
+    </button>
+  </div>
+</div>

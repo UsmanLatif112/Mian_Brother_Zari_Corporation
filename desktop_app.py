@@ -168,7 +168,7 @@ def _run_in_browser(url: str, server_thread: threading.Thread) -> int:
 
 
 class DesktopApi:
-    """JS bridge for native Windows Save / folder dialogs."""
+    """JS bridge for native Windows Save / folder dialogs / multi-window pages."""
 
     def quit_for_update(self):
         """Close the desktop window so the update script can replace app files."""
@@ -178,6 +178,60 @@ class DesktopApi:
             webview.windows[0].destroy()
         return True
 
+    def open_app_window(self, url: str = "", title: str = ""):
+        """Open any app page in a new native window (every call = new window)."""
+        import webview
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+        from app.runtime_paths import APP_DISPLAY_NAME
+
+        target = (url or "").strip()
+        if not target:
+            return False
+        if target.startswith("/"):
+            base = (os.environ.get("APP_BASE_URL") or "http://127.0.0.1:5000").rstrip("/")
+            target = f"{base}{target}"
+        # Mark child windows so they skip the auto update/offline modal.
+        try:
+            parts = urlsplit(target)
+            q = dict(parse_qsl(parts.query, keep_blank_values=True))
+            if q.get("mbf_child") != "1":
+                q["mbf_child"] = "1"
+                target = urlunsplit(
+                    (parts.scheme, parts.netloc, parts.path, urlencode(q), parts.fragment)
+                )
+        except Exception:
+            pass
+        label = (title or "").strip() or APP_DISPLAY_NAME
+        if label != APP_DISPLAY_NAME and not label.startswith(f"{APP_DISPLAY_NAME}"):
+            label = f"{APP_DISPLAY_NAME} — {label}"
+        webview.create_window(
+            label,
+            target,
+            width=1360,
+            height=860,
+            min_size=(1024, 700),
+            confirm_close=False,
+            js_api=DesktopApi(),
+        )
+        return True
+
+    def _window_for_dialog(self):
+        """Prefer the Backup & Cloud window over the main dashboard window."""
+        import webview
+
+        windows = list(webview.windows or [])
+        if not windows:
+            return None
+        for win in reversed(windows):
+            try:
+                current = (win.get_current_url() or "").lower()
+            except Exception:
+                current = ""
+            if "sync-backup" in current:
+                return win
+        return windows[-1]
+
     def choose_backup_path(self, default_filename: str = "sqlite_backup.zip"):
         import webview
 
@@ -185,8 +239,8 @@ class DesktopApi:
         lower = name.lower()
         if not (lower.endswith(".zip") or lower.endswith(".db")):
             name = f"{name}.zip"
-        windows = webview.windows
-        if not windows:
+        win = self._window_for_dialog()
+        if not win:
             return None
         # Start in Documents so the explorer dialog is familiar
         start_dir = os.path.join(os.path.expanduser("~"), "Documents")
@@ -197,7 +251,7 @@ class DesktopApi:
             "SQLite Database (*.db)",
             "All files (*.*)",
         )
-        result = windows[0].create_file_dialog(
+        result = win.create_file_dialog(
             webview.SAVE_DIALOG,
             directory=start_dir,
             save_filename=name,
@@ -263,17 +317,26 @@ def main() -> int:
         return 1
 
     try:
+        from app.runtime_paths import user_data_dir
+
+        webview_storage = os.path.join(user_data_dir(), "webview")
+        os.makedirs(webview_storage, exist_ok=True)
+
         webview.create_window(
             APP_DISPLAY_NAME,
             url,
             width=1360,
             height=860,
             min_size=(1024, 700),
-            confirm_close=True,
+            confirm_close=False,
             js_api=DesktopApi(),
         )
-        # On Windows, Edge WebView2 is the renderer; window shell still uses WinForms.
-        webview.start(gui="edgechromium")
+        # private_mode=False so session cookies persist and are shared across new windows
+        webview.start(
+            gui="edgechromium",
+            private_mode=False,
+            storage_path=webview_storage,
+        )
         try:
             from app.services.update_service import launch_pending_update
 

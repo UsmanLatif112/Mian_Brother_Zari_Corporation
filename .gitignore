@@ -36,9 +36,16 @@ data/
 backups/
 databses/
 
-# User packages / scratch DB folders
+# Scratch / legacy folders (do not reintroduce)
 Saeed_New/
 new_test/
+Chachu saeed data base/
+shop app/
+shop_instance/
+instance_original/
+Update_Release/
+firebase/
+test/
 
 # Desktop build output (PyInstaller)
 build/
@@ -49,14 +56,13 @@ dist/
 releases/
 final release/
 *.zip
+*.rar
+
+# Packaged desktop builds (keep locally; not source)
+shop_app/
 
 # User uploads (logos, photos — per-install, not source code)
 app/static/uploads/
-
-# Test / import scratch data
-test/*.csv
-test/*.xlsx
-test/*.xls
 
 # Misc local files
 image.png

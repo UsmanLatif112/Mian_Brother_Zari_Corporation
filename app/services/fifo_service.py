@@ -599,8 +599,13 @@ def next_fifo_sale_price(product, unit_weight=None):
     return Decimal(str(product.sale_price or 0))
 
 
-def adjust_batch(layer, new_qty, user_id, notes=None, entry_at=None):
-    """Set remaining qty on a batch; sync product.current_stock. Does not touch sold history."""
+def adjust_batch(layer, new_qty, user_id, notes=None, entry_at=None, *, record_loss=True):
+    """
+    Set remaining sealed qty on a batch; sync product.current_stock.
+
+    record_loss=True (default): a decrease is treated as physical shortage → InventoryLoss.
+    Use record_loss=False for cascade deletes / purchase corrections (payable already reversed).
+    """
     layer = db.session.get(StockLayer, layer.id if hasattr(layer, "id") else int(layer))
     if not layer:
         raise ValueError("Batch not found.")
@@ -656,7 +661,8 @@ def adjust_batch(layer, new_qty, user_id, notes=None, entry_at=None):
         )
     )
     # Shortage (e.g. bought 50, count 49) → non-cash inventory loss (does not hit cash)
-    if delta < 0:
+    # Skip on cascade delete / purchase reverse — those are not physical losses.
+    if delta < 0 and record_loss:
         try:
             from app.services.inventory_loss_service import record_inventory_loss
             from app.utils.working_date import get_working_date
@@ -674,6 +680,127 @@ def adjust_batch(layer, new_qty, user_id, notes=None, entry_at=None):
             )
         except Exception:
             pass
+    return layer
+
+
+def adjust_open_weight(layer, new_open_weight, user_id, notes=None, entry_at=None, *, record_loss=True):
+    """
+    Set open/loose weight on a batch and sync product stock.
+
+    A decrease with record_loss=True is a physical shortage → InventoryLoss
+    (bag-equivalent × unit cost). Use record_loss=False for purchase corrections.
+    """
+    layer = db.session.get(StockLayer, layer.id if hasattr(layer, "id") else int(layer))
+    if not layer:
+        raise ValueError("Batch not found.")
+    product = layer.product
+    old_w = Decimal(str(layer.open_weight_remaining or 0))
+    new_w = Decimal(str(new_open_weight or 0))
+    if new_w < 0:
+        raise ValueError("Open weight cannot be negative.")
+    delta_w = new_w - old_w
+    if delta_w == 0:
+        return layer
+
+    when = as_working_datetime(entry_at) if entry_at is not None else get_working_datetime()
+    layer.open_weight_remaining = new_w
+    sync_product_stock(product)
+
+    uw = layer.effective_unit_weight
+    wu = layer.effective_weight_unit or "kg"
+    # Movement qty in bag-equivalent when unit weight is known
+    if uw and uw > 0:
+        delta_bags = delta_w / uw
+    else:
+        delta_bags = delta_w
+
+    default_notes = (
+        notes
+        or f"Open weight {old_w.normalize()}→{new_w.normalize()} {wu}"
+    )
+    db.session.add(
+        StockMovement(
+            product_id=product.id,
+            movement_type="adjust_open_weight",
+            quantity=delta_bags,
+            unit_cost=layer.unit_cost,
+            balance_after=product.current_stock,
+            reference_type="stock_layer",
+            reference_id=layer.id,
+            notes=default_notes,
+            created_by_id=user_id,
+            created_at=when,
+        )
+    )
+
+    if delta_w < 0 and record_loss:
+        try:
+            from app.services.inventory_loss_service import record_inventory_loss
+
+            loss_qty = abs(delta_bags)
+            loss_date = when.date() if hasattr(when, "date") else None
+            record_inventory_loss(
+                product_id=product.id,
+                quantity=loss_qty,
+                unit_cost=layer.unit_cost or 0,
+                source_type="adjustment_shortage",
+                source_id=layer.id,
+                loss_date=loss_date,
+                notes=notes
+                or (
+                    f"Batch #{layer.id} open-weight shortage "
+                    f"{old_w.normalize()}→{new_w.normalize()} {wu}"
+                ),
+                user_id=user_id,
+            )
+        except Exception:
+            pass
+    return layer
+
+
+def clear_layer_stock(layer, user_id, notes=None, entry_at=None, *, movement_type="batch_delete"):
+    """
+    Zero sealed + open weight on a layer for cascade delete/void.
+    Writes a stock movement only — never InventoryLoss (purchase/vendor already reversed).
+    """
+    layer = db.session.get(StockLayer, layer.id if hasattr(layer, "id") else int(layer))
+    if not layer:
+        raise ValueError("Batch not found.")
+    product = layer.product
+    sealed = Decimal(str(layer.quantity_remaining or 0))
+    open_w = Decimal(str(getattr(layer, "open_weight_remaining", None) or 0))
+    if sealed == 0 and open_w == 0:
+        return layer
+
+    when = as_working_datetime(entry_at) if entry_at is not None else get_working_datetime()
+    # Bag-equivalent removed (sealed + open weight / unit weight)
+    removed = Decimal("0")
+    try:
+        removed = Decimal(str(layer.stock_qty_equivalent or 0))
+    except Exception:
+        removed = sealed
+    if removed <= 0:
+        removed = sealed
+
+    layer.quantity_remaining = Decimal("0")
+    layer.open_weight_remaining = Decimal("0")
+    sync_product_stock(product)
+
+    default_notes = notes or f"Batch #{layer.id} cleared (cascade delete)"
+    db.session.add(
+        StockMovement(
+            product_id=product.id,
+            movement_type=movement_type,
+            quantity=-abs(removed),
+            unit_cost=layer.unit_cost,
+            balance_after=product.current_stock,
+            reference_type="stock_layer",
+            reference_id=layer.id,
+            notes=default_notes,
+            created_by_id=user_id,
+            created_at=when,
+        )
+    )
     return layer
 
 

@@ -214,16 +214,20 @@
       {% from 'partials/macros.html' import photo_field %}
       {{ photo_field(icon='fa-image', label='Company logo', upload='ajax', folder='logos', clear_name='clear_company_logo', picker_id='create-user-logo-picker') }}
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
       {{ form.trial_amount.label(class='form-label') }}
       {{ form.trial_amount(class='form-control', min=1, max=9999) }}
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
       {{ form.trial_unit.label(class='form-label') }}
       {{ form.trial_unit(class='form-select') }}
     </div>
-    <div class="col-md-4 d-flex align-items-end">
-      <div class="form-text mb-2">Trial starts when the user is created (default 7 days).</div>
+    <div class="col-md-3">
+      {{ form.subscription_plan.label(class='form-label') }}
+      {{ form.subscription_plan(class='form-select') }}
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+      <div class="form-text mb-2">Trial first, then paid plan after serial key.</div>
     </div>
     <div class="col-md-6">
       <div class="password-field-wrap">

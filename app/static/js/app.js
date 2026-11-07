@@ -144,8 +144,9 @@
     $('.datatable').each(function initDatatable() {
       const $table = $(this);
       const emptyTable = $table.data('emptyTable') || 'No data available';
+      const pageLen = parseInt($table.data('pageLength'), 10);
       $table.DataTable({
-      pageLength: 25,
+      pageLength: Number.isFinite(pageLen) && pageLen > 0 ? pageLen : 25,
       lengthMenu: [
         [10, 25, 50, 100, -1],
         [10, 25, 50, 100, 'All'],
@@ -255,6 +256,20 @@
     } catch (_) { /* ignore */ }
   }
 
+  try {
+    const pendingRaw = sessionStorage.getItem('erp-pending-toast');
+    if (pendingRaw) {
+      sessionStorage.removeItem('erp-pending-toast');
+      const pending = JSON.parse(pendingRaw);
+      if (pending && pending.message) {
+        setTimeout(
+          () => showErpToast(pending.category || 'success', pending.message, 5000),
+          80
+        );
+      }
+    }
+  } catch (_) { /* ignore */ }
+
   if (document.querySelector('.erp-wrapper')) {
     let toastCursor = parseInt(sessionStorage.getItem('erp-toast-cursor') || '0', 10) || 0;
     let toastReady = sessionStorage.getItem('erp-toast-ready') === '1';
@@ -301,7 +316,133 @@
       setInterval(pollAppToasts, 3000);
     });
 
+    initDueNotifications();
     initRegistrationGuard();
+  }
+
+  function csrfHeader() {
+    return {
+      'X-CSRFToken': window.CSRF_TOKEN || document.querySelector('meta[name=csrf-token]')?.content || '',
+      'X-Requested-With': 'fetch',
+    };
+  }
+
+  function renderDueNotifications(items) {
+    const list = document.getElementById('due-notifications-list');
+    const badge = document.getElementById('due-notifications-badge');
+    if (!list) return;
+    const unread = (items || []).filter((n) => !n.is_read);
+    if (badge) {
+      if (unread.length) {
+        badge.textContent = unread.length > 99 ? '99+' : String(unread.length);
+        badge.classList.remove('d-none');
+      } else {
+        badge.classList.add('d-none');
+      }
+    }
+    if (!(items || []).length) {
+      list.innerHTML = '<div class="text-muted small text-center py-4">No reminders</div>';
+      return;
+    }
+    const stageClass = {
+      tomorrow: 'border-success',
+      due: 'border-warning',
+      overdue: 'border-danger',
+    };
+    const stageBg = {
+      tomorrow: 'bg-success-subtle',
+      due: 'bg-warning-subtle',
+      overdue: 'bg-danger-subtle',
+    };
+    list.innerHTML = items
+      .map((n) => {
+        const stage = n.stage || 'due';
+        const border = stageClass[stage] || 'border-secondary';
+        const bg = stageBg[stage] || '';
+        const readCls = n.is_read ? 'opacity-75' : '';
+        return `<button type="button" class="dropdown-item due-notification-item border-start border-3 ${border} ${bg} ${readCls} py-2 px-3 text-wrap"
+                  data-id="${n.id}" data-read="${n.is_read ? '1' : '0'}">
+            <div class="fw-semibold small">${escapeHtml(n.title || '')}</div>
+            <div class="text-muted small">${escapeHtml(n.message || '')}</div>
+          </button>`;
+      })
+      .join('');
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  async function syncDueNotifications({ toast } = { toast: true }) {
+    try {
+      const working = document.body.dataset.workingDate || '';
+      const key = `erp-due-sync:${working}`;
+      const already = sessionStorage.getItem(key) === '1';
+      const toastFlag = toast && !already ? '1' : '0';
+      const res = await fetch(`/api/notifications/due-sync?toast=${toastFlag}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: csrfHeader(),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      sessionStorage.setItem(key, '1');
+      renderDueNotifications(data.notifications || []);
+    } catch (_) { /* ignore */ }
+  }
+
+  async function refreshDueNotificationsList() {
+    try {
+      const res = await fetch('/api/notifications/due?unread=0', {
+        credentials: 'same-origin',
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      renderDueNotifications(data.notifications || []);
+    } catch (_) { /* ignore */ }
+  }
+
+  function initDueNotifications() {
+    if (!document.getElementById('due-notifications-btn')) return;
+    syncDueNotifications({ toast: true });
+    setInterval(() => syncDueNotifications({ toast: true }), 5 * 60 * 1000);
+
+    document.getElementById('due-notifications-btn')?.addEventListener('click', () => {
+      refreshDueNotificationsList();
+    });
+
+    document.getElementById('due-notifications-list')?.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.due-notification-item');
+      if (!btn || btn.dataset.read === '1') return;
+      const id = btn.dataset.id;
+      try {
+        await fetch(`/api/notifications/${id}/read`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: csrfHeader(),
+        });
+        btn.dataset.read = '1';
+        btn.classList.add('opacity-75');
+        refreshDueNotificationsList();
+      } catch (_) { /* ignore */ }
+    });
+
+    document.getElementById('due-notifications-read-all')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        await fetch('/api/notifications/due/read-all', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: csrfHeader(),
+        });
+        refreshDueNotificationsList();
+      } catch (_) { /* ignore */ }
+    });
   }
 
   function showRegistrationModal() {

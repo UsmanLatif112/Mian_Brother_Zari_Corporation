@@ -4,7 +4,7 @@ from app.extensions import db
 from app.models.mixins import SoftDeleteMixin, TimestampMixin
 from app.utils.working_date import default_entry_date
 
-# good | bad | 1_year | 6_month | late_pay
+# Fallback labels when customer_types table is empty / offline
 CUSTOMER_TYPE_CHOICES = [
     ("good", "Good"),
     ("bad", "Bad"),
@@ -12,6 +12,20 @@ CUSTOMER_TYPE_CHOICES = [
     ("6_month", "6 Month"),
     ("late_pay", "Late Pay"),
 ]
+
+
+class CustomerType(SoftDeleteMixin, TimestampMixin, db.Model):
+    """User-managed customer types (Good, Bad, custom…)."""
+
+    __tablename__ = "customer_types"
+
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(60), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(120), nullable=False, index=True)
+    due_days = db.Column(db.Integer, default=30, nullable=False)
+    is_system = db.Column(db.Boolean, default=False, nullable=False)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    remote_id = db.Column(db.Integer, nullable=True, index=True)
 
 
 class Customer(SoftDeleteMixin, TimestampMixin, db.Model):
@@ -22,7 +36,7 @@ class Customer(SoftDeleteMixin, TimestampMixin, db.Model):
     phone = db.Column(db.String(30), nullable=True, index=True)
     cnic = db.Column(db.String(20), nullable=True)
     address = db.Column(db.Text, nullable=True)
-    customer_type = db.Column(db.String(30), default="good", nullable=False, index=True)
+    customer_type = db.Column(db.String(60), default="good", nullable=False, index=True)
     old_book_no = db.Column(db.String(50), nullable=True, index=True)
     joined_date = db.Column(db.Date, default=default_entry_date, nullable=True, index=True)
     opening_balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
@@ -42,7 +56,14 @@ class Customer(SoftDeleteMixin, TimestampMixin, db.Model):
 
     @property
     def customer_type_label(self):
-        return dict(CUSTOMER_TYPE_CHOICES).get(self.customer_type, self.customer_type)
+        try:
+            from app.services.customer_type_service import customer_type_label
+
+            return customer_type_label(self.customer_type)
+        except Exception:
+            return dict(CUSTOMER_TYPE_CHOICES).get(
+                self.customer_type, self.customer_type
+            )
 
     @property
     def active_label(self):
@@ -150,6 +171,7 @@ class Salesman(SoftDeleteMixin, TimestampMixin, db.Model):
     phone = db.Column(db.String(30), nullable=True, index=True)
     company = db.Column(db.String(200), nullable=True)
     address = db.Column(db.Text, nullable=True)
+    joined_date = db.Column(db.Date, default=default_entry_date, nullable=True, index=True)
     opening_balance = db.Column(db.Numeric(14, 2), default=Decimal("0"))
     notes = db.Column(db.Text, nullable=True)
     # Outstanding credit attributable to this salesman (debit - credit on ledger)

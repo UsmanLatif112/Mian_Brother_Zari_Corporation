@@ -41,6 +41,13 @@ def _seed_reference_data() -> None:
         if not ExpenseCategory.query.filter_by(name=cat_name).first():
             db.session.add(ExpenseCategory(name=cat_name))
 
+    try:
+        from app.services.customer_type_service import seed_default_customer_types
+
+        seed_default_customer_types()
+    except Exception:
+        pass
+
     for type_name, units in UNIT_PRESETS.items():
         ut = UnitType.query.filter_by(name=type_name).first()
         if not ut:

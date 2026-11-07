@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block title %}SQLite packages — {{ suite_name }}{% endblock %}
+{% block content %}
+<div class="pt-1">
+  <h1 class="h3 mb-1">SQLite packages</h1>
+  <p class="text-muted mb-3">
+    Upload a company’s <code>mbzc_erp.db</code> (their shop data).
+    When they download the app from the portal, this DB is packed into their zip and
+    <strong>restricted</strong> to that company’s portal users and registration keys only.
+  </p>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>Upload package</strong></div>
+    <div class="card-body">
+      <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-5">
+          <label class="form-label">Company</label>
+          <select class="form-select" name="company_id" required>
+            <option value="">Select…</option>
+            {% for p in packages %}
+            <option value="{{ p.company.id }}">{{ p.company.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">SQLite file (.db)</label>
+          <input class="form-control" type="file" name="sqlite_file" accept=".db,.sqlite,.sqlite3" required>
+        </div>
+        <div class="col-md-2">
+          <button class="btn btn-success w-100" type="submit">Upload</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+      <table class="table mb-0 align-middle">
+        <thead><tr><th>Company</th><th>Status</th><th>Size</th><th>Updated</th><th></th></tr></thead>
+        <tbody>
+          {% for p in packages %}
+          <tr>
+            <td>{{ p.company.name }}</td>
+            <td>{% if p.exists %}<span class="badge text-bg-success">Ready</span>{% else %}<span class="badge text-bg-secondary">Missing</span>{% endif %}</td>
+            <td>{% if p.exists %}{{ '%.1f'|format(p.size / 1048576) }} MB{% else %}—{% endif %}</td>
+            <td class="small text-muted">{{ p.mtime or '—' }}</td>
+            <td class="text-end">
+              {% if p.exists %}
+              <a class="btn btn-sm btn-outline-success" href="{{ url_for('downloads.download_sqlite', company_id=p.company.id) }}">Download</a>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-muted p-3">Create a company first.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

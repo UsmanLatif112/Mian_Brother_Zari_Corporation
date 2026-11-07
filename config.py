@@ -43,7 +43,12 @@ class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 28000}
-    PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
+    # Keep users signed in across app restarts / new windows (min 30 days)
+    PERMANENT_SESSION_LIFETIME = timedelta(days=30)
+    REMEMBER_COOKIE_DURATION = timedelta(days=30)
+    REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_REFRESH_EACH_REQUEST = True
+    SESSION_REFRESH_EACH_REQUEST = True
     WTF_CSRF_ENABLED = True
     BACKUP_DIR = os.environ.get("BACKUP_DIR") or os.path.join(basedir, "backups")
     SYNC_AUTO_ENABLED = os.environ.get("SYNC_AUTO_ENABLED", "false").lower() == "true"
@@ -51,10 +56,13 @@ class Config:
     # Short MySQL probe — keeps Sync page + cron from hanging when offline
     SYNC_MYSQL_CONNECT_TIMEOUT = int(os.environ.get("SYNC_MYSQL_CONNECT_TIMEOUT", "2"))
     SYNC_MYSQL_CACHE_SECONDS = int(os.environ.get("SYNC_MYSQL_CACHE_SECONDS", "45"))
-    # Separate cron: SQLite auto-backup (all files kept on disk; UI shows last N)
+    # Separate cron: SQLite auto-backup every N hours.
+    # Retention: last BACKUP_UI_LIMIT backups for today + 1 day-end copy for each
+    # of the last BACKUP_KEEP_DAYS calendar days.
     AUTO_BACKUP_ENABLED = os.environ.get("AUTO_BACKUP_ENABLED", "true").lower() == "true"
     AUTO_BACKUP_INTERVAL_HOURS = int(os.environ.get("AUTO_BACKUP_INTERVAL_HOURS", "1"))
     BACKUP_UI_LIMIT = int(os.environ.get("BACKUP_UI_LIMIT", "10"))
+    BACKUP_KEEP_DAYS = int(os.environ.get("BACKUP_KEEP_DAYS", "10"))
     # Google Drive cloud backup (replaces MySQL sync for desktop/offline-first)
     GOOGLE_DRIVE_CLIENT_ID = os.environ.get("GOOGLE_DRIVE_CLIENT_ID", "")
     GOOGLE_DRIVE_CLIENT_SECRET = os.environ.get("GOOGLE_DRIVE_CLIENT_SECRET", "")

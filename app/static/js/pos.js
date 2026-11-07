@@ -87,7 +87,15 @@
       })
     });
     const data = await res.json();
-    if (data.ok) { alert('Sale complete: ' + data.invoice_no); location.href = '/sales/' + data.sale_id + '/invoice?next=' + encodeURIComponent('/sales/'); }
+    if (data.ok) {
+      alert('Sale complete: ' + data.invoice_no);
+      const invoiceUrl = '/sales/' + data.sale_id + '/invoice?next=' + encodeURIComponent('/sales/');
+      if (typeof window.openAppPage === 'function') {
+        window.openAppPage(invoiceUrl, 'Invoice');
+      } else {
+        location.href = invoiceUrl;
+      }
+    }
     else alert(data.error || 'Sale failed');
   }
 

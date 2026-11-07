@@ -15,8 +15,9 @@ from app.services.vendor_payment_service import (
     PAYMENT_TYPES,
     delete_vendor_payment,
     record_vendor_payment,
+    update_vendor_payment,
 )
-from app.services.ledger_service import delete_ledger_entry_cascading
+from app.services.ledger_service import delete_ledger_entry_cascading, update_ledger_entry
 from app.utils.decorators import permission_required
 from app.utils.party_filters import apply_party_active_filter, parse_party_active
 from app.utils.uploads import accept_uploaded_path, delete_image, save_image
@@ -97,6 +98,9 @@ def _vendor_page(form=None, open_modal=False):
     if status not in ("all", "payable", "prepaid", "settled"):
         status = "all"
     active_filter = parse_party_active(request.args.get("active"), default="all")
+    profit_filter = (request.args.get("profit") or "all").strip().lower()
+    if profit_filter not in {"all", "profit", "loss", "zero"}:
+        profit_filter = "all"
 
     query = Vendor.query.filter_by(is_deleted=False)
     query = apply_party_active_filter(query, Vendor, active_filter)
@@ -112,6 +116,28 @@ def _vendor_page(form=None, open_modal=False):
         query = query.filter(Vendor.balance == 0)
 
     vendors = query.options(joinedload(Vendor.photos)).order_by(Vendor.name).all()
+
+    from app.services.vendor_list_analytics_service import vendor_gross_profit_map
+
+    profit_map = vendor_gross_profit_map(
+        period=period,
+        start_date=period_start,
+        end_date=period_end,
+        vendor_ids=[v.id for v in vendors] if vendors else [],
+    )
+    for v in vendors:
+        v.period_profit = profit_map.get(v.id, Decimal("0"))
+
+    if profit_filter == "profit":
+        vendors = [v for v in vendors if v.period_profit > 0]
+    elif profit_filter == "loss":
+        vendors = [v for v in vendors if v.period_profit < 0]
+    elif profit_filter == "zero":
+        vendors = [v for v in vendors if v.period_profit == 0]
+
+    total_period_profit = sum((v.period_profit for v in vendors), Decimal("0"))
+    profit_vendor_count = sum(1 for v in vendors if v.period_profit > 0)
+    loss_vendor_count = sum(1 for v in vendors if v.period_profit < 0)
 
     from app.services.ledger_service import sum_party_balances_as_of
 
@@ -157,6 +183,10 @@ def _vendor_page(form=None, open_modal=False):
         end_date=period_end.isoformat() if period_end else "",
         selected_status=status,
         selected_active=active_filter,
+        selected_profit=profit_filter,
+        total_period_profit=total_period_profit,
+        profit_vendor_count=profit_vendor_count,
+        loss_vendor_count=loss_vendor_count,
     )
 
 
@@ -303,6 +333,62 @@ def delete_payment(payment_id):
         flash("Payment deleted and reversed.", "success")
         return redirect(url_for("vendors.detail", vendor_id=vendor_id))
     except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("vendors.index"))
+
+
+@vendors_bp.route("/ledger/<int:entry_id>/edit", methods=["POST"])
+@login_required
+@permission_required("vendors.*")
+def edit_ledger(entry_id):
+    try:
+        entry = db.session.get(LedgerEntry, entry_id)
+        if not entry:
+            raise ValueError("Ledger entry not found.")
+
+        entry_type = (request.form.get("entry_type") or "").strip().lower()
+        ref_type = (entry.reference_type or "").strip().lower()
+        is_payment = (
+            ref_type == "vendor_payment"
+            and entry.reference_id
+            and entry_type in PAYMENT_TYPES
+        )
+
+        if is_payment:
+            amount_raw = request.form.get("amount")
+            if amount_raw in (None, ""):
+                debit = Decimal(str(request.form.get("debit") or 0))
+                credit = Decimal(str(request.form.get("credit") or 0))
+                amount_raw = debit if entry_type == "loan" else credit
+                if Decimal(str(amount_raw or 0)) <= 0:
+                    amount_raw = max(debit, credit)
+            payment = update_vendor_payment(
+                int(entry.reference_id),
+                payment_type=entry_type,
+                amount=amount_raw,
+                payment_date=request.form.get("entry_date"),
+                remarks=request.form.get("notes"),
+                user_id=current_user.id,
+            )
+            log_audit("update", "vendor_payment", payment.id)
+            db.session.commit()
+            flash("Payment updated. Balance and cash recalculated.", "success")
+            return redirect(url_for("vendors.detail", vendor_id=payment.vendor_id))
+
+        entry = update_ledger_entry(
+            entry_id,
+            entry_date=request.form.get("entry_date"),
+            debit=request.form.get("debit"),
+            credit=request.form.get("credit"),
+            notes=request.form.get("notes"),
+            entry_type=request.form.get("entry_type"),
+        )
+        log_audit("update", "ledger_entry", entry.id)
+        db.session.commit()
+        flash("Ledger entry updated.", "success")
+        return redirect(url_for("vendors.detail", vendor_id=entry.party_id))
+    except (ValueError, TypeError) as exc:
         db.session.rollback()
         flash(str(exc), "danger")
         return redirect(url_for("vendors.index"))

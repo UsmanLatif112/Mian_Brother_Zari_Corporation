@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Ledger — {{ vendor.name }}{% endblock %}
+{% block search_placeholder %}Search ledger…{% endblock %}
+{% block page_filters %}
+{% include 'partials/period_filter.html' %}
+{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 dash-hero mb-3">
+    <div>
+      <a class="small text-decoration-none" href="{{ url_for('company.vendors') }}"><i class="fa-solid fa-arrow-left me-1"></i>Vendors</a>
+      <h1 class="h3 mb-1">{{ vendor.name }}</h1>
+      <p class="text-muted mb-0">Balance {{ '%.2f'|format(vendor.balance or 0) }}</p>
+    </div>
+  </div>
+  <div class="card dash-panel border-0 shadow-sm">
+    <div class="table-responsive">
+      <table class="table mb-0 portal-search-table w-100">
+        <thead>
+          <tr>
+            <th>Date</th><th>Type</th><th>Particulars</th>
+            <th class="text-end">Debit</th><th class="text-end">Credit</th><th class="text-end">Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in entries %}
+          <tr>
+            <td>{{ e.entry_date }}</td>
+            <td>{{ e.entry_type }}</td>
+            <td class="small">{{ e.notes or '—' }}</td>
+            <td class="text-end">{{ '%.2f'|format(e.debit or 0) }}</td>
+            <td class="text-end">{{ '%.2f'|format(e.credit or 0) }}</td>
+            <td class="text-end fw-semibold">{{ '%.2f'|format(e.balance_after or 0) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-muted p-3">No ledger entries for this period.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

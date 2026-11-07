@@ -116,7 +116,9 @@
       <td>
         <input type="number" min="0" step="0.01" class="form-control form-control-sm price" value="0" title="Editable for this sale only">
       </td>
-      <td class="text-end line-total fw-semibold">0.00</td>
+      <td class="text-end">
+        <input type="number" min="0" step="0.01" class="form-control form-control-sm text-end line-total fw-semibold" value="0.00" title="Edit total to recalculate sale price">
+      </td>
       <td class="text-end">
         <button type="button" class="btn btn-sm btn-light border-0 sale-row-remove btn-remove-row" title="Remove row">
           <i class="fa-solid fa-trash-can text-danger"></i>
@@ -267,15 +269,36 @@
       }
     }
     setProductThumb(tr, p.photo_url || null);
+    if (keepAmount && p.line_total != null) {
+      const lt = tr.querySelector('.line-total');
+      if (lt) {
+        lt.value = money(p.line_total);
+        tr.dataset.lineTotalDirty = '1';
+        tr.dataset.priceDirty = '1';
+      }
+    }
   }
 
   function lineAmount(tr) {
+    if (tr.dataset.lineTotalDirty === '1') {
+      return Number(tr.querySelector('.line-total')?.value || 0);
+    }
     if (isOpenSale(tr)) {
       return Number(tr.querySelector('.price')?.value || 0);
     }
     const qty = Number(tr.querySelector('.qty')?.value || 0);
     const price = Number(tr.querySelector('.price')?.value || 0);
     return qty * price;
+  }
+
+  function syncPriceFromLineTotal(tr) {
+    const line = Number(tr.querySelector('.line-total')?.value || 0);
+    if (isOpenSale(tr)) {
+      tr.querySelector('.price').value = money(line);
+      return;
+    }
+    const qty = Number(tr.querySelector('.qty')?.value || 0);
+    tr.querySelector('.price').value = money(qty > 0 ? line / qty : 0);
   }
 
   function subtotal() {
@@ -308,6 +331,40 @@
     }
   }
 
+  function syncSaleDueUI() {
+    const status = document.getElementById('payment-status')?.value || 'paid';
+    const wrap = document.getElementById('sale-due-wrap');
+    const enabledEl = document.getElementById('sale-due-enabled');
+    const dateEl = document.getElementById('sale-due-date');
+    const credit = status === 'unpaid' || status === 'partial';
+    if (!wrap || !enabledEl || !dateEl) return;
+    wrap.classList.toggle('d-none', !credit);
+    if (!credit) {
+      enabledEl.checked = false;
+      dateEl.value = '';
+      dateEl.disabled = true;
+      return;
+    }
+    dateEl.disabled = !enabledEl.checked;
+    if (!enabledEl.checked) dateEl.value = '';
+  }
+
+  async function suggestSaleDueDate() {
+    const enabledEl = document.getElementById('sale-due-enabled');
+    const dateEl = document.getElementById('sale-due-date');
+    const customerId = document.getElementById('customer-id')?.value;
+    if (!enabledEl?.checked || !dateEl || dateEl.value || !customerId) return;
+    try {
+      const base = document.getElementById('sale-date')?.value || '';
+      const res = await fetch(
+        `/api/customers/${customerId}/suggest-due-date?base=${encodeURIComponent(base)}`,
+        { credentials: 'same-origin' }
+      );
+      const data = await res.json();
+      if (data.ok && data.due_date) dateEl.value = data.due_date;
+    } catch (_) { /* ignore */ }
+  }
+
   function updatePaymentUI() {
     const status = document.getElementById('payment-status')?.value || 'paid';
     const grand = grandTotal();
@@ -316,6 +373,7 @@
     const advanceWrap = document.getElementById('advance-wrap');
     const paidWrap = document.getElementById('amount-paid-wrap');
     updateCustomerRequirement();
+    syncSaleDueUI();
 
     if (status === 'unpaid') {
       paidEl.value = '0.00';
@@ -365,7 +423,7 @@
         const uw = rowUnitWeight(tr);
         const sw = Number(tr.querySelector('.sale-weight')?.value || 0);
         if (uw > 0) tr.querySelector('.qty').value = sw > 0 ? sw / uw : 0;
-        if (tr.dataset.priceDirty !== '1') {
+        if (tr.dataset.priceDirty !== '1' && tr.dataset.lineTotalDirty !== '1') {
           tr.querySelector('.price').value = money(suggestedWeightAmount(tr));
         }
       } else if (hasUnitWeight(tr)) {
@@ -373,9 +431,14 @@
         const q = Number(tr.querySelector('.qty')?.value || 0);
         if (uw > 0) tr.querySelector('.sale-weight').value = q > 0 ? q * uw : '';
       }
+      if (tr.dataset.lineTotalDirty === '1') {
+        syncPriceFromLineTotal(tr);
+      }
       const line = lineAmount(tr);
       const cell = tr.querySelector('.line-total');
-      if (cell) cell.textContent = money(line);
+      if (cell && tr.dataset.lineTotalDirty !== '1') {
+        cell.value = money(line);
+      }
       sum += line;
     });
     let disc = discountAmount();
@@ -411,10 +474,12 @@
   function bindRow(tr) {
     tr.querySelector('.qty')?.addEventListener('input', () => {
       tr.dataset.priceDirty = '0';
+      tr.dataset.lineTotalDirty = '0';
       recalc();
     });
     tr.querySelector('.sale-weight')?.addEventListener('input', () => {
       tr.dataset.priceDirty = '0';
+      tr.dataset.lineTotalDirty = '0';
       recalc();
     });
     tr.querySelector('.sale-mode')?.addEventListener('change', () => {
@@ -438,10 +503,17 @@
         tr.querySelector('.price').value = money(list);
       }
       tr.dataset.priceDirty = '0';
+      tr.dataset.lineTotalDirty = '0';
       applyRowMode(tr);
       recalc();
     });
     tr.querySelector('.price')?.addEventListener('input', () => {
+      tr.dataset.priceDirty = '1';
+      tr.dataset.lineTotalDirty = '0';
+      recalc();
+    });
+    tr.querySelector('.line-total')?.addEventListener('input', () => {
+      tr.dataset.lineTotalDirty = '1';
       tr.dataset.priceDirty = '1';
       recalc();
     });
@@ -584,7 +656,12 @@
       bootstrap.Modal.getInstance(document.getElementById('saleModal'))?.hide();
       const invoiceUrl = data.invoice_url || '/sales/' + data.sale_id + '/invoice';
       const sep = invoiceUrl.includes('?') ? '&' : '?';
-      window.location.href = invoiceUrl + sep + 'next=' + encodeURIComponent('/sales/');
+      const fullInvoiceUrl = invoiceUrl + sep + 'next=' + encodeURIComponent('/sales/');
+      if (typeof window.openAppPage === 'function') {
+        window.openAppPage(fullInvoiceUrl, 'Invoice');
+      } else {
+        window.location.href = fullInvoiceUrl;
+      }
     } catch (e) {
       err.textContent = 'Network error. Try again.';
       err.classList.remove('d-none');
@@ -616,6 +693,13 @@
     document.getElementById('sale-discount').value = '0';
     document.getElementById('amount-paid').value = '0';
     document.getElementById('sale-notes').value = '';
+    const dueEnabled = document.getElementById('sale-due-enabled');
+    const dueDate = document.getElementById('sale-due-date');
+    if (dueEnabled) dueEnabled.checked = false;
+    if (dueDate) {
+      dueDate.value = '';
+      dueDate.disabled = true;
+    }
     const err = document.getElementById('sale-error');
     if (err) {
       err.classList.add('d-none');
@@ -625,6 +709,7 @@
     addRow();
     recalc();
     updateCustomerRequirement();
+    syncSaleDueUI();
   }
 
   async function openSaleForEdit(saleId) {
@@ -672,6 +757,20 @@
       if ((s.payment_status || '') !== 'paid') {
         document.getElementById('amount-paid').value = money(s.amount_paid || 0);
         updatePaymentUI();
+      }
+      const dueEnabled = document.getElementById('sale-due-enabled');
+      const dueDate = document.getElementById('sale-due-date');
+      if (dueEnabled && dueDate) {
+        if (s.due_date) {
+          dueEnabled.checked = true;
+          dueDate.value = s.due_date;
+          dueDate.disabled = false;
+        } else {
+          dueEnabled.checked = false;
+          dueDate.value = '';
+          dueDate.disabled = true;
+        }
+        syncSaleDueUI();
       }
 
       bootstrap.Modal.getOrCreateInstance(document.getElementById('saleModal')).show();
@@ -831,6 +930,12 @@
     setVal('qs-company', '');
     setVal('qs-address', '');
     setVal('qs-balance', '');
+    setVal(
+      'qs-date',
+      window.getErpWorkingDate?.() ||
+        document.body?.dataset?.workingDate ||
+        ''
+    );
     const err = document.getElementById('qs-error');
     if (err) {
       err.classList.add('d-none');
@@ -854,6 +959,10 @@
       company: document.getElementById('qs-company').value.trim(),
       address: document.getElementById('qs-address').value.trim(),
       opening_balance: document.getElementById('qs-balance').value || 0,
+      joined_date:
+        document.getElementById('qs-date')?.value ||
+        window.getErpWorkingDate?.() ||
+        '',
       photo: document.querySelector('#qs-photo-picker .photo-path')?.value || '',
     };
     if (!payload.name) {
@@ -876,6 +985,11 @@
     document.getElementById('salesman-search').value = data.name;
     document.getElementById('salesman-selected').textContent = data.name;
     bootstrap.Modal.getInstance(document.getElementById('quickSalesmanModal'))?.hide();
+  });
+
+  document.getElementById('sale-due-enabled')?.addEventListener('change', () => {
+    syncSaleDueUI();
+    if (document.getElementById('sale-due-enabled')?.checked) suggestSaleDueDate();
   });
 
   document.getElementById('payment-status')?.addEventListener('change', () => {
@@ -983,6 +1097,17 @@
       err.classList.remove('d-none');
       return;
     }
+    const dueEnabled = document.getElementById('sale-due-enabled')?.checked;
+    const dueDateVal = document.getElementById('sale-due-date')?.value || '';
+    if (
+      (paymentStatus === 'unpaid' || paymentStatus === 'partial') &&
+      dueEnabled &&
+      !dueDateVal
+    ) {
+      err.textContent = 'Enter a due date, or turn off the due date switch.';
+      err.classList.remove('d-none');
+      return;
+    }
     const payload = {
       sale_date: document.getElementById('sale-date').value,
       customer_id: customerId,
@@ -991,6 +1116,10 @@
       amount_paid: document.getElementById('amount-paid').value,
       discount: document.getElementById('sale-discount')?.value || 0,
       notes: document.getElementById('sale-notes').value,
+      due_date:
+        (paymentStatus === 'unpaid' || paymentStatus === 'partial') && dueEnabled
+          ? dueDateVal
+          : null,
       allow_negative_stock: allowNegativeStock || items.some((i) => i.allow_negative_stock),
       items,
     };

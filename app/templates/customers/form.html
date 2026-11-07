@@ -17,11 +17,23 @@
             {{ form.opening_balance(class='form-control', placeholder='Leave blank if none') }}
           </div>
           <div class="col-md-4">{{ form.joined_date.label(class='form-label') }}{{ form.joined_date(class='form-control', type='date') }}</div>
-          <div class="col-md-6">{{ form.customer_type.label(class='form-label') }}{{ form.customer_type(class='form-select') }}</div>
+          <div class="col-md-6">
+            <label class="form-label">{{ form.customer_type.label.text }}</label>
+            <div class="input-group customer-type-cell">
+              {{ form.customer_type(class='form-select customer-type-select') }}
+              <button type="button" class="btn erp-btn-quick-add btn-quick-customer-type" title="Add customer type">
+                <i class="fa-solid fa-plus"></i>
+              </button>
+            </div>
+          </div>
         </div>
         <div class="mt-3">{{ form.submit(class='btn btn-sm btn-success') }}</div>
       </form>
     </div>
   </div>
 </div>
+{% include 'partials/quick_customer_type_modal.html' %}
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/customer-type-quick.js') }}?v=2"></script>
 {% endblock %}

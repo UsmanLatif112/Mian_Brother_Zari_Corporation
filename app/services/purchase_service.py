@@ -1,17 +1,17 @@
 """Record purchases (inventory receipts) with stock, vendor balance, and ledger."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from app.extensions import db
-from app.models import LedgerEntry, Purchase, PurchaseItem, Vendor
+from app.models import LedgerEntry, Purchase, PurchaseItem, StockLayer, StockMovement, Vendor
 from app.services.fifo_service import fifo_receive, next_product_batch_seq
 from app.services.ledger_service import (
     delete_ledger_by_reference,
     post_ledger_entry,
     rebuild_party_balances,
 )
-from app.utils.working_date import get_working_date
+from app.utils.working_date import as_working_datetime, get_working_date
 
 
 def _fmt_qty(value) -> str:
@@ -266,6 +266,44 @@ def _recompute_purchase_totals(purchase):
     return purchase.grand_total
 
 
+def _apply_purchase_date_everywhere(purchase, new_date):
+    """
+    Cascade purchase date to stock layers (batch received), receive movements,
+    and leave ledger entry_date to _sync_purchase_vendor_ledger.
+    Purchasing journal reads Purchase.purchase_date directly.
+    """
+    if isinstance(new_date, str):
+        new_date = date.fromisoformat(new_date)
+    if not isinstance(new_date, date):
+        raise ValueError("Invalid purchase date.")
+
+    purchase.purchase_date = new_date
+    when = as_working_datetime(new_date)
+
+    layers = StockLayer.query.filter_by(
+        source_type="purchase",
+        source_id=purchase.id,
+    ).all()
+    for layer in layers:
+        if layer.received_at and isinstance(layer.received_at, datetime):
+            layer.received_at = datetime.combine(new_date, layer.received_at.time())
+        else:
+            layer.received_at = when
+
+    moves = StockMovement.query.filter_by(
+        reference_type="purchase",
+        reference_id=purchase.id,
+        movement_type="purchase_in",
+    ).all()
+    for move in moves:
+        if move.created_at and isinstance(move.created_at, datetime):
+            move.created_at = datetime.combine(new_date, move.created_at.time())
+        else:
+            move.created_at = when
+
+    return purchase
+
+
 def _sync_purchase_vendor_ledger(purchase, old_vendor_id, notes=None):
     """Keep the purchase ledger row and vendor.balance aligned with purchase.grand_total."""
     grand = Decimal(str(purchase.grand_total or 0))
@@ -290,6 +328,7 @@ def _sync_purchase_vendor_ledger(purchase, old_vendor_id, notes=None):
         ledger.debit = grand
         ledger.credit = Decimal("0")
         ledger.notes = ledger_notes
+        ledger.entry_date = purchase.purchase_date
         db.session.flush()
         for vid in parties:
             rebuild_party_balances("vendor", vid)
@@ -339,9 +378,17 @@ def reverse_purchase_for_layer(layer, *, notes=None):
     remaining = Decimal(str(layer.quantity_remaining or 0))
     if remaining < 0:
         remaining = Decimal("0")
+    # Prefer bag-equivalent stock (sealed + open weight) so open leftover is reversed too.
+    try:
+        unsold = Decimal(str(layer.stock_qty_equivalent or 0))
+    except Exception:
+        unsold = remaining
+    if unsold <= 0:
+        unsold = remaining
+    if unsold < 0:
+        unsold = Decimal("0")
     # Only reverse what is still in stock (unsold). Sold portion stays payable.
-    unsold = remaining
-    sold = received - remaining if received > remaining else Decimal("0")
+    sold = received - unsold if received > unsold else Decimal("0")
     if unsold <= 0:
         return None
 
@@ -414,16 +461,51 @@ def reverse_purchase_for_layer(layer, *, notes=None):
     }
 
 
+def remove_stock_layer_cascading(layer, user_id=None, *, notes=None):
+    """
+    Cascade-delete one stock batch:
+    reverse linked purchase/vendor payable for unsold qty → clear stock
+    (no inventory loss) → delete layer → sync product stock.
+    """
+    from app.services.fifo_service import clear_layer_stock, sync_product_stock
+
+    if not layer:
+        return None
+    product_id = layer.product_id
+    layer_id = layer.id
+    note = notes or f"Batch #{layer_id} deleted"
+
+    reversed_info = reverse_purchase_for_layer(layer, notes=note)
+    clear_layer_stock(
+        layer,
+        user_id,
+        notes=note,
+        movement_type="batch_delete",
+    )
+    db.session.delete(layer)
+    db.session.flush()
+
+    from app.models import Product
+
+    product = db.session.get(Product, product_id)
+    if product:
+        sync_product_stock(product)
+
+    return {
+        "layer_id": layer_id,
+        "product_id": product_id,
+        "purchase": reversed_info,
+    }
+
+
 def void_purchase(purchase_id, user_id=None, *, notes=None):
     """
     Reverse a purchase from ledger/inventory: clear unsold stock, reduce or
     remove the Purchase document, and rebuild vendor payable. Sold qty stays
     on the purchase (void related sales first to reverse those).
     """
-    from sqlalchemy import func
-
     from app.models import Product, StockLayer
-    from app.services.fifo_service import adjust_batch
+    from app.services.fifo_service import clear_layer_stock, sync_product_stock
 
     purchase = db.session.get(Purchase, int(purchase_id))
     if not purchase:
@@ -439,10 +521,12 @@ def void_purchase(purchase_id, user_id=None, *, notes=None):
         .order_by(StockLayer.id)
         .all()
     )
-    total_remaining = sum(
-        (Decimal(str(layer.quantity_remaining or 0)) for layer in layers),
-        Decimal("0"),
-    )
+    total_remaining = Decimal("0")
+    for layer in layers:
+        try:
+            total_remaining += Decimal(str(layer.stock_qty_equivalent or 0))
+        except Exception:
+            total_remaining += Decimal(str(layer.quantity_remaining or 0))
 
     if not layers:
         delete_ledger_by_reference("purchase", pid, rebuild=False)
@@ -469,27 +553,24 @@ def void_purchase(purchase_id, user_id=None, *, notes=None):
     reversed_any = False
     for layer in layers:
         product_ids.add(layer.product_id)
-        remaining = Decimal(str(layer.quantity_remaining or 0))
+        try:
+            remaining = Decimal(str(layer.stock_qty_equivalent or 0))
+        except Exception:
+            remaining = Decimal(str(layer.quantity_remaining or 0))
         if remaining <= 0:
             continue
         info = reverse_purchase_for_layer(layer, notes=note)
         if info:
             reversed_any = True
-        adjust_batch(layer, Decimal("0"), user_id, notes=note)
+        clear_layer_stock(layer, user_id, notes=note, movement_type="purchase_void")
         db.session.delete(layer)
 
     db.session.flush()
 
     for product_id in product_ids:
         product = db.session.get(Product, product_id)
-        if not product:
-            continue
-        open_qty = (
-            db.session.query(func.coalesce(func.sum(StockLayer.quantity_remaining), 0))
-            .filter(StockLayer.product_id == product_id)
-            .scalar()
-        )
-        product.current_stock = Decimal(str(open_qty or 0))
+        if product:
+            sync_product_stock(product)
 
     still = db.session.get(Purchase, pid)
     return {
@@ -510,11 +591,14 @@ def amend_purchase_for_layer(
     new_unit_cost,
     new_vendor_id=None,
     new_invoice_no=None,
+    new_purchase_date=None,
     notes=None,
 ):
     """
     When a purchase-backed stock batch is edited, keep Purchase / PurchaseItem
     and the vendor ledger / payable in sync so purchasing totals match stock.
+    Optional new_purchase_date cascades to purchase, batch received, stock
+    movement, purchasing journal, and vendor ledger entry_date.
     """
     if not layer or (layer.source_type or "") != "purchase" or not layer.source_id:
         return None
@@ -536,6 +620,15 @@ def amend_purchase_for_layer(
     if new_purchased < 0:
         raise ValueError("Purchased quantity cannot be negative.")
 
+    parsed_date = None
+    if new_purchase_date is not None and str(new_purchase_date).strip() != "":
+        if isinstance(new_purchase_date, date) and not isinstance(new_purchase_date, datetime):
+            parsed_date = new_purchase_date
+        elif isinstance(new_purchase_date, datetime):
+            parsed_date = new_purchase_date.date()
+        else:
+            parsed_date = date.fromisoformat(str(new_purchase_date).strip()[:10])
+
     # No-op if nothing that affects purchasing changed
     same_qty = old_purchased == new_purchased
     same_cost = old_unit_cost == new_unit_cost
@@ -545,7 +638,8 @@ def amend_purchase_for_layer(
     same_invoice = new_invoice_no is None or (
         (str(new_invoice_no).strip() or None) == (purchase.invoice_no or None)
     )
-    if same_qty and same_cost and same_vendor and same_invoice:
+    same_date = parsed_date is None or parsed_date == purchase.purchase_date
+    if same_qty and same_cost and same_vendor and same_invoice and same_date:
         return purchase
 
     old_vendor_id = purchase.vendor_id
@@ -566,6 +660,9 @@ def amend_purchase_for_layer(
         if inv:
             purchase.invoice_no = inv
 
+    if parsed_date is not None and parsed_date != purchase.purchase_date:
+        _apply_purchase_date_everywhere(purchase, parsed_date)
+
     item.quantity = new_purchased
     item.unit_price = new_unit_cost
     item.line_total = new_purchased * new_unit_cost
@@ -579,6 +676,6 @@ def amend_purchase_for_layer(
             pass
     _recompute_purchase_totals(purchase)
 
-    # Always refresh ledger notes from line items (what was purchased)
+    # Always refresh ledger notes / entry_date from the purchase
     _sync_purchase_vendor_ledger(purchase, old_vendor_id, notes=None)
     return purchase

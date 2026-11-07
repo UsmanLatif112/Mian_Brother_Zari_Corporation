@@ -110,6 +110,7 @@
           <th class="text-end">Total</th>
           <th class="text-end">Paid</th>
           <th class="text-end">Due</th>
+          <th>Due Date</th>
           <th class="col-actions">Action</th>
         </tr>
       </thead>
@@ -148,6 +149,7 @@
           <td class="text-end text-danger">-{{ '%.2f'|format(total) }}</td>
           <td class="text-end">{{ '%.2f'|format(cash) }}</td>
           <td class="text-end">{{ '%.2f'|format(credit) }}</td>
+          <td class="text-muted">—</td>
           <td class="col-actions">
             <div class="table-actions">
             {% if r.sale_id %}
@@ -187,6 +189,7 @@
           <td class="text-end">{{ '%.2f'|format(total) }}</td>
           <td class="text-end">{{ '%.2f'|format(paid) }}</td>
           <td class="text-end {% if due > 0 %}text-danger{% endif %}">{{ '%.2f'|format(due) }}</td>
+          <td>{% if s.due_date %}{{ s.due_date }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
           <td class="col-actions">
             <div class="table-actions">
             <a href="{{ url_for('sales.invoice', sale_id=s.id) }}" class="action-icon-btn" title="Invoice / Print">
@@ -313,6 +316,15 @@
               <span class="input-group-text bg-success-subtle text-success-emphasis small">Account</span>
             </div>
           </div>
+          <div class="col-md-3 d-none" id="sale-due-wrap">
+            <label class="form-label d-flex align-items-center justify-content-between gap-2">
+              <span>Due date</span>
+              <span class="form-check form-switch m-0">
+                <input class="form-check-input" type="checkbox" id="sale-due-enabled" title="Enable due date">
+              </span>
+            </label>
+            <input type="date" id="sale-due-date" class="form-control" disabled title="Turn on the switch to set a due date">
+          </div>
           <div class="col-md-3">
             <label class="form-label">Notes</label>
             <input type="text" id="sale-notes" class="form-control" placeholder="Optional">
@@ -385,14 +397,20 @@
             <input type="date" id="qc-date" name="joined_date" class="form-control erp-entry-date" value="{{ today }}" data-erp-entry-date>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Customer Type</label>
-            <select id="qc-type" class="form-select">
-              <option value="good">Good</option>
-              <option value="bad">Bad</option>
-              <option value="1_year">1 Year</option>
-              <option value="6_month">6 Month</option>
-              <option value="late_pay">Late Pay</option>
-            </select>
+            <label class="form-label" for="qc-type">Customer Type</label>
+            <div class="input-group customer-type-cell">
+              <select id="qc-type" class="form-select customer-type-select">
+                {% for val, label in customer_type_choices %}
+                <option value="{{ val }}" {% if val == 'good' %}selected{% endif %}>{{ label }}</option>
+                {% else %}
+                <option value="good" selected>Good</option>
+                <option value="bad">Bad</option>
+                {% endfor %}
+              </select>
+              <button type="button" class="btn erp-btn-quick-add btn-quick-customer-type" title="Add customer type">
+                <i class="fa-solid fa-plus"></i>
+              </button>
+            </div>
           </div>
         </div>
         <div class="text-danger small mt-2 d-none" id="qc-error"></div>
@@ -433,6 +451,10 @@
           <div class="col-md-6">
             <label class="form-label">Opening Balance <span class="text-muted fw-normal">(optional)</span></label>
             <input type="number" step="0.01" id="qs-balance" class="form-control" placeholder="Leave blank if none">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Date Added</label>
+            <input type="date" id="qs-date" class="form-control erp-entry-date" data-erp-entry-date value="{{ today }}">
           </div>
           <div class="col-12">
             <label class="form-label">Address</label>
@@ -603,6 +625,8 @@ document.getElementById('btn-print-sales')?.addEventListener('click', () => {
 <script src="{{ url_for('static', filename='js/category-lookup.js') }}"></script>
 <script src="{{ url_for('static', filename='js/customer-photos.js') }}"></script>
 <script src="{{ url_for('static', filename='js/vendor-lookup.js') }}"></script>
-<script src="{{ url_for('static', filename='js/inventory-form.js') }}"></script>
-<script src="{{ url_for('static', filename='js/sales.js') }}?v=18"></script>
+<script src="{{ url_for('static', filename='js/inventory-form.js') }}?v=5"></script>
+{% include 'partials/quick_customer_type_modal.html' %}
+<script src="{{ url_for('static', filename='js/sales.js') }}?v=20"></script>
+<script src="{{ url_for('static', filename='js/customer-type-quick.js') }}?v=2"></script>
 {% endblock %}

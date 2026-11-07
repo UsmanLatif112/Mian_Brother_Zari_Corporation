@@ -74,14 +74,17 @@ def index():
 
     backup_dir = ensure_backup_dir()
     ui_limit = int(current_app.config.get("BACKUP_UI_LIMIT", 10) or 10)
-    backups, backup_total = list_backup_files(limit=ui_limit)
+    keep_days = int(current_app.config.get("BACKUP_KEEP_DAYS", 10) or 10)
+    # Show today's snapshots + day-end history (rough max ≈ today + prior days)
+    list_limit = max(ui_limit + keep_days, ui_limit)
+    backups, backup_total = list_backup_files(limit=list_limit)
 
     return render_template(
         "maintenance/index.html",
         can_backup=can_backup,
         backups=backups,
         backup_total=backup_total,
-        backup_ui_limit=ui_limit,
+        backup_ui_limit=list_limit,
         backup_dir=backup_dir,
         auto_backup_hours=int(current_app.config.get("AUTO_BACKUP_INTERVAL_HOURS", 1) or 1),
         auto_backup_enabled=bool(current_app.config.get("AUTO_BACKUP_ENABLED", True)),

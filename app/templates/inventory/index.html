@@ -129,21 +129,26 @@
   </div>
 
   <div class="card dash-panel border-0 shadow-sm">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
       <strong>Products</strong>
-      <span class="text-muted small">{{ products|length }} records</span>
+      <div class="d-flex align-items-center gap-2">
+        <span class="text-muted small">{{ products|length }} records</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-print-inventory" title="Print filtered products">
+          <i class="fa-solid fa-print me-1"></i> Print
+        </button>
+      </div>
     </div>
     <table class="table datatable mb-0 w-100" id="inventory-products-table">
       <thead>
         <tr>
-          <th style="width:52px"></th>
+          <th class="col-print-skip" style="width:52px"></th>
           <th>SKU</th>
           <th>Name</th>
           <th>Category</th>
           <th class="text-end">Stock</th>
           <th class="text-end">Min</th>
           <th class="text-end">Sale Price</th>
-          <th>Stock</th>
+          <th>Status</th>
           <th>Active</th>
           <th class="col-actions">Action</th>
         </tr>
@@ -305,6 +310,21 @@ function onInventoryPeriodChange() {
 }
 toggleCustomDates();
 
+document.getElementById('btn-print-inventory')?.addEventListener('click', () => {
+  const period = document.getElementById('period-filter');
+  const periodLabel = period?.options?.[period.selectedIndex]?.text || 'All';
+  const q = document.getElementById('global-search-input')?.value?.trim();
+  const parts = ['Period: ' + periodLabel];
+  if (q) parts.push('Search: ' + q);
+  window.PrintFiltered?.print({
+    table: '#inventory-products-table',
+    title: 'Inventory — Products',
+    subtitle: parts.join(' · '),
+    sectionTitle: 'Products',
+    skipSelectors: ['.col-actions', '.col-print-skip'],
+  });
+});
+
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('.btn-edit-product');
   if (!btn) return;
@@ -325,5 +345,5 @@ document.addEventListener('click', (e) => {
 <script src="{{ url_for('static', filename='js/category-lookup.js') }}"></script>
 <script src="{{ url_for('static', filename='js/customer-photos.js') }}"></script>
 <script src="{{ url_for('static', filename='js/vendor-lookup.js') }}"></script>
-<script src="{{ url_for('static', filename='js/inventory-form.js') }}"></script>
+<script src="{{ url_for('static', filename='js/inventory-form.js') }}?v=5"></script>
 {% endblock %}

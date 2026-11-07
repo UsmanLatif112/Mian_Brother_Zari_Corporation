@@ -114,6 +114,127 @@ def record_vendor_payment(
     return payment
 
 
+def update_vendor_payment(
+    payment_id,
+    payment_type=None,
+    amount=None,
+    payment_date=None,
+    remarks=None,
+    user_id=None,
+):
+    """
+    Edit a Record Payment entry: type (loan / advance / account_settle),
+    amount, date, notes. Updates payment + ledger debit/credit + cash (loan only),
+    then rebuilds vendor balance.
+    """
+    from app.models import LedgerEntry
+
+    payment = db.session.get(VendorPayment, payment_id)
+    if not payment:
+        raise ValueError("Payment not found.")
+
+    vendor = db.session.get(Vendor, payment.vendor_id)
+    if not vendor or vendor.is_deleted:
+        raise ValueError("Vendor not found.")
+
+    ptype = (payment_type if payment_type is not None else payment.payment_type or "").strip().lower()
+    if ptype not in PAYMENT_TYPES:
+        raise ValueError("Invalid payment type. Use advance, loan, or account_settle.")
+
+    if amount is None:
+        amount = payment.amount
+    amount = Decimal(str(amount or 0))
+    if amount <= 0:
+        raise ValueError("Amount must be greater than zero.")
+
+    entry_date = payment_date if payment_date is not None else payment.payment_date
+    if isinstance(entry_date, str):
+        entry_date = date.fromisoformat(entry_date)
+    if entry_date is None:
+        entry_date = get_working_date()
+
+    uid = user_id or (current_user.id if current_user and current_user.is_authenticated else None)
+    label = PAYMENT_TYPES[ptype]
+    if remarks is None:
+        note = payment.notes
+    else:
+        note = (remarks or "").strip() or None
+
+    payment.payment_type = ptype
+    payment.amount = amount
+    payment.payment_date = entry_date
+    payment.notes = note
+    payment.payment_method = PaymentMethod.CASH
+
+    entry = (
+        LedgerEntry.query.filter_by(
+            reference_type="vendor_payment",
+            reference_id=payment.id,
+        )
+        .order_by(LedgerEntry.id.asc())
+        .first()
+    )
+    if entry:
+        entry.entry_type = ptype
+        entry.entry_date = entry_date
+        entry.notes = note or (label if ptype != "loan" else "Cash loan from vendor")
+        if ptype == "loan":
+            entry.debit = amount
+            entry.credit = Decimal("0")
+        else:
+            entry.debit = Decimal("0")
+            entry.credit = amount
+    else:
+        if ptype == "loan":
+            post_ledger_entry(
+                "vendor",
+                vendor.id,
+                "loan",
+                debit=amount,
+                credit=Decimal("0"),
+                entry_date=entry_date,
+                reference_type="vendor_payment",
+                reference_id=payment.id,
+                notes=note or "Cash loan from vendor",
+            )
+        else:
+            post_ledger_entry(
+                "vendor",
+                vendor.id,
+                ptype,
+                debit=Decimal("0"),
+                credit=amount,
+                entry_date=entry_date,
+                reference_type="vendor_payment",
+                reference_id=payment.id,
+                notes=note or label,
+            )
+
+    # Reverse any prior loan cash; only loan posts cash in again
+    reverse_cash_by_reference(
+        "vendor_payment",
+        payment.id,
+        notes=f"Edit vendor payment #{payment.id}",
+        created_by_id=uid,
+    )
+    if ptype == "loan":
+        record_cash_movement(
+            "in",
+            "vendor_loan",
+            amount,
+            "vendor_payment",
+            payment.id,
+            notes=f"Loan from {vendor.name}" + (f" — {note}" if note else ""),
+            created_by_id=uid,
+            entry_date=entry_date,
+        )
+
+    rebuild_party_balances("vendor", vendor.id)
+    enqueue_sync("vendor_payments", payment.id, "update")
+    enqueue_sync("vendors", vendor.id, "update")
+    return payment
+
+
 def delete_vendor_payment(payment_id, user_id=None):
     """Delete vendor payment and reverse ledger (+ cash for loan inflows)."""
     payment = db.session.get(VendorPayment, payment_id)

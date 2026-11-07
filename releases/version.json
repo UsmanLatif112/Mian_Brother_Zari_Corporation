@@ -1,8 +1,0 @@
-{
-  "version": "1.7.1",
-  "build": 171,
-  "released_at": "2026-09-01",
-  "download_url": "http://mbfupdates.usmanlateef.com/MianBrotherFertilizers-1.7.1.zip",
-  "sha256": "9da45bed969c1506a94b1a69c736f691bf84d8027e9341eeb2c25f15c27a1361",
-  "release_notes": "- Fixed Add Product modal on Inventory and Sales (form restored; nested modals work)\n- Fixed Add Customer and Add Vendor from Sales/Inventory (CNIC field, field layout, quick-add API)\n- Sale edit: stock restores correctly; movements show Sale Edit (not Void) with clear particulars\n- Sale edit qty change shows one net row in Recent Movements (e.g. 1 \u2192 2 shows \u22121, not two rows)\n- Modal nesting fix so all Add buttons open correctly across the app\n- Purchase entry: sealed bags + loose kg; void/reprice/movement labels improved\n- Inventory Active/Inactive filter; charts restored on dashboard and list pages\n- Faster login when offline; database migration preserves existing data"
-}

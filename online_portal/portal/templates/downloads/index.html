@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block title %}Download — {{ suite_name }}{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="dash-hero mb-4">
+    <h1 class="h3 mb-1">Download</h1>
+    <p class="text-muted mb-0">
+      {% if current_user.is_super_admin() %}
+      Publish releases under App releases. Company users get a personal zip (app + their SQLite/key).
+      {% else %}
+      Download Agri Books with <strong>only your company login, key, and data</strong>.
+      {% endif %}
+    </p>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-7">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <h2 class="h5">
+            {% if current_user.is_super_admin() %}Desktop release (raw){% else %}Your install package{% endif %}
+          </h2>
+          {% if manifest.version %}
+          <p class="mb-1">App version <strong>{{ manifest.version }}</strong>
+            {% if manifest.build %}(build {{ manifest.build }}){% endif %}
+          </p>
+          <p class="small text-muted">{{ manifest.notes or '' }}</p>
+          {% if not current_user.is_super_admin() %}
+          <ul class="small text-muted">
+            <li>Includes Agri Books desktop app</li>
+            <li>SQLite locked to your company user(s) and registration key</li>
+            <li>{% if has_sqlite %}Includes your uploaded business data{% else %}Fresh DB with your login only (upload data later via Super Admin){% endif %}</li>
+            {% if registration_key %}<li>Your key: <code>{{ registration_key }}</code></li>{% endif %}
+          </ul>
+          {% endif %}
+          <a class="btn btn-success" href="{{ url_for('downloads.download_app') }}">
+            <i class="fa-solid fa-download me-1"></i>
+            {% if current_user.is_super_admin() %}Download release zip{% else %}Download my app + SQLite{% endif %}
+          </a>
+          {% else %}
+          <p class="text-muted mb-0">No release published yet. Super Admin must upload an App release first.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% if company %}
+    <div class="col-md-5">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <h2 class="h5">SQLite only</h2>
+          <p class="small text-muted">Database file for <strong>{{ company.name }}</strong> (advanced — normally use the full package).</p>
+          {% if has_sqlite %}
+          <a class="btn btn-outline-success" href="{{ url_for('downloads.download_sqlite', company_id=company.id) }}">
+            <i class="fa-solid fa-database me-1"></i> Download .db
+          </a>
+          {% else %}
+          <p class="text-muted mb-0">No business DB uploaded yet. Your install package still includes a login-only SQLite.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

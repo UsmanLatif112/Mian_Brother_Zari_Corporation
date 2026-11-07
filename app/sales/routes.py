@@ -17,6 +17,12 @@ from app.utils.working_date import get_working_date
 sales_bp = Blueprint("sales", __name__)
 
 
+def _customer_type_choices():
+    from app.services.customer_type_service import customer_type_choices
+
+    return customer_type_choices()
+
+
 def _parse_date(value):
     if not value:
         return None
@@ -299,6 +305,15 @@ def _parse_sale_request(data):
         )
         return None, (jsonify({"ok": False, "error": msg}), 400)
 
+    due_date = None
+    if payment_status in ("unpaid", "partial"):
+        raw_due = data.get("due_date")
+        if raw_due:
+            try:
+                due_date = _parse_date(raw_due) if not hasattr(raw_due, "isoformat") else raw_due
+            except Exception:
+                due_date = None
+
     payload = {
         "customer_id": customer_id,
         "salesman_id": salesman_id,
@@ -307,6 +322,7 @@ def _parse_sale_request(data):
         "tax_amount": data.get("tax_amount", 0),
         "payment_method": payment_method,
         "amount_paid": amount_paid,
+        "due_date": due_date,
         "notes": data.get("notes"),
         "allow_negative_stock": bool(data.get("allow_negative_stock")),
     }
@@ -490,6 +506,7 @@ def index():
         subcategories=subcategories,
         today=get_working_date().isoformat(),
         open_modal=open_modal,
+        customer_type_choices=_customer_type_choices(),
     )
 
 
@@ -578,6 +595,7 @@ def get_sale(sale_id):
                 "salesman_name": sale.salesman.name if sale.salesman else "",
                 "payment_status": status,
                 "amount_paid": amount_paid,
+                "due_date": sale.due_date.isoformat() if sale.due_date else None,
                 "discount": float(sale.discount or 0),
                 "notes": sale.notes or "",
                 "items": [

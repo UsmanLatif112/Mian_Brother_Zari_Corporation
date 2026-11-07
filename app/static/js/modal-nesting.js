@@ -6,6 +6,13 @@
     return [...document.querySelectorAll('.modal.show')];
   }
 
+  function ensureBackdrop() {
+    if (document.querySelector('.modal-backdrop')) return;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop fade show';
+    document.body.appendChild(backdrop);
+  }
+
   function onChildShow(childId) {
     const child = document.getElementById(childId);
     const parents = openModals().filter((m) => m.id !== childId);
@@ -23,13 +30,18 @@
         parent.removeAttribute('data-nested-by');
       }
     });
-    cleanupOrphans();
+    // Let Bootstrap finish removing the child backdrop, then repair page lock.
+    setTimeout(cleanupOrphans, 0);
   }
 
   function cleanupOrphans() {
     const showing = openModals();
     if (showing.length) {
       document.body.classList.add('modal-open');
+      ensureBackdrop();
+      // Extra backdrops from nested open/close leave the page feeling "stuck".
+      const backs = [...document.querySelectorAll('.modal-backdrop')];
+      backs.slice(0, -1).forEach((el) => el.remove());
       return;
     }
     document.querySelectorAll('.modal-backdrop').forEach((el) => el.remove());
@@ -56,5 +68,5 @@
   global.ErpModalNesting = { onChildShow, onChildHidden, cleanupOrphans, bindQuickModal };
 
   document.addEventListener('DOMContentLoaded', cleanupOrphans);
-  document.addEventListener('hidden.bs.modal', cleanupOrphans);
+  document.addEventListener('hidden.bs.modal', () => setTimeout(cleanupOrphans, 0));
 })(window);

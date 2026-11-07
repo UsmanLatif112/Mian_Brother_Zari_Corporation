@@ -160,13 +160,63 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _download_file(url: str, dest: Path) -> None:
+def _download_file(url: str, dest: Path, progress_cb=None) -> None:
+    """Download url to dest; optional progress_cb(dict) for UI updates."""
+    for _evt in _iter_download_file(url, dest):
+        if progress_cb:
+            progress_cb(_evt)
+
+
+def _iter_download_file(url: str, dest: Path):
+    """Yield progress dicts while downloading url to dest."""
     req = urllib.request.Request(
         url,
         headers={"User-Agent": f"MBF-ERP/{APP_VERSION} (build {APP_BUILD})"},
     )
     with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp, dest.open("wb") as out:
-        shutil.copyfileobj(resp, out, length=1024 * 256)
+        total = 0
+        try:
+            total = int(resp.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        downloaded = 0
+        chunk_size = 1024 * 256
+        last_pct = -1
+        while True:
+            chunk = resp.read(chunk_size)
+            if not chunk:
+                break
+            out.write(chunk)
+            downloaded += len(chunk)
+            if total > 0:
+                pct = min(99, int(downloaded * 100 / total))
+            else:
+                pct = min(90, 5 + int((downloaded / (1024 * 1024)) * 3))
+            if pct != last_pct or downloaded == total:
+                last_pct = pct
+                yield {
+                    "phase": "download",
+                    "percent": pct,
+                    "bytes_downloaded": downloaded,
+                    "bytes_total": total,
+                    "message": _download_message(downloaded, total),
+                }
+        yield {
+            "phase": "download",
+            "percent": 100 if total > 0 else min(95, max(last_pct, 0) + 5),
+            "bytes_downloaded": downloaded,
+            "bytes_total": total or downloaded,
+            "message": "Download complete. Verifying...",
+        }
+
+
+def _download_message(downloaded: int, total: int) -> str:
+    def _mb(n: int) -> str:
+        return f"{n / (1024 * 1024):.1f} MB"
+
+    if total > 0:
+        return f"Downloading update… {_mb(downloaded)} / {_mb(total)}"
+    return f"Downloading update… {_mb(downloaded)}"
 
 
 def _find_app_root(extract_dir: Path) -> Path:
@@ -207,22 +257,66 @@ def _write_apply_script(source_dir: Path, dest_dir: Path) -> Path:
     return bat
 
 
-def prepare_update_apply() -> dict[str, Any]:
+def prepare_update_apply():
+    """Download and stage update; returns final result dict (no streaming)."""
+    result = {"ok": False, "error": "Update failed."}
+    for event in iter_update_apply_progress():
+        if event.get("phase") == "done" or event.get("phase") == "error":
+            result = event
+    return result
+
+
+def iter_update_apply_progress():
+    """Yield NDJSON-friendly progress events, then a final done/error event."""
     if not can_apply_updates():
-        return {
+        yield {
+            "phase": "error",
             "ok": False,
+            "percent": 0,
             "error": "Updates can only be applied from the desktop app (.exe).",
         }
+        return
+
+    yield {
+        "phase": "check",
+        "percent": 1,
+        "message": "Checking update server…",
+        "ok": True,
+    }
 
     status = check_for_update(respect_skip=False)
     if not status.get("ok"):
-        return {"ok": False, "error": status.get("error", "Update check failed."), "offline": True}
+        yield {
+            "phase": "error",
+            "ok": False,
+            "offline": True,
+            "percent": 0,
+            "error": status.get("error", "Update check failed."),
+        }
+        return
     if not status.get("update_available"):
-        return {"ok": False, "error": "No newer update is available."}
+        yield {
+            "phase": "error",
+            "ok": False,
+            "percent": 0,
+            "error": "No newer update is available.",
+        }
+        return
 
     url = manifest_url()
     assert url
-    manifest = _parse_manifest(_fetch_json(url))
+    try:
+        manifest = _parse_manifest(_fetch_json(url))
+    except Exception as exc:
+        yield {
+            "phase": "error",
+            "ok": False,
+            "offline": True,
+            "percent": 0,
+            "error": str(exc) or "Could not read update manifest.",
+        }
+        return
+
     download_url = manifest["download_url"]
     expected_sha = manifest.get("sha256") or ""
 
@@ -232,15 +326,48 @@ def prepare_update_apply() -> dict[str, Any]:
     extract_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        _download_file(download_url, zip_path)
+        yield {
+            "phase": "download",
+            "percent": 5,
+            "message": "Starting download…",
+            "ok": True,
+        }
+
+        for evt in _iter_download_file(download_url, zip_path):
+            raw = int(evt.get("percent") or 0)
+            overall = 5 + int(raw * 0.75)
+            yield {
+                **evt,
+                "percent": overall,
+                "ok": True,
+            }
+
+        yield {
+            "phase": "verify",
+            "percent": 82,
+            "message": "Verifying download…",
+            "ok": True,
+        }
         if expected_sha:
             actual = _sha256_file(zip_path)
             if actual != expected_sha:
                 raise ValueError("Downloaded update failed security check (checksum mismatch).")
 
+        yield {
+            "phase": "extract",
+            "percent": 88,
+            "message": "Extracting update files…",
+            "ok": True,
+        }
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(extract_dir)
 
+        yield {
+            "phase": "prepare",
+            "percent": 96,
+            "message": "Preparing installer…",
+            "ok": True,
+        }
         source_root = _find_app_root(extract_dir)
         dest_root = Path(app_home())
         bat_path = _write_apply_script(source_root, dest_root)
@@ -255,8 +382,10 @@ def prepare_update_apply() -> dict[str, Any]:
         pending_path = Path(user_data_dir()) / PENDING_FILE
         pending_path.write_text(json.dumps(pending, indent=2), encoding="utf-8")
 
-        return {
+        yield {
+            "phase": "done",
             "ok": True,
+            "percent": 100,
             "message": "Update downloaded. The app will close and restart automatically.",
             "version": manifest["version"],
             "build": manifest["build"],
@@ -265,7 +394,12 @@ def prepare_update_apply() -> dict[str, Any]:
     except Exception as exc:
         logger.exception("Prepare update failed")
         shutil.rmtree(work_root, ignore_errors=True)
-        return {"ok": False, "error": str(exc)}
+        yield {
+            "phase": "error",
+            "ok": False,
+            "percent": 0,
+            "error": str(exc),
+        }
 
 
 def launch_pending_update() -> bool:

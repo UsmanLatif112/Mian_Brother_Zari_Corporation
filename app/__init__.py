@@ -155,6 +155,18 @@ def create_app(config_class=None):
         except Exception:
             logging.getLogger(__name__).warning("Could not ensure customer_type column")
         try:
+            from app.services.customer_type_service import ensure_customer_types_schema
+
+            ensure_customer_types_schema()
+        except Exception:
+            logging.getLogger(__name__).warning("Could not ensure customer_types table")
+        try:
+            from app.services.due_notification_service import ensure_due_date_schema
+
+            ensure_due_date_schema()
+        except Exception:
+            logging.getLogger(__name__).warning("Could not ensure due_date schema")
+        try:
             from app.services.user_registry_service import ensure_user_registration_columns
 
             ensure_user_registration_columns()
@@ -281,10 +293,11 @@ def register_registration_guard(app):
             return None
         if request.path.startswith("/api/") and ep in ("api.internet_status", "api.poll_toasts"):
             return None
+        xrw = (request.headers.get("X-Requested-With") or "").strip().lower()
         wants_json = (
             request.is_json
             or request.accept_mimetypes.best == "application/json"
-            or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+            or xrw in ("xmlhttprequest", "fetch")
         )
         if wants_json or (ep and ep.startswith("api.")):
             return jsonify(

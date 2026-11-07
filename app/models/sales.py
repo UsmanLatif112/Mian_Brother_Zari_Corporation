@@ -33,6 +33,8 @@ class Sale(TimestampMixin, db.Model):
     payment_method = db.Column(db.Enum(PaymentMethod), default=PaymentMethod.CASH)
     payment_status = db.Column(db.Enum(PaymentStatus), default=PaymentStatus.PAID)
     amount_paid = db.Column(db.Numeric(14, 2), default=Decimal("0"))
+    # Optional collection due date (credit / partial sales). Null = no due reminders.
+    due_date = db.Column(db.Date, nullable=True, index=True)
     notes = db.Column(db.Text, nullable=True)
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     remote_id = db.Column(db.Integer, nullable=True, index=True)
@@ -130,6 +132,8 @@ class CustomerReceiving(db.Model):
     # advance | loan | account_settle
     payment_type = db.Column(db.String(30), default="account_settle", nullable=False, index=True)
     payment_method = db.Column(db.Enum(PaymentMethod), default=PaymentMethod.CASH)
+    # Optional repayment due date for loans. Null = no due reminders.
+    due_date = db.Column(db.Date, nullable=True, index=True)
     notes = db.Column(db.Text, nullable=True)
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)

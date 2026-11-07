@@ -19,7 +19,7 @@ from app.services.fifo_service import stock_valuation, stock_valuation_as_of
 from app.services.ledger_service import sum_party_balances_as_of
 from app.services.account_service import account_previous_amount
 
-# Customer payment / credit types and allowed due days
+# Fallback only — live types come from customer_types table
 CUSTOMER_TYPE_META = {
     "good": {"label": "Good", "due_days": 30},
     "bad": {"label": "Bad", "due_days": 0},
@@ -48,7 +48,7 @@ def ensure_customer_type_column():
         if "customer_type" not in cols:
             alters.append(
                 "ALTER TABLE customers ADD COLUMN customer_type "
-                "VARCHAR(30) DEFAULT 'good' NOT NULL"
+                "VARCHAR(60) DEFAULT 'good' NOT NULL"
             )
         if "old_book_no" not in cols:
             alters.append("ALTER TABLE customers ADD COLUMN old_book_no VARCHAR(50)")
@@ -342,6 +342,51 @@ def _ensure_salesman_schema():
         if "salesman_id" not in cols:
             with db.engine.begin() as conn:
                 conn.execute(text("ALTER TABLE sales ADD COLUMN salesman_id INTEGER"))
+    except Exception:
+        pass
+    try:
+        insp = inspect(db.engine)
+        sm_cols = {c["name"] for c in insp.get_columns("salesmen")}
+        if "joined_date" not in sm_cols:
+            with db.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE salesmen ADD COLUMN joined_date DATE"))
+        dialect = db.engine.dialect.name
+        with db.engine.begin() as conn:
+            if dialect == "sqlite":
+                conn.execute(
+                    text(
+                        """
+                        UPDATE salesmen
+                        SET joined_date = (
+                          SELECT le.entry_date FROM ledger_entries le
+                          WHERE le.party_type='salesman' AND le.party_id=salesmen.id
+                            AND le.entry_type='opening'
+                          ORDER BY le.id ASC LIMIT 1
+                        )
+                        WHERE joined_date IS NULL
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        UPDATE salesmen
+                        SET joined_date = date(created_at)
+                        WHERE joined_date IS NULL AND created_at IS NOT NULL
+                        """
+                    )
+                )
+            else:
+                # MySQL / Postgres: created_at fallback (opening date filled on next edit)
+                conn.execute(
+                    text(
+                        """
+                        UPDATE salesmen
+                        SET joined_date = DATE(created_at)
+                        WHERE joined_date IS NULL AND created_at IS NOT NULL
+                        """
+                    )
+                )
     except Exception:
         pass
 
@@ -691,8 +736,18 @@ def _format_chart_axis_label(bucket: str, *, daily: bool) -> str:
 
 def _customer_due_info(customer: Customer, today: date, oldest_sale_date=None, *, batched=False):
     ctype = getattr(customer, "customer_type", None) or "good"
-    meta = CUSTOMER_TYPE_META.get(ctype, CUSTOMER_TYPE_META["good"])
-    allowed = meta["due_days"]
+    try:
+        from app.services.customer_type_service import (
+            customer_type_due_days,
+            customer_type_label,
+        )
+
+        allowed = customer_type_due_days(ctype)
+        type_label = customer_type_label(ctype)
+    except Exception:
+        meta = CUSTOMER_TYPE_META.get(ctype, CUSTOMER_TYPE_META["good"])
+        allowed = meta["due_days"]
+        type_label = meta["label"]
     if not batched and oldest_sale_date is None:
         oldest = (
             Sale.query.filter(
@@ -712,7 +767,7 @@ def _customer_due_info(customer: Customer, today: date, oldest_sale_date=None, *
     if not oldest_sale_date:
         return {
             "type": ctype,
-            "type_label": meta["label"],
+            "type_label": type_label,
             "allowed_days": allowed,
             "due_days": 0,
             "overdue_days": 0,
@@ -721,7 +776,7 @@ def _customer_due_info(customer: Customer, today: date, oldest_sale_date=None, *
     overdue = max(0, age - allowed) if allowed else age
     return {
         "type": ctype,
-        "type_label": meta["label"],
+        "type_label": type_label,
         "allowed_days": allowed,
         "due_days": age,
         "overdue_days": overdue,

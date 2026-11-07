@@ -1,7 +1,34 @@
 (function () {
+  // localStorage is shared across desktop child windows (sessionStorage is not).
   const SESSION_KEY = 'erp-update-checked';
+  const OFFLINE_NOTICE_KEY = 'erp-offline-update-notice';
+  const UPDATE_SHOWN_KEY = 'erp-update-available-shown';
   const isDesktop = document.body.dataset.desktopApp === '1';
   const updatesEnabled = document.body.dataset.updatesEnabled === '1';
+
+  function storageGet(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (_) {
+      return sessionStorage.getItem(key);
+    }
+  }
+
+  function storageSet(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (_) {
+      sessionStorage.setItem(key, value);
+    }
+  }
+
+  function isChildAppWindow() {
+    try {
+      return new URLSearchParams(window.location.search).get('mbf_child') === '1';
+    } catch (_) {
+      return false;
+    }
+  }
 
   function csrf() {
     return window.CSRF_TOKEN || document.querySelector('meta[name=csrf-token]')?.content || '';
@@ -17,6 +44,60 @@
     bootstrap.Modal.getOrCreateInstance(el).show();
   }
 
+  function setProgressVisible(show) {
+    document.getElementById('update-modal-progress-wrap')?.classList.toggle('d-none', !show);
+  }
+
+  function setProgress({ percent, label, detail, indeterminate }) {
+    const wrap = document.getElementById('update-modal-progress-wrap');
+    const bar = document.getElementById('update-modal-progress-bar');
+    const pctEl = document.getElementById('update-modal-progress-pct');
+    const labelEl = document.getElementById('update-modal-progress-label');
+    const detailEl = document.getElementById('update-modal-progress-detail');
+    if (!wrap || !bar) return;
+
+    wrap.classList.remove('d-none');
+    const pct = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+    bar.style.width = `${pct}%`;
+    bar.setAttribute('aria-valuenow', String(pct));
+    bar.classList.toggle('progress-bar-animated', !!indeterminate || pct < 100);
+    bar.classList.toggle('progress-bar-striped', !!indeterminate || pct < 100);
+    if (pctEl) pctEl.textContent = `${pct}%`;
+    if (labelEl && label) labelEl.textContent = label;
+    if (detailEl) detailEl.textContent = detail || '';
+  }
+
+  function setDownloadingUi(active) {
+    const el = modalEl();
+    const closeBtn = document.getElementById('update-modal-close');
+    const laterBtn = document.getElementById('update-modal-later');
+    const skipBtn = document.getElementById('update-modal-skip');
+    const applyBtn = document.getElementById('update-modal-apply');
+    const okBtn = document.getElementById('update-modal-ok');
+    if (el && window.bootstrap) {
+      const instance = bootstrap.Modal.getOrCreateInstance(el, {
+        backdrop: active ? 'static' : true,
+        keyboard: !active,
+      });
+      instance._config.backdrop = active ? 'static' : true;
+      instance._config.keyboard = !active;
+    }
+    if (closeBtn) {
+      closeBtn.disabled = !!active;
+      closeBtn.classList.toggle('d-none', !!active);
+    }
+    if (laterBtn) {
+      laterBtn.disabled = !!active;
+      laterBtn.classList.toggle('d-none', !!active);
+    }
+    if (skipBtn) skipBtn.classList.add('d-none');
+    if (okBtn) okBtn.classList.add('d-none');
+    if (applyBtn) {
+      applyBtn.disabled = !!active;
+      applyBtn.classList.toggle('d-none', !!active);
+    }
+  }
+
   function setModalState({ title, message, notes, mode, build }) {
     const titleEl = document.getElementById('update-modal-title');
     const msgEl = document.getElementById('update-modal-message');
@@ -27,6 +108,7 @@
     const skipBtn = document.getElementById('update-modal-skip');
     const okBtn = document.getElementById('update-modal-ok');
     const laterBtn = document.getElementById('update-modal-later');
+    const closeBtn = document.getElementById('update-modal-close');
 
     if (titleEl) titleEl.textContent = title || 'Updates';
     if (msgEl) msgEl.textContent = message || '';
@@ -38,14 +120,23 @@
       notesWrap.classList.add('d-none');
     }
 
+    if (mode !== 'downloading') {
+      setProgressVisible(false);
+      if (closeBtn) closeBtn.disabled = false;
+      if (laterBtn) laterBtn.disabled = false;
+    }
+
     safeNote?.classList.toggle('d-none', mode !== 'available');
     applyBtn?.classList.toggle('d-none', mode !== 'available');
     skipBtn?.classList.toggle('d-none', mode !== 'available');
-    okBtn?.classList.toggle('d-none', mode === 'available' || mode === 'loading');
-    laterBtn?.classList.toggle('d-none', mode === 'offline' || mode === 'ok');
+    okBtn?.classList.toggle('d-none', mode === 'available' || mode === 'loading' || mode === 'downloading');
+    laterBtn?.classList.toggle('d-none', mode === 'offline' || mode === 'ok' || mode === 'downloading');
 
     if (skipBtn) skipBtn.dataset.build = build ? String(build) : '';
-    if (applyBtn) applyBtn.disabled = false;
+    if (applyBtn) {
+      applyBtn.disabled = false;
+      applyBtn.innerHTML = '<i class="fa-solid fa-download me-1"></i>Update now';
+    }
   }
 
   async function fetchUpdateStatus(respectSkip) {
@@ -81,8 +172,12 @@
           message: data.error || 'Connect to the internet to check for updates.',
           mode: 'offline',
         });
-        if (auto && window.showOfflineModal) {
-          window.showOfflineModal('Connect to the internet to check for app updates.');
+        if (auto) {
+          // Once per app session across all windows — "OK, continue offline".
+          if (storageGet(OFFLINE_NOTICE_KEY) === '1') return;
+          if (window.showOfflineModal) {
+            window.showOfflineModal('Connect to the internet to check for app updates.');
+          }
         } else {
           showUpdateModal();
         }
@@ -100,6 +195,10 @@
       }
 
       if (data.update_available) {
+        const buildKey = String(data.latest_build || data.latest_version || '');
+        if (auto && buildKey && storageGet(UPDATE_SHOWN_KEY) === buildKey) {
+          return;
+        }
         setModalState({
           title: `Update available (v${data.latest_version})`,
           message: `You are on v${data.version}. A newer version is ready to install.`,
@@ -107,6 +206,7 @@
           mode: 'available',
           build: data.latest_build,
         });
+        if (auto && buildKey) storageSet(UPDATE_SHOWN_KEY, buildKey);
         showUpdateModal();
         return;
       }
@@ -131,33 +231,137 @@
     }
   }
 
+  function phaseLabel(phase) {
+    switch (phase) {
+      case 'check':
+        return 'Checking…';
+      case 'download':
+        return 'Downloading…';
+      case 'verify':
+        return 'Verifying…';
+      case 'extract':
+        return 'Extracting…';
+      case 'prepare':
+        return 'Preparing…';
+      case 'done':
+        return 'Complete';
+      default:
+        return 'Updating…';
+    }
+  }
+
+  async function readNdjsonProgress(res, onEvent) {
+    if (!res.body || !res.body.getReader) {
+      const data = await res.json().catch(() => ({}));
+      onEvent(data);
+      return data;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let last = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const evt = JSON.parse(trimmed);
+          last = evt;
+          onEvent(evt);
+        } catch (_) {
+          /* ignore partial/bad line */
+        }
+      }
+    }
+
+    const tail = buffer.trim();
+    if (tail) {
+      try {
+        const evt = JSON.parse(tail);
+        last = evt;
+        onEvent(evt);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    return last || {};
+  }
+
   async function applyUpdate() {
     const applyBtn = document.getElementById('update-modal-apply');
-    if (applyBtn) {
-      applyBtn.disabled = true;
-      applyBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Downloading...';
-    }
-    document.getElementById('global-loader')?.classList.remove('d-none');
+    setModalState({
+      title: 'Downloading update',
+      message: 'Please keep this window open until the download finishes.',
+      mode: 'downloading',
+    });
+    setDownloadingUi(true);
+    setProgress({
+      percent: 2,
+      label: 'Starting…',
+      detail: 'Connecting to update server…',
+      indeterminate: true,
+    });
+    showUpdateModal();
 
     try {
       const res = await fetch('/api/updates/apply', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Accept: 'application/x-ndjson, application/json',
           'X-CSRFToken': csrf(),
         },
         credentials: 'same-origin',
         body: '{}',
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) {
+
+      if (!res.ok && !res.body) {
+        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Update failed.');
       }
 
+      const finalEvent = await readNdjsonProgress(res, (evt) => {
+        if (evt.phase === 'error' || evt.ok === false) {
+          return;
+        }
+        setProgress({
+          percent: evt.percent ?? 0,
+          label: phaseLabel(evt.phase),
+          detail: evt.message || '',
+          indeterminate: (evt.percent || 0) < 5,
+        });
+        const msgEl = document.getElementById('update-modal-message');
+        if (msgEl && evt.message) msgEl.textContent = evt.message;
+      });
+
+      if (!finalEvent || finalEvent.ok === false || finalEvent.phase === 'error') {
+        throw new Error((finalEvent && finalEvent.error) || 'Update failed.');
+      }
+
+      setProgress({
+        percent: 100,
+        label: 'Complete',
+        detail: finalEvent.message || 'Update ready.',
+        indeterminate: false,
+      });
       setModalState({
         title: 'Update ready',
-        message: data.message || 'The app will close and restart with the new version.',
+        message: finalEvent.message || 'The app will close and restart with the new version.',
         mode: 'ok',
+      });
+      setProgressVisible(true);
+      setProgress({
+        percent: 100,
+        label: 'Complete',
+        detail: finalEvent.message || '',
+        indeterminate: false,
       });
       showUpdateModal();
 
@@ -172,10 +376,17 @@
         }
       }, 1200);
     } catch (err) {
-      document.getElementById('global-loader')?.classList.add('d-none');
+      setDownloadingUi(false);
+      setProgressVisible(false);
+      setModalState({
+        title: 'Update failed',
+        message: err.message || 'Could not download update.',
+        mode: 'ok',
+      });
       if (applyBtn) {
         applyBtn.disabled = false;
         applyBtn.innerHTML = '<i class="fa-solid fa-download me-1"></i>Update now';
+        applyBtn.classList.remove('d-none');
       }
       window.showErpToast?.('danger', err.message || 'Could not download update.');
     }
@@ -206,9 +417,15 @@
     document.getElementById('update-modal-apply')?.addEventListener('click', applyUpdate);
     document.getElementById('update-modal-skip')?.addEventListener('click', skipVersion);
 
+    document.getElementById('offlineModal')?.addEventListener('hidden.bs.modal', () => {
+      storageSet(OFFLINE_NOTICE_KEY, '1');
+    });
+
     if (!isDesktop || !updatesEnabled) return;
-    if (sessionStorage.getItem(SESSION_KEY) === '1') return;
-    sessionStorage.setItem(SESSION_KEY, '1');
+    // Child page windows skip auto check — main window owns update/offline notice.
+    if (isChildAppWindow()) return;
+    if (storageGet(SESSION_KEY) === '1') return;
+    storageSet(SESSION_KEY, '1');
     setTimeout(() => checkUpdates({ auto: true, respectSkip: true }), 1500);
   }
 

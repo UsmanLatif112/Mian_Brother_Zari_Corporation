@@ -8,17 +8,19 @@ from flask_login import current_user, login_required
 from sqlalchemy import func
 from app.extensions import db
 from app.forms import ProductForm
-from app.models import Category, Product, StockLayer, StockMovement, Vendor
+from app.models import Category, Product, Purchase, StockLayer, StockMovement, Vendor
 from app.services.audit_service import log_audit
 from app.services.fifo_service import (
     adjust_batch,
+    adjust_open_weight,
     reprice_all_remaining,
     reprice_batch,
+    sync_product_stock,
 )
 from app.services.purchase_service import (
     amend_purchase_for_layer,
     record_purchase,
-    reverse_purchase_for_layer,
+    remove_stock_layer_cascading,
 )
 from app.utils.party_filters import apply_party_active_filter, parse_party_active
 from app.utils.working_date import get_working_date
@@ -103,23 +105,25 @@ def _parse_purchase_quantities(item):
     if has_split:
         sealed = Decimal(str(sealed_raw or 0))
         loose = Decimal(str(loose_raw or 0))
+        if sealed < 0 or loose < 0:
+            name = (item.get("name") or "product").strip()
+            raise ValueError(f"Quantity cannot be negative for {name}.")
         uw = parse_unit_weight(uw_raw) if uw_raw not in (None, "") else None
         if uw and uw > 0:
             total = sealed + (loose / uw)
         else:
             total = sealed
-        if total <= 0:
-            name = (item.get("name") or "product").strip()
-            raise ValueError(f"Purchase quantity is required for {name}.")
+        # 0 qty allowed: catalog product for negative/backorder sales (no purchase).
         return total, sealed, loose
 
     try:
         qty = Decimal(str(item.get("opening_stock") or item.get("quantity") or 0))
     except Exception as exc:
         raise ValueError(f"Invalid purchase quantity for {item.get('name') or 'product'}.") from exc
-    if qty <= 0:
+    if qty < 0:
         name = (item.get("name") or "product").strip()
-        raise ValueError(f"Purchase quantity is required for {name}.")
+        raise ValueError(f"Quantity cannot be negative for {name}.")
+    # 0 qty allowed: create product only (no purchase / vendor ledger).
     return qty, None, None
 
 
@@ -251,10 +255,20 @@ def _create_inventory_products(data, *, as_json=True):
     """
     Create/restock one or more products from Add Product.
 
-    Each product row becomes its own Purchase + vendor ledger entry so the
-    ledger shows product / qty × weight @ rate on separate lines.
-    Shared vendor invoice no. (if entered) is copied onto every row.
+    Vendor is always required (even at qty 0) so later stock/invoice can be
+    purchased against that vendor and cover negative/backorder sales.
+
+    Qty > 0: each row becomes its own Purchase + vendor ledger entry.
+    Qty = 0: catalog-only product (no purchase posted yet).
     """
+    items_raw = data.get("items")
+    if not isinstance(items_raw, list) or not items_raw:
+        msg = "Add at least one product row."
+        if as_json:
+            return jsonify({"ok": False, "error": msg}), 400
+        flash(msg, "danger")
+        return _inventory_page(open_modal=True)
+
     try:
         vendor_id = int(data.get("vendor_id") or 0)
     except (TypeError, ValueError):
@@ -267,38 +281,35 @@ def _create_inventory_products(data, *, as_json=True):
         flash(msg, "danger")
         return _inventory_page(open_modal=True)
 
-    items_raw = data.get("items")
-    if not isinstance(items_raw, list) or not items_raw:
-        msg = "Add at least one product row."
-        if as_json:
-            return jsonify({"ok": False, "error": msg}), 400
-        flash(msg, "danger")
-        return _inventory_page(open_modal=True)
-
     invoice_no = _parse_optional_text(data.get("invoice_no"))
+    purchase_date = _parse_optional_date(data.get("purchase_date")) or get_working_date()
     created = []
     restocked = []
+    catalog_only = []
     purchases = []
 
     try:
         for raw in items_raw:
-            product, _qty, purchase_line, action = _upsert_product_line(raw or {})
+            product, qty, purchase_line, action = _upsert_product_line(raw or {})
             if action == "create":
                 created.append(product)
             else:
                 restocked.append(product)
             log_audit(action, "product", product.id, product.name)
 
-            purchase = record_purchase(
-                vendor_id=vendor.id,
-                items=[purchase_line],
-                user_id=current_user.id,
-                invoice_no=invoice_no,
-                purchase_date=get_working_date(),
-                notes=f"Inventory add: {product.name}",
-            )
-            purchases.append(purchase)
-            log_audit("create", "purchase", purchase.id, purchase.invoice_no)
+            if qty > 0:
+                purchase = record_purchase(
+                    vendor_id=vendor.id,
+                    items=[purchase_line],
+                    user_id=current_user.id,
+                    invoice_no=invoice_no,
+                    purchase_date=purchase_date,
+                    notes=f"Inventory add: {product.name}",
+                )
+                purchases.append(purchase)
+                log_audit("create", "purchase", purchase.id, purchase.invoice_no)
+            else:
+                catalog_only.append(product)
 
         db.session.commit()
     except Exception as exc:
@@ -318,28 +329,49 @@ def _create_inventory_products(data, *, as_json=True):
     if len(purchases) > 4:
         invoice_text += f" (+{len(purchases) - 4} more)"
 
+    vendor_name = vendor.name if vendor else ""
     if total == 1 and first_purchase:
         product = (created or restocked)[0]
         if created:
             msg = (
                 f"Product created and purchase {first_purchase.invoice_no} "
-                f"recorded for {vendor.name}."
+                f"recorded for {vendor_name}."
             )
         else:
             msg = (
                 f"Stock added to {product.name}. Purchase {first_purchase.invoice_no} "
-                f"recorded for {vendor.name}."
+                f"recorded for {vendor_name}."
             )
         redirect_url = url_for("inventory.detail", product_id=product.id)
+    elif total == 1 and catalog_only:
+        product = catalog_only[0]
+        msg = (
+            f"Product “{product.name}” saved with 0 stock for {vendor_name} "
+            "(sale/backorder ready). Add purchase when invoice/stock arrives."
+        )
+        redirect_url = url_for("inventory.detail", product_id=product.id)
+    elif purchases and catalog_only:
+        msg = (
+            f"{len(purchases)} purchase(s) recorded"
+            f"{f' ({invoice_text})' if invoice_text else ''} for {vendor_name}; "
+            f"{len(catalog_only)} product(s) saved with 0 stock."
+        )
+        redirect_url = url_for("inventory.index")
+    elif purchases:
+        msg = (
+            f"{total} products saved as {len(purchases)} separate purchases"
+            f"{f' ({invoice_text})' if invoice_text else ''} for {vendor_name}."
+        )
+        redirect_url = url_for("inventory.index")
     else:
         msg = (
-            f"{total} products saved as {total} separate purchases"
-            f"{f' ({invoice_text})' if invoice_text else ''} for {vendor.name}."
+            f"{total} product(s) saved with 0 stock for {vendor_name} "
+            "(sale/backorder ready). Add purchase when invoice/stock arrives."
         )
         redirect_url = url_for("inventory.index")
 
     if as_json:
-        flash(msg, "success")
+        # Client shows toast (and may soft-navigate); avoid duplicate flash toast.
         products_payload = []
         for p in created + restocked:
             products_payload.append(
@@ -478,6 +510,66 @@ def categories():
     return redirect(url_for("categories.index"))
 
 
+@inventory_bp.route("/profitability")
+@login_required
+@permission_required("inventory.view")
+def profitability():
+    """Inventory profitability by category for a selected period."""
+    from app.services.inventory_profitability_service import inventory_profitability_metrics
+
+    period = request.args.get("period", "all")
+    start_raw = (request.args.get("start_date") or "").strip()
+    end_raw = (request.args.get("end_date") or "").strip()
+    try:
+        period_start = date.fromisoformat(start_raw) if start_raw else None
+    except ValueError:
+        period_start = None
+    try:
+        period_end = date.fromisoformat(end_raw) if end_raw else None
+    except ValueError:
+        period_end = None
+
+    category_raw = (request.args.get("category_id") or "").strip()
+    try:
+        selected_category = int(category_raw) if category_raw else None
+    except ValueError:
+        selected_category = None
+
+    categories = (
+        Category.query.filter(Category.parent_id.is_(None), Category.is_deleted.is_(False))
+        .order_by(Category.name)
+        .all()
+    )
+    if selected_category and not any(c.id == selected_category for c in categories):
+        # Allow filtering by a subcategory id as well
+        cat = Category.query.filter_by(id=selected_category, is_deleted=False).first()
+        if not cat:
+            selected_category = None
+
+    metrics = inventory_profitability_metrics(
+        period=period,
+        start_date=period_start,
+        end_date=period_end,
+        category_id=selected_category,
+    )
+    selected_cat_name = None
+    if selected_category:
+        selected_cat_name = (
+            Category.query.filter_by(id=selected_category).with_entities(Category.name).scalar()
+        )
+
+    return render_template(
+        "inventory/profitability.html",
+        metrics=metrics,
+        categories=categories,
+        selected_category=selected_category,
+        selected_category_name=selected_cat_name,
+        selected_period=period,
+        start_date=start_raw if period == "custom" else "",
+        end_date=end_raw if period == "custom" else "",
+    )
+
+
 @inventory_bp.route("/products/create", methods=["GET", "POST"])
 @login_required
 @permission_required("inventory.*")
@@ -608,6 +700,32 @@ def detail(product_id):
         )
 
     layers = layers_q.order_by(StockLayer.id.desc()).all()
+    purchase_ids = [
+        int(L.source_id)
+        for L in layers
+        if (L.source_type or "") == "purchase" and L.source_id
+    ]
+    purchases_by_id = {}
+    if purchase_ids:
+        purchases_by_id = {
+            p.id: p
+            for p in Purchase.query.filter(Purchase.id.in_(purchase_ids)).all()
+        }
+    for layer in layers:
+        purchase = None
+        if (layer.source_type or "") == "purchase" and layer.source_id:
+            purchase = purchases_by_id.get(int(layer.source_id))
+        if purchase and purchase.purchase_date:
+            layer.purchase_date = purchase.purchase_date
+        elif layer.received_at:
+            layer.purchase_date = (
+                layer.received_at.date()
+                if hasattr(layer.received_at, "date")
+                else layer.received_at
+            )
+        else:
+            layer.purchase_date = None
+
     from app.utils.movement_labels import group_sale_edit_movements
 
     movements = group_sale_edit_movements(
@@ -765,13 +883,13 @@ def edit_layer_entry(layer_id):
         layer.unit_weight = product.unit_weight
         layer.weight_unit = product.weight_unit
 
+        old_open_w = Decimal(str(layer.open_weight_remaining or 0))
         try:
             open_w = Decimal(str(request.form.get("open_weight_remaining") or 0))
         except Exception:
             open_w = Decimal("0")
         if open_w < 0:
             raise ValueError("Open weight cannot be negative.")
-        layer.open_weight_remaining = open_w
 
         old_purchased = Decimal(str(layer.quantity_received or 0))
         old_unit_cost = Decimal(str(layer.unit_cost or 0))
@@ -793,17 +911,32 @@ def edit_layer_entry(layer_id):
         if new_qty > new_purchased:
             raise ValueError("Sealed bags cannot be more than purchased qty.")
 
+        # Purchase qty also changed → correction (no loss). Qty-only drop → real shortage.
+        is_purchase_correction = new_purchased != old_purchased
+        adj_notes = (request.form.get("adjustment_notes") or "").strip() or None
+
         layer.quantity_received = new_purchased
         current_qty = Decimal(str(layer.quantity_remaining or 0))
         if new_qty != current_qty:
-            adj_notes = (request.form.get("adjustment_notes") or "").strip() or None
             adjust_batch(
                 layer,
                 new_qty,
                 current_user.id,
                 notes=adj_notes,
+                record_loss=not is_purchase_correction,
             )
         layer.quantity_received = new_purchased
+
+        if open_w != old_open_w:
+            adjust_open_weight(
+                layer,
+                open_w,
+                current_user.id,
+                notes=adj_notes,
+                record_loss=not is_purchase_correction,
+            )
+        else:
+            layer.open_weight_remaining = open_w
 
         reprice_batch(
             layer,
@@ -817,7 +950,9 @@ def edit_layer_entry(layer_id):
 
         sync_product_stock(product)
 
-        # Keep linked purchase + vendor payable / ledger in sync with this batch
+        purchase_date = _parse_optional_date(request.form.get("purchase_date"))
+
+        # Keep linked purchase + vendor payable / ledger / journal date in sync
         amend_purchase_for_layer(
             layer,
             old_purchased=old_purchased,
@@ -826,6 +961,7 @@ def edit_layer_entry(layer_id):
             new_unit_cost=purchase_price,
             new_vendor_id=vendor.id,
             new_invoice_no=layer.invoice_no,
+            new_purchase_date=purchase_date,
         )
 
         log_audit(
@@ -839,6 +975,7 @@ def edit_layer_entry(layer_id):
                     "sku": product.sku,
                     "vendor_id": layer.vendor_id,
                     "invoice_no": layer.invoice_no,
+                    "purchase_date": purchase_date.isoformat() if purchase_date else None,
                     "quantity": float(layer.quantity_remaining or 0),
                     "open_weight_remaining": float(layer.open_weight_remaining or 0),
                     "quantity_received": float(layer.quantity_received or 0),
@@ -1018,23 +1155,13 @@ def delete_layer(layer_id):
         return redirect(url_for("inventory.index"))
     product_id = layer.product_id
     try:
-        # Reverse linked purchase / vendor payable before clearing stock.
-        reversed_info = reverse_purchase_for_layer(
-            layer, notes=f"Batch #{layer_id} deleted"
+        # Cascade: reverse purchase/vendor → clear stock (no fake loss) → delete layer
+        result = remove_stock_layer_cascading(
+            layer,
+            current_user.id,
+            notes=f"Batch #{layer_id} deleted",
         )
-        remaining = Decimal(str(layer.quantity_remaining or 0))
-        if remaining > 0:
-            adjust_batch(layer, Decimal("0"), current_user.id, notes="Batch cleared / deleted")
-        db.session.delete(layer)
-        db.session.flush()
-        product = db.session.get(Product, product_id)
-        if product:
-            open_qty = (
-                db.session.query(func.coalesce(func.sum(StockLayer.quantity_remaining), 0))
-                .filter(StockLayer.product_id == product_id)
-                .scalar()
-            )
-            product.current_stock = Decimal(str(open_qty or 0))
+        reversed_info = (result or {}).get("purchase")
         audit_detail = f"product={product_id}"
         if reversed_info:
             audit_detail += (
@@ -1074,20 +1201,14 @@ def delete_product(product_id):
         layers = StockLayer.query.filter_by(product_id=product.id).all()
         purchases_removed = 0
         for layer in layers:
-            info = reverse_purchase_for_layer(
-                layer, notes=f"Product deleted: {product.name}"
+            result = remove_stock_layer_cascading(
+                layer,
+                current_user.id,
+                notes=f"Product deleted: {product.name}",
             )
+            info = (result or {}).get("purchase")
             if info and info.get("deleted"):
                 purchases_removed += 1
-            remaining = Decimal(str(layer.quantity_remaining or 0))
-            if remaining > 0:
-                adjust_batch(
-                    layer,
-                    Decimal("0"),
-                    current_user.id,
-                    notes="Product deleted — stock cleared",
-                )
-            db.session.delete(layer)
 
         product.is_deleted = True
         product.current_stock = Decimal("0")

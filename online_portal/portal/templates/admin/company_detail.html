@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+{% block title %}{{ company.name }}{% endblock %}
+{% block content %}
+<div class="pt-3">
+  <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+    <div>
+      <h1 class="h3 mb-1">{{ company.name }}</h1>
+      <p class="text-muted mb-0">Sync code <code>{{ company.sync_code }}</code>
+        · {% if company.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Inactive</span>{% endif %}
+      </p>
+    </div>
+    <form method="post" action="{{ url_for('admin.company_toggle', company_id=company.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline-secondary" type="submit">{% if company.is_active %}Mark inactive{% else %}Mark active{% endif %}</button>
+    </form>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white"><strong>Company details</strong></div>
+        <div class="card-body">
+          <form method="post" enctype="multipart/form-data">
+            {{ form.hidden_tag() }}
+            <input type="hidden" name="form_name" value="company">
+            <div class="mb-3">{{ form.name.label(class='form-label') }}{{ form.name(class='form-control') }}</div>
+            <div class="mb-3">{{ form.notes.label(class='form-label') }}{{ form.notes(class='form-control', rows=3) }}</div>
+            <div class="mb-3">{{ form.logo.label(class='form-label') }}{{ form.logo(class='form-control') }}</div>
+            <div class="form-check mb-3">{{ form.is_active(class='form-check-input') }}{{ form.is_active.label(class='form-check-label') }}</div>
+            {{ form.submit(class='btn btn-success') }}
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white"><strong>Add user under this company</strong></div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('admin.company_add_user', company_id=company.id) }}">
+            {{ user_form.hidden_tag() }}
+            <div class="row g-2">
+              <div class="col-md-6">{{ user_form.full_name.label(class='form-label') }}{{ user_form.full_name(class='form-control') }}</div>
+              <div class="col-md-6">{{ user_form.username.label(class='form-label') }}{{ user_form.username(class='form-control') }}</div>
+              <div class="col-md-6">{{ user_form.email.label(class='form-label') }}{{ user_form.email(class='form-control') }}</div>
+              <div class="col-md-6">{{ user_form.password.label(class='form-label') }}{{ user_form.password(class='form-control') }}</div>
+              <div class="col-md-4">{{ user_form.role.label(class='form-label') }}{{ user_form.role(class='form-select') }}</div>
+              <div class="col-md-4">{{ user_form.subscription_plan.label(class='form-label') }}{{ user_form.subscription_plan(class='form-select') }}</div>
+              <div class="col-md-4 d-flex align-items-end">
+                <div class="form-check mb-2">{{ user_form.is_active(class='form-check-input') }}{{ user_form.is_active.label(class='form-check-label') }}</div>
+              </div>
+            </div>
+            <button class="btn btn-success mt-2" type="submit">{{ user_form.submit.label.text }}</button>
+          </form>
+        </div>
+      </div>
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white"><strong>Users</strong></div>
+        <div class="table-responsive">
+          <table class="table mb-0 align-middle">
+            <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Key</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              {% for u in users %}
+              <tr>
+                <td>{{ u.full_name }}</td>
+                <td>{{ u.username }}</td>
+                <td>{{ u.role_label }}</td>
+                <td><code class="small">{{ u.registration_key or '—' }}</code></td>
+                <td>{% if u.is_active_user %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Inactive</span>{% endif %}</td>
+                <td class="text-end text-nowrap">
+                  <form class="d-inline" method="post" action="{{ url_for('admin.user_regen_key', user_id=u.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-primary" type="submit">Regen key</button>
+                  </form>
+                  <form class="d-inline" method="post" action="{{ url_for('admin.user_toggle', user_id=u.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-secondary" type="submit">{% if u.is_active_user %}Deactivate{% else %}Activate{% endif %}</button>
+                  </form>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="6" class="text-muted p-3">No users yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -52,8 +52,12 @@ def _purchase_line_particular(it) -> str:
     return purchase_line_particular(it)
 
 
-def items_particulars(items, *, limit: int = 4, fallback: str = "", kind: str = "sale") -> str:
-    """Particulars from line items only (no amounts — those are in money columns)."""
+def items_particulars(items, *, limit: int | None = 4, fallback: str = "", kind: str = "sale") -> str:
+    """Particulars from line items only (no amounts — those are in money columns).
+
+    limit=4 (default): short screen text with \"| +N more\" when truncated.
+    limit=None: full list (tooltip / print).
+    """
     if kind == "purchase":
         labels: list[str] = []
         for it in items or []:
@@ -82,7 +86,7 @@ def items_particulars(items, *, limit: int = 4, fallback: str = "", kind: str = 
 
     if not labels:
         return fallback
-    if len(labels) <= limit:
+    if limit is None or limit <= 0 or len(labels) <= limit:
         return " | ".join(labels)
     shown = " | ".join(labels[:limit])
     return f"{shown} | +{len(labels) - limit} more"

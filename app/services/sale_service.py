@@ -19,7 +19,9 @@ def _sale_particulars_notes(sale) -> str:
     try:
         from app.services.journal_service import items_particulars
 
-        text = (items_particulars(sale.items or [], fallback="", kind="sale") or "").strip()
+        text = (
+            items_particulars(sale.items or [], limit=None, fallback="", kind="sale") or ""
+        ).strip()
         if text:
             return f"{prefix} / {text}"
     except Exception:
@@ -85,6 +87,14 @@ def create_sale(data, items, user_id, prefer_layer_ids=None):
     sale_date = data.get("sale_date") or get_working_date()
     if isinstance(sale_date, str):
         sale_date = date_cls.fromisoformat(sale_date)
+    due_date = data.get("due_date")
+    if isinstance(due_date, str):
+        due_date = due_date.strip() or None
+        if due_date:
+            due_date = date_cls.fromisoformat(due_date)
+    elif due_date is not None and not hasattr(due_date, "isoformat"):
+        due_date = None
+
     sale = Sale(
         invoice_no=data.get("invoice_no") or generate_invoice_no(),
         sale_date=sale_date,
@@ -93,6 +103,7 @@ def create_sale(data, items, user_id, prefer_layer_ids=None):
         discount=Decimal(str(data.get("discount", 0))),
         tax_amount=Decimal(str(data.get("tax_amount", 0))),
         payment_method=PaymentMethod(data.get("payment_method", "cash")),
+        due_date=due_date,
         notes=data.get("notes"),
         created_by_id=user_id,
     )
@@ -216,6 +227,7 @@ def create_sale(data, items, user_id, prefer_layer_ids=None):
         sale.payment_method = PaymentMethod.CASH if cash_received > 0 else PaymentMethod.CREDIT
     elif applied > 0:
         sale.payment_status = PaymentStatus.PARTIAL
+        sale.due_date = None
         sale.payment_method = PaymentMethod.CASH
     else:
         sale.payment_status = PaymentStatus.UNPAID

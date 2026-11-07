@@ -1,0 +1,42 @@
+<aside class="erp-sidebar" id="erp-sidebar">
+  <div class="sidebar-brand">
+    {% if brand_logo %}
+    <img class="sidebar-brand-logo" src="{{ brand_logo }}" alt="{{ brand_name }}{% if brand_sub %} {{ brand_sub }}{% endif %}">
+    {% else %}
+    <div class="sidebar-brand-logo sidebar-brand-logo--placeholder" aria-hidden="true">
+      <i class="fa-solid fa-building"></i>
+    </div>
+    {% endif %}
+    <div class="sidebar-brand-text">
+      <span class="sidebar-brand-name">{{ brand_name }}</span>
+      {% if brand_sub %}
+      <span class="sidebar-brand-sub">{{ brand_sub }}</span>
+      {% endif %}
+    </div>
+  </div>
+  <nav class="sidebar-nav">
+    {% if current_user.is_super_admin() %}
+    <a href="{{ url_for('admin.dashboard') }}" class="nav-link {% if request.endpoint == 'admin.dashboard' %}active{% endif %}"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
+    <a href="{{ url_for('admin.companies') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('admin.company') %}active{% endif %}"><i class="fa-solid fa-building"></i> Companies</a>
+    <a href="{{ url_for('admin.users') }}" class="nav-link {% if request.endpoint == 'admin.users' %}active{% endif %}"><i class="fa-solid fa-user-shield"></i> Users</a>
+    <a href="{{ url_for('admin.company_new') }}" class="nav-link {% if request.endpoint == 'admin.company_new' %}active{% endif %}"><i class="fa-solid fa-plus"></i> New company</a>
+    <a href="{{ url_for('downloads.admin_releases') }}" class="nav-link {% if request.endpoint and 'releases' in (request.endpoint or '') %}active{% endif %}"><i class="fa-solid fa-cloud-arrow-up"></i> App releases</a>
+    <a href="{{ url_for('downloads.admin_sqlite') }}" class="nav-link {% if request.endpoint == 'downloads.admin_sqlite' %}active{% endif %}"><i class="fa-solid fa-database"></i> SQLite packages</a>
+    {% else %}
+    <a href="{{ url_for('company.dashboard') }}" class="nav-link {% if request.endpoint == 'company.dashboard' %}active{% endif %}"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
+    <a href="{{ url_for('company.customers') }}" class="nav-link {% if request.endpoint and 'customer' in (request.endpoint or '') %}active{% endif %}"><i class="fa-solid fa-users"></i> Customers</a>
+    <a href="{{ url_for('company.vendors') }}" class="nav-link {% if request.endpoint and 'vendor' in (request.endpoint or '') %}active{% endif %}"><i class="fa-solid fa-building"></i> Vendors</a>
+    <a href="{{ url_for('downloads.index') }}" class="nav-link {% if request.endpoint == 'downloads.index' %}active{% endif %}"><i class="fa-solid fa-download"></i> Download app</a>
+    {% endif %}
+  </nav>
+  <div class="sidebar-credit">
+    <div class="sidebar-credit-line">
+      <span class="sidebar-credit-product">{{ suite_name }}</span>
+      <span class="sidebar-credit-by">developed by <span class="sidebar-credit-dev"><span class="sidebar-credit-u">U.</span> Technologies</span></span>
+    </div>
+    <a class="sidebar-credit-link" href="{{ developer_url }}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-globe"></i>
+      <span>udottechnologies.com</span>
+    </a>
+  </div>
+</aside>

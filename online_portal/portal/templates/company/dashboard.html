@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard — {{ company.name if company else suite_name }}{% endblock %}
+{% block search_placeholder %}Search…{% endblock %}
+{% block page_filters %}
+{% include 'partials/period_filter.html' %}
+{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 dash-hero mb-3">
+    <div>
+      <h1 class="h3 mb-1">{{ company.name if company else 'Dashboard' }}</h1>
+      <p class="text-muted mb-0">Overview from last offline sync</p>
+    </div>
+  </div>
+
+  {% if not stats.has_synced_data %}
+  <div class="alert alert-warning">
+    No synced shop data yet. When the offline app syncs, customers and vendors will appear here.
+  </div>
+  {% endif %}
+
+  <div class="row g-3">
+    <div class="col-md-4"><div class="portal-kpi"><div class="label">Customers</div><div class="value">{{ stats.customers if stats.customers is not none else '—' }}</div></div></div>
+    <div class="col-md-4"><div class="portal-kpi"><div class="label">Vendors</div><div class="value">{{ stats.vendors if stats.vendors is not none else '—' }}</div></div></div>
+    <div class="col-md-4"><div class="portal-kpi"><div class="label">Last sync</div><div class="value" style="font-size:1rem">{{ stats.last_sync or 'Never' }}</div></div></div>
+  </div>
+</div>
+{% endblock %}

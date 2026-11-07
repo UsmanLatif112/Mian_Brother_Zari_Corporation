@@ -30,11 +30,19 @@ TRIAL_UNIT_CHOICES = [
     ("months", "Months"),
 ]
 
+# After serial key — paid access window
+LICENSE_PLAN_CHOICES = [
+    ("lifetime", "Lifetime"),
+    ("1_month", "1 Month"),
+    ("1_year", "1 Year"),
+    ("custom", "Custom length"),
+]
+
 
 class LoginForm(FlaskForm):
     username = StringField("Username", validators=[DataRequired(), Length(max=80)])
     password = PasswordField("Password", validators=[DataRequired()])
-    remember = BooleanField("Remember me")
+    remember = BooleanField("Remember me", default=True)
     submit = SubmitField("Sign In")
 
 
@@ -62,6 +70,12 @@ class UserForm(FlaskForm):
         "Trial unit",
         choices=TRIAL_UNIT_CHOICES,
         default="days",
+    )
+    subscription_plan = SelectField(
+        "After key (paid plan)",
+        choices=LICENSE_PLAN_CHOICES,
+        default="lifetime",
+        description="When they register the PC with their serial key.",
     )
     password = PasswordField("Password", validators=[StrongPassword(required=True)])
     is_active_user = BooleanField("Active", default=True)
@@ -97,6 +111,28 @@ class UserEditForm(FlaskForm):
         "Reset / extend trial from now",
         default=False,
         description="Starts a new trial window from now using the length above.",
+    )
+    subscription_plan = SelectField(
+        "Paid plan (after key)",
+        choices=LICENSE_PLAN_CHOICES,
+        default="lifetime",
+        validators=[Optional()],
+    )
+    apply_paid_plan = BooleanField(
+        "Apply / extend paid plan from now",
+        default=False,
+        description="Starts or renews paid access (1 month / 1 year / lifetime / custom) from now.",
+    )
+    paid_amount = IntegerField(
+        "Custom paid length",
+        validators=[Optional(), NumberRange(min=1, max=9999)],
+        default=30,
+    )
+    paid_unit = SelectField(
+        "Custom paid unit",
+        choices=TRIAL_UNIT_CHOICES,
+        default="days",
+        validators=[Optional()],
     )
     password = PasswordField(
         "New Password",
@@ -188,13 +224,7 @@ class CustomerForm(FlaskForm):
     joined_date = DateField("Date Added", validators=[Optional()])
     customer_type = SelectField(
         "Customer Type",
-        choices=[
-            ("good", "Good"),
-            ("bad", "Bad"),
-            ("1_year", "1 Year"),
-            ("6_month", "6 Month"),
-            ("late_pay", "Late Pay"),
-        ],
+        choices=[],
         default="good",
     )
     cnic = StringField("CNIC", validators=[Optional()])
@@ -229,6 +259,7 @@ class SalesmanForm(FlaskForm):
         validators=[Optional()],
         default=None,
     )
+    joined_date = DateField("Date Added", validators=[Optional()])
     notes = TextAreaField("Notes", validators=[Optional()])
     submit = SubmitField("Save")
 

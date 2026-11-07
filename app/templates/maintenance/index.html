@@ -158,6 +158,7 @@
         <div class="card-body">
           <p class="small text-muted mb-3">
             <strong>Create Backup</strong> makes a dated folder with a consistent <code>.db</code> snapshot.
+            Keeps today’s last <strong>10</strong> backups, plus the last backup of each of the last <strong>10 days</strong>.
             {% if auto_backup_enabled %}
             Auto-backup runs every <strong>{{ auto_backup_hours }} hour{{ 's' if auto_backup_hours != 1 else '' }}</strong>.
             {% endif %}
@@ -192,7 +193,7 @@
           </span>
         </div>
         <div class="card-body">
-          <table class="table datatable mb-0" id="backups-table">
+          <table class="table datatable mb-0" id="backups-table" data-page-length="10">
             <thead>
               <tr><th>Backup</th><th class="text-end">Actions</th></tr>
             </thead>

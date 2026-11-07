@@ -465,10 +465,11 @@
       } else {
         openingStock = sealedBags;
       }
-      if (!(openingStock > 0)) {
+      // 0 stock allowed: catalog product for sale/backorder; purchase added later.
+      if (openingStock < 0) {
         return {
           ok: false,
-          error: `Enter full item and/or loose item for “${name}”.`,
+          error: `Quantity cannot be negative for “${name}”.`,
         };
       }
 
@@ -508,9 +509,17 @@
     const vendorSearch = document.getElementById('vendor-search');
     const vendorId = document.getElementById('vendor_id');
     const invoiceNo = document.getElementById('invoice_no');
+    const purchaseDate = document.getElementById('purchase_date');
     if (vendorSearch) vendorSearch.value = '';
     if (vendorId) vendorId.value = '';
     if (invoiceNo) invoiceNo.value = '';
+    if (purchaseDate) {
+      purchaseDate.value =
+        (typeof window.getErpWorkingDate === 'function' && window.getErpWorkingDate()) ||
+        purchaseDate.dataset.today ||
+        '';
+      purchaseDate.dataset.erpPreserveDate = '';
+    }
     addRow();
     const pendingName = window._pendingSaleProductName;
     if (pendingName) {
@@ -556,9 +565,15 @@
       return;
     }
 
+    const purchaseDateEl = document.getElementById('purchase_date');
+    const purchaseDate =
+      purchaseDateEl?.value ||
+      (typeof window.getErpWorkingDate === 'function' ? window.getErpWorkingDate() : '') ||
+      '';
     const payload = {
       vendor_id: document.getElementById('vendor_id')?.value || '',
       invoice_no: document.getElementById('invoice_no')?.value?.trim() || '',
+      purchase_date: purchaseDate,
       items: collected.items,
     };
 
@@ -577,10 +592,34 @@
         return;
       }
       if (isSalesContext && typeof window.onInventoryProductSaved === 'function') {
+        if (typeof window.showErpToast === 'function') {
+          window.showErpToast('success', data.message || 'Product saved.');
+        }
         window.onInventoryProductSaved(data);
         return;
       }
-      window.location.href = data.redirect || '/inventory/';
+      // Stay in this window/tab — toast is required; user can search to open the product.
+      const msg = data.message || 'Products saved.';
+      if (typeof window.showErpToast === 'function') {
+        window.showErpToast('success', msg);
+      }
+      try {
+        sessionStorage.setItem(
+          'erp-pending-toast',
+          JSON.stringify({ category: 'success', message: msg })
+        );
+      } catch (_) { /* ignore */ }
+      const hostModal = document.getElementById(hostModalId);
+      if (hostModal && window.bootstrap) {
+        bootstrap.Modal.getInstance(hostModal)?.hide();
+      }
+      const productName = data.name || data.products?.[0]?.name || '';
+      let nextUrl = '/inventory/';
+      if (productName) {
+        nextUrl =
+          '/inventory/?search=' + encodeURIComponent(productName);
+      }
+      window.location.href = nextUrl;
     } catch (_) {
       showError('Network error. Try again.');
     } finally {

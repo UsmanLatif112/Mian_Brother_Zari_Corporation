@@ -1,4 +1,4 @@
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -294,9 +294,7 @@ def _apply_user_registration(
         )
         return True, key
     user.registration_key = None
-    user.is_registered = True
-    user.license_type = "lifetime"
-    user.license_expires_at = None
+    user.activate_with_plan("lifetime")
     if not user.registered_at:
         user.registered_at = utcnow()
     user.device_id = None
@@ -329,7 +327,9 @@ def login():
             User.is_deleted.is_(False),
         ).first()
         if user and user.check_password(form.password.data) and user.is_active:
-            login_user(user, remember=form.remember.data)
+            # Always remember for 30 days so new app windows stay logged in
+            login_user(user, remember=True)
+            session.permanent = True
             user.last_login_at = utcnow()
             log_audit("login", "user", user.id)
             db.session.commit()
@@ -346,7 +346,8 @@ def login():
             if imported:
                 db.session.add(imported)
                 db.session.flush()
-                login_user(imported, remember=form.remember.data)
+                login_user(imported, remember=True)
+                session.permanent = True
                 imported.last_login_at = utcnow()
                 log_audit("login", "user", imported.id, "imported_from_mysql")
                 db.session.commit()
@@ -458,8 +459,10 @@ def validate_password():
 @auth_bp.route("/register", methods=["POST"])
 @login_required
 def register():
-    """Verify key against MySQL, then mark lifetime registered in MySQL + local SQLite."""
-    if current_user.is_super_admin() or current_user.is_registered:
+    """Verify key against MySQL, then apply Super Admin paid plan (lifetime / 1 mo / 1 yr)."""
+    if current_user.is_super_admin():
+        return jsonify({"ok": True, "message": "Already registered."})
+    if current_user.is_registered and not current_user.is_paid_license_expired():
         return jsonify({"ok": True, "message": "Already registered."})
 
     if not mysql_configured():
@@ -498,20 +501,29 @@ def register():
         return jsonify({"ok": False, "error": result.get("error", "Registration failed.")}), 400
 
     now = utcnow()
-    current_user.activate_lifetime()
+    plan = result.get("subscription_plan") or current_user.subscription_plan or "lifetime"
+    current_user.activate_with_plan(plan)
     current_user.registered_at = now
     current_user.device_id = machine_id
     current_user.registration_key = result.get("registration_key") or key
     if result.get("cloud_id"):
         current_user.remote_id = result["cloud_id"]
-    log_audit("register", "user", current_user.id, f"device={machine_id};license=lifetime")
+    # Sync expiry back if MySQL returned computed values
+    if result.get("license_type"):
+        current_user.license_type = result["license_type"]
+    if "license_expires_at" in result:
+        current_user.license_expires_at = result.get("license_expires_at")
+    log_audit("register", "user", current_user.id, f"device={machine_id};plan={plan}")
     db.session.commit()
-    return jsonify(
-        {
-            "ok": True,
-            "message": "This computer is registered for lifetime. You can use the app offline from now on.",
-        }
-    )
+    if plan == "lifetime":
+        msg = "This computer is registered for lifetime. You can use the app offline from now on."
+    elif plan == "1_year":
+        msg = "Registered for 1 year. After that the app locks until Super Admin extends your plan."
+    elif plan == "1_month":
+        msg = "Registered for 1 month. After that the app locks until Super Admin extends your plan."
+    else:
+        msg = "Registered. Access follows the plan set by Super Admin."
+    return jsonify({"ok": True, "message": msg})
 
 
 def _users_page(form=None, open_modal=False):
@@ -675,6 +687,12 @@ def create_user():
             trial_amount=form.trial_amount.data,
             trial_unit=form.trial_unit.data,
         )
+        if needs_key:
+            user.set_subscription_plan(
+                getattr(form, "subscription_plan", None)
+                and form.subscription_plan.data
+                or "lifetime"
+            )
 
         db.session.flush()
         log_audit("create", "user", user.id, username)
@@ -863,6 +881,7 @@ def edit_user(user_id):
     form = UserEditForm(obj=user)
     if not user.is_super_admin():
         form.role.data = user.role.value
+        form.subscription_plan.data = user.subscription_plan or "lifetime"
     if form.validate_on_submit():
         role = _resolve_edit_role(user, form.role.data)
         if role is None:
@@ -893,11 +912,23 @@ def edit_user(user_id):
 
         if not user.is_super_admin():
             _apply_registration_for_role(user, role)
+            user.set_subscription_plan(form.subscription_plan.data or user.subscription_plan or "lifetime")
             if form.reset_trial.data and not user.is_registered:
                 user.start_trial(
                     amount=form.trial_amount.data or 7,
                     unit=form.trial_unit.data or "days",
                 )
+                if not user.registration_key:
+                    user.registration_key = generate_registration_key()
+            if form.apply_paid_plan.data:
+                plan = form.subscription_plan.data or "lifetime"
+                user.activate_with_plan(
+                    plan,
+                    amount=form.paid_amount.data,
+                    unit=form.paid_unit.data,
+                )
+                if not user.registered_at:
+                    user.registered_at = utcnow()
                 if not user.registration_key:
                     user.registration_key = generate_registration_key()
 

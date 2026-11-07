@@ -1,7 +1,9 @@
+from datetime import date
+from decimal import Decimal
+
 from flask import Blueprint, jsonify, request
 from flask_login import login_required
 from sqlalchemy import or_
-from decimal import Decimal
 
 from app.extensions import db
 from app.utils.party_filters import apply_party_active_filter, parse_party_active
@@ -85,13 +87,25 @@ def updates_skip():
 @api_bp.route("/updates/apply", methods=["POST"])
 @login_required
 def updates_apply():
-    from app.services.update_service import prepare_update_apply
+    """Stream NDJSON progress while downloading/preparing the update."""
+    import json
 
-    result = prepare_update_apply()
-    code = 200 if result.get("ok") else 400
-    if result.get("offline"):
-        code = 503
-    return jsonify(result), code
+    from flask import Response, stream_with_context
+
+    from app.services.update_service import iter_update_apply_progress
+
+    def generate():
+        for event in iter_update_apply_progress():
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @api_bp.route("/toasts")
@@ -104,6 +118,66 @@ def poll_toasts():
     except (TypeError, ValueError):
         after_id = 0
     return jsonify({"toasts": fetch_toasts(after_id=after_id)})
+
+
+@api_bp.route("/notifications/due-sync", methods=["POST"])
+@login_required
+def due_notifications_sync():
+    """Create today's due reminders (idempotent) and return unread list."""
+    from app.services.due_notification_service import list_due_notifications, sync_due_notifications
+
+    push = (request.args.get("toast") or "1") != "0"
+    result = sync_due_notifications(push_toasts=push)
+    unread = list_due_notifications(limit=40, unread_only=True)
+    return jsonify({"ok": True, **result, "notifications": unread, "unread_count": len(unread)})
+
+
+@api_bp.route("/notifications/due")
+@login_required
+def due_notifications_list():
+    from app.services.due_notification_service import list_due_notifications
+
+    unread_only = (request.args.get("unread") or "0") == "1"
+    items = list_due_notifications(limit=40, unread_only=unread_only)
+    return jsonify({"ok": True, "notifications": items, "unread_count": sum(1 for i in items if not i["is_read"])})
+
+
+@api_bp.route("/notifications/<int:notification_id>/read", methods=["POST"])
+@login_required
+def notification_mark_read(notification_id):
+    from app.services.due_notification_service import mark_notification_read
+
+    ok = mark_notification_read(notification_id)
+    return jsonify({"ok": ok})
+
+
+@api_bp.route("/notifications/due/read-all", methods=["POST"])
+@login_required
+def due_notifications_read_all():
+    from app.services.due_notification_service import mark_all_due_notifications_read
+
+    count = mark_all_due_notifications_read()
+    return jsonify({"ok": True, "count": count})
+
+
+@api_bp.route("/customers/<int:customer_id>/suggest-due-date")
+@login_required
+def suggest_customer_due_date(customer_id):
+    from app.services.due_notification_service import suggest_due_date_for_customer
+    from app.utils.working_date import get_working_date
+
+    base_raw = (request.args.get("base") or "").strip()
+    try:
+        base = date.fromisoformat(base_raw) if base_raw else get_working_date()
+    except ValueError:
+        base = get_working_date()
+    suggested = suggest_due_date_for_customer(customer_id, base)
+    return jsonify(
+        {
+            "ok": True,
+            "due_date": suggested.isoformat() if suggested else None,
+        }
+    )
 
 
 @api_bp.route("/search")
@@ -198,6 +272,58 @@ def customers_lookup():
     )
 
 
+@api_bp.route("/customers/<int:customer_id>/payment-info")
+@login_required
+def customers_payment_info(customer_id: int):
+    from app.services.customer_dues_service import get_customer_payment_info
+
+    try:
+        return jsonify(get_customer_payment_info(customer_id))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+
+
+@api_bp.route("/vendors/<int:vendor_id>/payment-info")
+@login_required
+def vendors_payment_info(vendor_id: int):
+    """Current vendor amount for Record Payment live calc.
+
+    Vendor.balance > 0 = payable (we still need to pay them).
+    Vendor.balance < 0 = prepaid / to receive side (already paid ahead).
+    Always returns the absolute current_amount so the UI never shows a blank zero
+    when the vendor has a non-zero books balance.
+    """
+    from decimal import Decimal
+
+    vendor = Vendor.query.filter_by(id=vendor_id, is_deleted=False).first()
+    if not vendor:
+        return jsonify({"ok": False, "error": "Vendor not found."}), 404
+    balance = Decimal(str(vendor.balance or 0)).quantize(Decimal("0.01"))
+    owes = balance if balance > 0 else Decimal("0.00")
+    advance = (-balance) if balance < 0 else Decimal("0.00")
+    if balance > 0:
+        direction = "payable"
+    elif balance < 0:
+        direction = "receive"
+    else:
+        direction = "settled"
+    current_amount = abs(balance)
+    return jsonify(
+        {
+            "ok": True,
+            "vendor_id": vendor.id,
+            "vendor_name": vendor.name,
+            "balance": float(balance),
+            "current_amount": float(current_amount),
+            "direction": direction,
+            "owes": float(owes),
+            "payable": float(owes),
+            "advance": float(advance),
+            "prepaid": float(advance),
+        }
+    )
+
+
 @api_bp.route("/vendors/lookup")
 @login_required
 def vendors_lookup():
@@ -263,8 +389,10 @@ def salesmen_lookup():
 @api_bp.route("/salesmen/quick", methods=["POST"])
 @login_required
 def quick_salesman():
+    from datetime import date as date_cls
+
     from app.models import Salesman
-    from app.services.ledger_service import post_ledger_entry
+    from app.services.ledger_service import sync_party_opening_entry
     from app.utils.uploads import accept_uploaded_path
     from app.utils.working_date import get_working_date
 
@@ -274,12 +402,18 @@ def quick_salesman():
         return jsonify({"ok": False, "error": "Salesman name is required."}), 400
 
     opening = Decimal(str(data.get("opening_balance") or 0))
+    raw_joined = (data.get("joined_date") or data.get("date") or "").strip()
+    try:
+        joined = date_cls.fromisoformat(raw_joined) if raw_joined else get_working_date()
+    except ValueError:
+        joined = get_working_date()
     photo = accept_uploaded_path(data.get("photo"), "salesmen")
     salesman = Salesman(
         name=name,
         phone=(data.get("phone") or "").strip() or None,
         company=(data.get("company") or "").strip() or None,
         address=(data.get("address") or "").strip() or None,
+        joined_date=joined,
         opening_balance=opening,
         balance=opening,
         notes=(data.get("notes") or "").strip() or None,
@@ -287,19 +421,13 @@ def quick_salesman():
     )
     db.session.add(salesman)
     db.session.flush()
-    if opening:
-        opening_d = Decimal(str(opening))
-        debit = opening_d if opening_d > 0 else Decimal("0")
-        credit = abs(opening_d) if opening_d < 0 else Decimal("0")
-        post_ledger_entry(
-            "salesman",
-            salesman.id,
-            "opening",
-            debit=debit,
-            credit=credit,
-            entry_date=get_working_date(),
-            notes="Opening balance",
-        )
+    sync_party_opening_entry(
+        "salesman",
+        salesman.id,
+        opening,
+        entry_date=joined,
+        notes="Opening balance",
+    )
     db.session.commit()
     return jsonify({"ok": True, "id": salesman.id, "name": salesman.name})
 
@@ -486,6 +614,36 @@ def products_lookup():
     return jsonify({"results": results})
 
 
+@api_bp.route("/customer-types/quick", methods=["POST"])
+@login_required
+def quick_customer_type():
+    from app.services.customer_type_service import create_customer_type
+    from app.services.audit_service import log_audit
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    try:
+        due_days = int(data.get("due_days") or 30)
+    except (TypeError, ValueError):
+        due_days = 30
+    try:
+        row = create_customer_type(name, due_days=due_days)
+        log_audit("create", "customer_type", row.id, row.name)
+        db.session.commit()
+        return jsonify(
+            {
+                "ok": True,
+                "id": row.id,
+                "code": row.code,
+                "name": row.name,
+                "due_days": row.due_days,
+            }
+        )
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
 @api_bp.route("/customers/quick", methods=["POST"])
 @login_required
 def quick_customer():
@@ -586,19 +744,19 @@ def quick_product():
         return jsonify({"ok": False, "error": "Product name is required."}), 400
 
     try:
+        qty = Decimal(str(data.get("opening_stock") or 0))
+    except Exception:
+        qty = Decimal("0")
+    if qty < 0:
+        return jsonify({"ok": False, "error": "Quantity cannot be negative."}), 400
+
+    try:
         vendor_id = int(data.get("vendor_id") or 0)
     except (TypeError, ValueError):
         vendor_id = 0
     vendor = db.session.get(Vendor, vendor_id) if vendor_id else None
     if not vendor or vendor.is_deleted:
         return jsonify({"ok": False, "error": "Vendor is required."}), 400
-
-    try:
-        qty = Decimal(str(data.get("opening_stock") or 0))
-    except Exception:
-        qty = Decimal("0")
-    if qty <= 0:
-        return jsonify({"ok": False, "error": "Purchase quantity is required."}), 400
 
     category_id = data.get("category_id")
     if category_id:
@@ -633,6 +791,17 @@ def quick_product():
             expiry_date = datetime.strptime(expiry_raw, "%Y-%m-%d").date()
         except ValueError:
             return jsonify({"ok": False, "error": "Invalid expiry date. Use YYYY-MM-DD."}), 400
+
+    purchase_date_raw = (data.get("purchase_date") or "").strip()
+    purchase_date = None
+    if purchase_date_raw:
+        from datetime import datetime
+
+        try:
+            purchase_date = datetime.strptime(purchase_date_raw, "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"ok": False, "error": "Invalid purchase date. Use YYYY-MM-DD."}), 400
+    purchase_date = purchase_date or get_working_date()
 
     photo = accept_uploaded_path(data.get("photo"), "products")
     existing_id = data.get("existing_product_id")
@@ -701,28 +870,30 @@ def quick_product():
         db.session.add(product)
         db.session.flush()
 
+    purchase = None
     try:
-        purchase = record_purchase(
-            vendor_id=vendor.id,
-            items=[
-                {
-                    "product": product,
-                    "quantity": qty,
-                    "unit_price": purchase_price or product.purchase_price,
-                    "sale_price": sale_price or product.sale_price,
-                    "batch_number": batch_number,
-                    "expiry_date": expiry_date,
-                    "unit_weight": data.get("unit_weight"),
-                    "weight_unit": data.get("weight_unit"),
-                }
-            ],
-            user_id=current_user.id,
-            invoice_no=invoice_no,
-            purchase_date=get_working_date(),
-            notes=f"{'Restock' if action == 'update' else 'Sale quick-add'}: {product.name}",
-        )
         log_audit(action, "product", product.id, product.name)
-        log_audit("create", "purchase", purchase.id, purchase.invoice_no)
+        if qty > 0:
+            purchase = record_purchase(
+                vendor_id=vendor.id,
+                items=[
+                    {
+                        "product": product,
+                        "quantity": qty,
+                        "unit_price": purchase_price or product.purchase_price,
+                        "sale_price": sale_price or product.sale_price,
+                        "batch_number": batch_number,
+                        "expiry_date": expiry_date,
+                        "unit_weight": data.get("unit_weight"),
+                        "weight_unit": data.get("weight_unit"),
+                    }
+                ],
+                user_id=current_user.id,
+                invoice_no=invoice_no,
+                purchase_date=purchase_date,
+                notes=f"{'Restock' if action == 'update' else 'Sale quick-add'}: {product.name}",
+            )
+            log_audit("create", "purchase", purchase.id, purchase.invoice_no)
         db.session.commit()
     except Exception as exc:
         db.session.rollback()
@@ -741,8 +912,9 @@ def quick_product():
             "unit_weight": float(product.unit_weight) if product.unit_weight is not None else None,
             "weight_unit": product.weight_unit or "",
             "photo_url": product.photo_url,
-            "purchase_id": purchase.id,
-            "purchase_invoice": purchase.invoice_no,
-            "restocked": action == "update",
+            "purchase_id": purchase.id if purchase else None,
+            "purchase_invoice": purchase.invoice_no if purchase else None,
+            "restocked": action == "update" and qty > 0,
+            "catalog_only": qty <= 0,
         }
     )

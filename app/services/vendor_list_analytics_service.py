@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import calendar
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models import Purchase
+from app.models import (
+    Purchase,
+    PurchaseItem,
+    Sale,
+    SaleItem,
+    SaleReturn,
+    SaleReturnItem,
+    StockLayer,
+)
 from app.services.dashboard_service import (
+    _filters,
     _format_chart_axis_label,
     _iter_chart_bucket_keys,
     _range_for_filter,
@@ -120,3 +130,106 @@ def vendor_list_chart_metrics(*, period: str = "all", start_date=None, end_date=
             "granularity": "day" if chart_daily else "month",
         },
     }
+
+
+def vendor_gross_profit_map(*, period: str = "all", start_date=None, end_date=None, vendor_ids=None):
+    """
+    Gross profit per vendor for the period, from sales of products primarily
+    supplied by that vendor (sale − FIFO COGS, net of returns).
+    """
+    start, end = _range_for_filter(period, start_date, end_date)
+    if vendor_ids is not None and not vendor_ids:
+        return {}
+
+    # Primary vendor per product (most stock received; purchases as fallback)
+    layer_rows = (
+        db.session.query(
+            StockLayer.product_id,
+            StockLayer.vendor_id,
+            func.coalesce(func.sum(StockLayer.quantity_received), 0).label("qty"),
+            func.max(StockLayer.received_at).label("latest"),
+        )
+        .filter(StockLayer.vendor_id.isnot(None))
+        .group_by(StockLayer.product_id, StockLayer.vendor_id)
+        .all()
+    )
+    best: dict[int, tuple[Decimal, object, int]] = {}
+    for product_id, vendor_id, qty, latest in layer_rows:
+        if product_id is None or vendor_id is None:
+            continue
+        qty_d = Decimal(str(qty or 0))
+        cur = best.get(product_id)
+        if cur is None or qty_d > cur[0] or (qty_d == cur[0] and (latest or "") > (cur[1] or "")):
+            best[product_id] = (qty_d, latest, int(vendor_id))
+
+    product_vendor = {pid: vid for pid, (_, __, vid) in best.items()}
+
+    purchase_rows = (
+        db.session.query(
+            PurchaseItem.product_id,
+            Purchase.vendor_id,
+            func.coalesce(func.sum(PurchaseItem.quantity), 0).label("qty"),
+            func.max(Purchase.purchase_date).label("latest"),
+        )
+        .join(Purchase, Purchase.id == PurchaseItem.purchase_id)
+        .group_by(PurchaseItem.product_id, Purchase.vendor_id)
+        .all()
+    )
+    purchase_best: dict[int, tuple[Decimal, object, int]] = {}
+    for product_id, vendor_id, qty, latest in purchase_rows:
+        if product_id is None or vendor_id is None or product_id in product_vendor:
+            continue
+        qty_d = Decimal(str(qty or 0))
+        cur = purchase_best.get(product_id)
+        if cur is None or qty_d > cur[0] or (qty_d == cur[0] and (latest or "") > (cur[1] or "")):
+            purchase_best[product_id] = (qty_d, latest, int(vendor_id))
+    product_vendor.update({pid: vid for pid, (_, __, vid) in purchase_best.items()})
+
+    if not product_vendor:
+        return {}
+
+    if vendor_ids is not None:
+        allowed = set(vendor_ids)
+        product_vendor = {pid: vid for pid, vid in product_vendor.items() if vid in allowed}
+        if not product_vendor:
+            return {}
+
+    product_ids = list(product_vendor.keys())
+
+    profit_expr = SaleItem.line_total - SaleItem.cost_of_goods
+    sales_q = (
+        db.session.query(
+            SaleItem.product_id,
+            func.coalesce(func.sum(profit_expr), 0),
+        )
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .filter(SaleItem.product_id.in_(product_ids))
+    )
+    for f in _filters(Sale.sale_date, start, end):
+        sales_q = sales_q.filter(f)
+    product_profit = {
+        pid: Decimal(str(total or 0))
+        for pid, total in sales_q.group_by(SaleItem.product_id).all()
+    }
+
+    ret_expr = SaleReturnItem.line_total - SaleReturnItem.cost_of_goods
+    ret_q = (
+        db.session.query(
+            SaleReturnItem.product_id,
+            func.coalesce(func.sum(ret_expr), 0),
+        )
+        .join(SaleReturn, SaleReturn.id == SaleReturnItem.sale_return_id)
+        .filter(SaleReturnItem.product_id.in_(product_ids))
+    )
+    for f in _filters(SaleReturn.return_date, start, end):
+        ret_q = ret_q.filter(f)
+    for pid, total in ret_q.group_by(SaleReturnItem.product_id).all():
+        product_profit[pid] = product_profit.get(pid, Decimal("0")) - Decimal(str(total or 0))
+
+    merged: dict[int, Decimal] = {}
+    for pid, profit in product_profit.items():
+        vid = product_vendor.get(pid)
+        if vid is None:
+            continue
+        merged[vid] = merged.get(vid, Decimal("0")) + profit
+    return merged

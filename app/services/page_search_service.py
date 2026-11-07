@@ -107,7 +107,7 @@ def _search_products(q: str, limit: int) -> list[dict]:
             "type": "product",
             "id": p.id,
             "label": p.name,
-            "url": f"/inventory/{p.id}",
+            "url": f"/inventory/products/{p.id}",
         }
         for p in rows
     ]

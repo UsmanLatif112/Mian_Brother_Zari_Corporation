@@ -15,11 +15,12 @@
   <link href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" rel="stylesheet">
   <link href="{{ url_for('static', filename='vendor/datatables/dataTables.bootstrap5.min.css') }}" rel="stylesheet">
   <link href="{{ url_for('static', filename='vendor/cropperjs/cropper.min.css') }}" rel="stylesheet">
-  <link href="{{ url_for('static', filename='css/theme.css') }}?v=19" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/theme.css') }}?v=21" rel="stylesheet">
   {% block extra_css %}{% endblock %}
 </head>
 <body class="erp-body"{% if current_user.is_authenticated %} data-search-scope="{{ search_scope }}" data-search-mode="{{ search_mode }}" data-search-table="{{ search_table_selector }}" data-user-registered="{{ '1' if current_user.is_registration_complete() else '0' }}" data-working-date="{{ working_date }}" data-calendar-today="{{ calendar_today }}" data-desktop-app="{{ '1' if is_desktop_app else '0' }}" data-updates-enabled="{{ '1' if updates_enabled else '0' }}" data-app-version="{{ app_version }}"{% endif %}>
   {% if current_user.is_authenticated %}
+  {% set _page_filters %}{% block page_filters %}{% endblock %}{% endset %}
   <div class="erp-wrapper">
   {% include 'partials/sidebar.html' %}
   <div class="erp-main">
@@ -36,12 +37,24 @@
       </div>
       <div class="d-flex align-items-center gap-2 topbar-right flex-shrink-0">
         {% include 'partials/working_date_control.html' %}
-        <div class="topbar-page-filters">
-          {% block page_filters %}{% endblock %}
-        </div>
         <button type="button" class="btn btn-sm btn-outline-secondary page-refresh-btn" id="page-refresh-btn" title="Refresh page stats">
           <i class="fa-solid fa-arrows-rotate"></i>
         </button>
+        <div class="dropdown" id="due-notifications-dropdown">
+          <button class="btn btn-sm btn-light position-relative" data-bs-toggle="dropdown" title="Due reminders" type="button" id="due-notifications-btn" aria-expanded="false">
+            <i class="fa-solid fa-bell"></i>
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none" id="due-notifications-badge">0</span>
+          </button>
+          <div class="dropdown-menu dropdown-menu-end due-notifications-menu p-0" style="min-width:320px;max-width:380px;">
+            <div class="d-flex align-items-center justify-content-between px-3 py-2 border-bottom">
+              <strong class="small">Due reminders</strong>
+              <button type="button" class="btn btn-link btn-sm p-0" id="due-notifications-read-all">Mark all read</button>
+            </div>
+            <div id="due-notifications-list" class="due-notifications-list" style="max-height:360px;overflow:auto;">
+              <div class="text-muted small text-center py-4">No reminders</div>
+            </div>
+          </div>
+        </div>
         <div class="dropdown">
           <button class="btn btn-sm btn-light dropdown-toggle" data-bs-toggle="dropdown" title="User menu" type="button">
             <i class="fa-solid fa-user-circle"></i>
@@ -73,15 +86,25 @@
             {% endif %}
             <li><hr class="dropdown-divider"></li>
             {% if current_user.is_super_admin() %}
-            <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}"><i class="fa-solid fa-key me-2"></i>Change Password</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}" data-same-window="1"><i class="fa-solid fa-key me-2"></i>Change Password</a></li>
             {% else %}
             <li><a class="dropdown-item" href="{{ url_for('auth.company_branding') }}"><i class="fa-solid fa-image me-2"></i>Company Branding</a></li>
             {% endif %}
-            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Logout</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}" data-same-window="1">Logout</a></li>
           </ul>
         </div>
       </div>
     </header>
+    {% if _page_filters|trim %}
+    <div class="erp-filters-bar" id="erp-filters-bar">
+      <div class="erp-filters-bar-inner">
+        <span class="erp-filters-bar-label"><i class="fa-solid fa-filter"></i> Filters</span>
+        <div class="topbar-page-filters">
+          {{ _page_filters|safe }}
+        </div>
+      </div>
+    </div>
+    {% endif %}
     <main class="erp-content container-fluid py-3">
       {% include 'partials/flash.html' %}
       {% block content %}{% endblock %}
@@ -109,14 +132,15 @@
   <script src="{{ url_for('static', filename='vendor/datatables/dataTables.bootstrap5.min.js') }}"></script>
   <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
   <script src="{{ url_for('static', filename='vendor/cropperjs/cropper.min.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/modal-nesting.js') }}?v=1"></script>
-  <script src="{{ url_for('static', filename='js/app.js') }}?v=8"></script>
+  <script src="{{ url_for('static', filename='js/modal-nesting.js') }}?v=2"></script>
+  <script src="{{ url_for('static', filename='js/page-windows.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}?v=9"></script>
   <script>
     window.CSRF_TOKEN = document.querySelector('meta[name=csrf-token]')?.content;
   </script>
   <script src="{{ url_for('static', filename='js/working-date.js') }}?v=4"></script>
   {% if current_user.is_authenticated and is_desktop_app and updates_enabled %}
-  <script src="{{ url_for('static', filename='js/updates.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='js/updates.js') }}?v=3"></script>
   {% endif %}
   <script>
     window.BUSINESS_INFO = {
@@ -130,7 +154,7 @@
       developer_url: {{ developer_url|tojson }},
     };
   </script>
-  <script src="{{ url_for('static', filename='js/print-filtered.js') }}?v=5"></script>
+  <script src="{{ url_for('static', filename='js/print-filtered.js') }}?v=8"></script>
   <script src="{{ url_for('static', filename='js/photo-picker.js') }}"></script>
   {% block extra_js %}{% endblock %}
 </body>

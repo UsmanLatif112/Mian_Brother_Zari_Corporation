@@ -1,20 +1,22 @@
-{# Topbar filters: each filter type uses a distinct icon so side-by-side toggles stay clear. #}
+{# Page filter chips: compact labeled dropdowns in the filters bar (never inline-expand in the topbar). #}
 
-{% macro header_filters_start(active=false, title='Filter', icon='fa-filter') %}
+{% macro header_filters_start(active=false, title='Filter', icon='fa-filter', label='') %}
+{% set chip_label = label or title %}
 <div class="header-page-filter dropdown" data-header-filter>
   <button type="button"
-          class="btn btn-sm btn-outline-secondary header-filter-toggle"
+          class="btn btn-sm btn-outline-secondary header-filter-toggle{% if active %} is-active{% endif %}"
           data-bs-toggle="dropdown"
           data-bs-auto-close="outside"
           aria-expanded="false"
           title="{{ title }}"
           aria-label="{{ title }}">
     <i class="fa-solid {{ icon }}"></i>
+    <span class="header-filter-toggle-label">{{ chip_label }}</span>
     {% if active %}
     <span class="header-filter-dot" aria-hidden="true"></span>
     {% endif %}
   </button>
-  <div class="dropdown-menu dropdown-menu-end header-filter-menu p-0">
+  <div class="dropdown-menu dropdown-menu-start header-filter-menu p-0">
 {% endmacro %}
 
 
@@ -59,7 +61,7 @@
   ] %}
 {% endif %}
 {% set active = selected_period and selected_period != 'all' %}
-{{ header_filters_start(active=active, title='Period filter', icon='fa-calendar-days') }}
+{{ header_filters_start(active=active, title='Period filter', icon='fa-calendar-days', label=label) }}
     <form method="get"
           class="header-filter-form"
           id="{{ form_id }}"
@@ -94,7 +96,7 @@
 
 {% macro header_category_filter(categories, selected_category, clear_url, persist_key='inventory', preserve=None) %}
 {% set active = selected_category %}
-{{ header_filters_start(active=active, title='Category filter', icon='fa-tags') }}
+{{ header_filters_start(active=active, title='Category filter', icon='fa-tags', label='Category') }}
     <form method="get" class="header-filter-form" data-persist-filters="{{ persist_key }}">
       {% if preserve %}
         {% for key, val in preserve.items() %}
@@ -134,7 +136,7 @@
 ) %}
 {% set options = options or [('all', 'All'), ('with_products', 'With products'), ('empty', 'No products')] %}
 {% set active = selected and selected != default %}
-{{ header_filters_start(active=active, title=label ~ ' filter', icon=icon) }}
+{{ header_filters_start(active=active, title=label ~ ' filter', icon=icon, label=label) }}
     <form method="get"
           class="header-filter-form"
           id="{{ form_id }}"

@@ -9,8 +9,9 @@ from decimal import Decimal
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models import LedgerEntry, Sale
+from app.models import LedgerEntry, Sale, SaleItem, SaleReturn, SaleReturnItem
 from app.services.dashboard_service import (
+    _filters,
     _format_chart_axis_label,
     _iter_chart_bucket_keys,
     _range_for_filter,
@@ -224,3 +225,53 @@ def customer_list_chart_metrics(
             "granularity": "day" if chart_daily else "month",
         },
     }
+
+
+def customer_gross_profit_map(*, period: str = "all", start_date=None, end_date=None, customer_ids=None):
+    """
+    Gross profit per customer for the period:
+    (sale line_total − COGS) minus the same on returns.
+    """
+    start, end = _range_for_filter(period, start_date, end_date)
+    if customer_ids is not None and not customer_ids:
+        return {}
+
+    profit_expr = SaleItem.line_total - SaleItem.cost_of_goods
+    sales_q = (
+        db.session.query(
+            Sale.customer_id,
+            func.coalesce(func.sum(profit_expr), 0),
+        )
+        .join(SaleItem, SaleItem.sale_id == Sale.id)
+        .filter(Sale.customer_id.isnot(None))
+    )
+    for f in _filters(Sale.sale_date, start, end):
+        sales_q = sales_q.filter(f)
+    if customer_ids is not None:
+        sales_q = sales_q.filter(Sale.customer_id.in_(customer_ids))
+    sales_map = {
+        cid: Decimal(str(total or 0))
+        for cid, total in sales_q.group_by(Sale.customer_id).all()
+        if cid is not None
+    }
+
+    ret_expr = SaleReturnItem.line_total - SaleReturnItem.cost_of_goods
+    ret_q = (
+        db.session.query(
+            SaleReturn.customer_id,
+            func.coalesce(func.sum(ret_expr), 0),
+        )
+        .join(SaleReturnItem, SaleReturnItem.sale_return_id == SaleReturn.id)
+        .filter(SaleReturn.customer_id.isnot(None))
+    )
+    for f in _filters(SaleReturn.return_date, start, end):
+        ret_q = ret_q.filter(f)
+    if customer_ids is not None:
+        ret_q = ret_q.filter(SaleReturn.customer_id.in_(customer_ids))
+
+    merged = dict(sales_map)
+    for cid, total in ret_q.group_by(SaleReturn.customer_id).all():
+        if cid is None:
+            continue
+        merged[cid] = merged.get(cid, Decimal("0")) - Decimal(str(total or 0))
+    return merged

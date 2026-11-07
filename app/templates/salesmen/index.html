@@ -108,6 +108,7 @@
                     data-company="{{ s.company or '' }}"
                     data-address="{{ s.address or '' }}"
                     data-opening="{{ s.opening_balance or 0 }}"
+                    data-joined="{{ s.joined_date.isoformat() if s.joined_date else today }}"
                     data-notes="{{ s.notes or '' }}"
                     data-photo="{{ s.photo_url or '' }}">
               <i class="fa-solid fa-pen"></i>
@@ -142,6 +143,10 @@
       <label class="form-label">{{ form.opening_balance.label.text }} <span class="text-muted fw-normal">(optional)</span></label>
       {{ form.opening_balance(class='form-control', placeholder='Leave blank if none') }}
     </div>
+    <div class="col-md-6">
+      <label class="form-label">{{ form.joined_date.label.text }}</label>
+      {{ form.joined_date(class='form-control erp-entry-date', type='date', **{'data-erp-entry-date': true}) }}
+    </div>
     <div class="col-12">{{ form.address.label(class='form-label') }}{{ form.address(class='form-control', rows=2) }}</div>
     <div class="col-12">{{ form.notes.label(class='form-label') }}{{ form.notes(class='form-control', rows=2) }}</div>
   </div>
@@ -175,6 +180,10 @@
             <div class="col-md-6">
               <label class="form-label">Opening Balance <span class="text-muted fw-normal">(optional)</span></label>
               <input type="number" step="0.01" name="opening_balance" class="form-control" placeholder="Leave blank if none">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Date Added</label>
+              <input type="date" name="joined_date" class="form-control erp-entry-date" data-erp-entry-date value="{{ today }}">
             </div>
             <div class="col-12">
               <label class="form-label">Address</label>
@@ -211,6 +220,8 @@ document.querySelectorAll('.btn-edit-salesman').forEach((btn) => {
     form.querySelector('[name=company]').value = btn.dataset.company || '';
     form.querySelector('[name=address]').value = btn.dataset.address || '';
     form.querySelector('[name=opening_balance]').value = btn.dataset.opening || '';
+    form.querySelector('[name=joined_date]').value =
+      btn.dataset.joined || window.getErpWorkingDate?.() || '{{ today }}';
     form.querySelector('[name=notes]').value = btn.dataset.notes || '';
     if (window.PhotoPicker) {
       PhotoPicker.setPreview?.(form.querySelector('.photo-picker'), btn.dataset.photo || '');

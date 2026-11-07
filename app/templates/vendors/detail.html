@@ -85,6 +85,17 @@
           <td class="text-end">{{ '%.2f'|format(l.balance_after|float) }}</td>
           <td class="col-actions">
             <div class="table-actions">
+            <button type="button" class="action-icon-btn action-edit btn-edit-ledger" title="Edit"
+                    data-id="{{ l.id }}"
+                    data-date="{{ l.entry_date.isoformat() if l.entry_date else '' }}"
+                    data-type="{{ l.entry_type }}"
+                    data-debit="{{ '%.2f'|format(l.debit|float) }}"
+                    data-credit="{{ '%.2f'|format(l.credit|float) }}"
+                    data-notes="{{ l.notes or '' }}"
+                    data-ref-type="{{ l.reference_type or '' }}"
+                    data-ref-id="{{ l.reference_id or '' }}">
+              <i class="fa-solid fa-pen"></i>
+            </button>
             <button type="button" class="action-icon-btn action-danger btn-delete-confirm" title="Delete"
                     data-action="{{ url_for('vendors.delete_ledger', entry_id=l.id) }}"
                     data-title="Delete this ledger entry?"
@@ -104,9 +115,9 @@
 <div class="modal fade erp-form-modal" id="paymentModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <form method="post" action="{{ url_for('vendors.payment') }}">
+      <form method="post" action="{{ url_for('vendors.payment') }}" id="payment-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="vendor_id" value="{{ vendor.id }}">
+        <input type="hidden" name="vendor_id" id="pay-vendor" value="{{ vendor.id }}">
         <input type="hidden" name="return_detail" value="1">
         <div class="modal-header">
           <h5 class="modal-title">Record Payment — {{ vendor.name }}</h5>
@@ -124,15 +135,31 @@
             </div>
             <div class="col-md-6">
               <label class="form-label">Date</label>
-              <input type="date" name="payment_date" class="form-control" value="{{ today }}" required>
+              <input type="date" name="payment_date" id="pay-date" class="form-control" value="{{ today }}" required>
             </div>
             <div class="col-12">
               <label class="form-label">Amount</label>
-              <input type="number" step="0.01" min="0.01" name="amount" class="form-control" required placeholder="0.00">
+              <input type="number" step="0.01" min="0.01" name="amount" id="pay-amount" class="form-control" required placeholder="0.00">
+            </div>
+            <div class="col-12" id="pay-calc-box">
+              <div class="rounded border bg-light px-3 py-2 small">
+                <div class="d-flex justify-content-between gap-2">
+                  <span class="text-muted" id="pay-balance-label">Balance</span>
+                  <span class="fw-semibold" id="pay-balance-value" title="Click to fill amount" role="button" style="cursor:pointer">—</span>
+                </div>
+                <div class="d-flex justify-content-between gap-2">
+                  <span class="text-muted" id="pay-paid-label">Paid</span>
+                  <span class="fw-semibold" id="pay-paid-display">0</span>
+                </div>
+                <div class="d-flex justify-content-between gap-2" id="pay-remain-wrap">
+                  <span class="text-muted" id="pay-remain-label">Remain</span>
+                  <span class="fw-semibold text-warning" id="pay-remain-value">—</span>
+                </div>
+              </div>
             </div>
             <div class="col-12">
               <label class="form-label">Remarks</label>
-              <textarea name="remarks" class="form-control" rows="2" placeholder="Optional"></textarea>
+              <textarea name="remarks" id="pay-remarks" class="form-control" rows="2" placeholder="Optional"></textarea>
             </div>
           </div>
           <div class="small text-muted mt-2" id="pay-hint">
@@ -142,6 +169,72 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="submit" class="btn btn-success">Save Payment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade erp-form-modal" id="editLedgerModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" id="edit-ledger-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <h5 class="modal-title" id="edit-ledger-title">Edit Ledger Entry</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label">Date</label>
+              <input type="date" name="entry_date" id="led-date" class="form-control" required>
+            </div>
+            <div class="col-md-6" id="led-type-payment-wrap">
+              <label class="form-label">Type</label>
+              <select name="entry_type" id="led-type-select" class="form-select" disabled>
+                <option value="account_settle">Account Settle</option>
+                <option value="advance">Advance</option>
+                <option value="loan">Loan (cash from vendor)</option>
+              </select>
+            </div>
+            <div class="col-md-6 d-none" id="led-type-text-wrap">
+              <label class="form-label">Type</label>
+              <input name="entry_type" id="led-type" class="form-control" disabled>
+            </div>
+            <div class="col-12" id="led-amount-wrap">
+              <label class="form-label">Amount</label>
+              <input type="number" step="0.01" min="0.01" name="amount" id="led-amount" class="form-control" placeholder="0.00">
+              <div class="form-text" id="led-amount-hint">Loan posts as debit; Settle / Advance as credit.</div>
+            </div>
+            <div class="col-md-6 d-none" id="led-debit-wrap">
+              <label class="form-label">Debit</label>
+              <input type="number" step="0.01" name="debit" id="led-debit" class="form-control">
+            </div>
+            <div class="col-md-6 d-none" id="led-credit-wrap">
+              <label class="form-label">Credit</label>
+              <input type="number" step="0.01" name="credit" id="led-credit" class="form-control">
+            </div>
+            <div class="col-12 rounded border bg-light px-3 py-2 small d-none" id="led-recalc-box">
+              <div class="d-flex justify-content-between gap-2">
+                <span class="text-muted">Posts as</span>
+                <span class="fw-semibold" id="led-recalc-side">—</span>
+              </div>
+              <div class="d-flex justify-content-between gap-2">
+                <span class="text-muted">Amount</span>
+                <span class="fw-semibold" id="led-recalc-amount">0</span>
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notes</label>
+              <textarea name="notes" id="led-notes" class="form-control" rows="2"></textarea>
+            </div>
+          </div>
+          <p class="small text-muted mt-2 mb-0" id="edit-ledger-help">Balance will be recalculated for all entries after this change.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Save</button>
         </div>
       </form>
     </div>
@@ -263,6 +356,139 @@ document.getElementById('pay-type')?.addEventListener('change', () => {
   if (el) el.textContent = hints[document.getElementById('pay-type').value] || '';
 });
 
+(function () {
+  const PAYMENT_TYPES = new Set(['account_settle', 'advance', 'loan']);
+  const typeSelect = document.getElementById('led-type-select');
+  const typeText = document.getElementById('led-type');
+  const amountEl = document.getElementById('led-amount');
+  const debitEl = document.getElementById('led-debit');
+  const creditEl = document.getElementById('led-credit');
+
+  function moneyLabel(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return '0';
+    if (Math.abs(v - Math.round(v)) < 0.001) return String(Math.round(v));
+    return v.toFixed(2).replace(/\.?0+$/, '') || '0';
+  }
+
+  function syncDebitCreditFromPayment() {
+    const type = (typeSelect?.value || '').toLowerCase();
+    const amount = Number(amountEl?.value || 0);
+    const safe = Number.isFinite(amount) && amount > 0 ? amount : 0;
+    if (type === 'loan') {
+      if (debitEl) debitEl.value = safe ? String(safe) : '';
+      if (creditEl) creditEl.value = '0';
+    } else {
+      if (debitEl) debitEl.value = '0';
+      if (creditEl) creditEl.value = safe ? String(safe) : '';
+    }
+    const sideEl = document.getElementById('led-recalc-side');
+    const amtEl = document.getElementById('led-recalc-amount');
+    if (sideEl) {
+      sideEl.textContent =
+        type === 'loan'
+          ? 'Debit (we owe vendor more / reduce to-get)'
+          : 'Credit (payable reduced / to-get increased)';
+    }
+    if (amtEl) amtEl.textContent = moneyLabel(safe);
+  }
+
+  function setPaymentMode(isPayment, typeValue) {
+    const payWrap = document.getElementById('led-type-payment-wrap');
+    const textWrap = document.getElementById('led-type-text-wrap');
+    const amountWrap = document.getElementById('led-amount-wrap');
+    const debitWrap = document.getElementById('led-debit-wrap');
+    const creditWrap = document.getElementById('led-credit-wrap');
+    const recalcBox = document.getElementById('led-recalc-box');
+    const title = document.getElementById('edit-ledger-title');
+    const help = document.getElementById('edit-ledger-help');
+
+    if (isPayment) {
+      payWrap?.classList.remove('d-none');
+      textWrap?.classList.add('d-none');
+      amountWrap?.classList.remove('d-none');
+      debitWrap?.classList.add('d-none');
+      creditWrap?.classList.add('d-none');
+      recalcBox?.classList.remove('d-none');
+      if (typeSelect) {
+        typeSelect.disabled = false;
+        typeSelect.name = 'entry_type';
+        if (PAYMENT_TYPES.has(typeValue)) typeSelect.value = typeValue;
+        else typeSelect.value = 'account_settle';
+      }
+      if (typeText) {
+        typeText.disabled = true;
+        typeText.removeAttribute('name');
+      }
+      if (title) title.textContent = 'Edit Payment';
+      if (help) {
+        help.textContent =
+          'Changing type recalculates debit/credit and cash (loan). Vendor balance is rebuilt.';
+      }
+      syncDebitCreditFromPayment();
+    } else {
+      payWrap?.classList.add('d-none');
+      textWrap?.classList.remove('d-none');
+      amountWrap?.classList.add('d-none');
+      debitWrap?.classList.remove('d-none');
+      creditWrap?.classList.remove('d-none');
+      recalcBox?.classList.add('d-none');
+      if (typeText) {
+        typeText.disabled = false;
+        typeText.name = 'entry_type';
+        typeText.value = typeValue || '';
+      }
+      if (typeSelect) {
+        typeSelect.disabled = true;
+        typeSelect.removeAttribute('name');
+      }
+      if (amountEl) amountEl.value = '';
+      if (title) title.textContent = 'Edit Ledger Entry';
+      if (help) {
+        help.textContent = 'Balance will be recalculated for all entries after this change.';
+      }
+    }
+  }
+
+  typeSelect?.addEventListener('change', syncDebitCreditFromPayment);
+  amountEl?.addEventListener('input', syncDebitCreditFromPayment);
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-edit-ledger');
+    if (!btn) return;
+    const form = document.getElementById('edit-ledger-form');
+    form.action = `/vendors/ledger/${btn.dataset.id}/edit`;
+    document.getElementById('led-date').value = btn.dataset.date || '';
+    document.getElementById('led-notes').value = btn.dataset.notes || '';
+
+    const typeValue = (btn.dataset.type || '').toLowerCase();
+    const refType = (btn.dataset.refType || '').toLowerCase();
+    const isPayment = refType === 'vendor_payment' && PAYMENT_TYPES.has(typeValue);
+
+    const debit = Number(btn.dataset.debit || 0);
+    const credit = Number(btn.dataset.credit || 0);
+    if (debitEl) debitEl.value = btn.dataset.debit || '0';
+    if (creditEl) creditEl.value = btn.dataset.credit || '0';
+
+    if (isPayment) {
+      const amount = Math.max(
+        Number.isFinite(debit) ? debit : 0,
+        Number.isFinite(credit) ? credit : 0
+      );
+      if (amountEl) amountEl.value = amount > 0 ? String(amount) : '';
+      setPaymentMode(true, typeValue);
+    } else {
+      setPaymentMode(false, btn.dataset.type || '');
+    }
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editLedgerModal')).show();
+  });
+
+  document.getElementById('edit-ledger-form')?.addEventListener('submit', () => {
+    if (!typeSelect?.disabled) syncDebitCreditFromPayment();
+  });
+})();
+
 document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
   window.PrintFiltered?.print({
     table: '#vendor-ledger-table',
@@ -280,5 +506,6 @@ document.getElementById('btn-print-ledger')?.addEventListener('click', () => {
   });
 });
 </script>
+<script src="{{ url_for('static', filename='js/vendor-payment.js') }}?v=2"></script>
 <script src="{{ url_for('static', filename='js/customer-photos.js') }}"></script>
 {% endblock %}

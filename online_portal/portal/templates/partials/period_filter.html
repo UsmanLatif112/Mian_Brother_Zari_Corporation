@@ -1,0 +1,43 @@
+{% set periods = [
+  ('all', 'All'),
+  ('today', 'Today'),
+  ('week', 'One Week'),
+  ('month', 'One Month'),
+  ('3_month', 'Three Month'),
+  ('12_month', '12 Month'),
+  ('custom', 'Custom'),
+] %}
+{% set active = selected_period and selected_period != 'all' %}
+<div class="header-page-filter dropdown" data-header-filter>
+  <button type="button"
+          class="btn btn-sm btn-outline-secondary header-filter-toggle{% if active %} is-active{% endif %}"
+          data-bs-toggle="dropdown"
+          data-bs-auto-close="outside"
+          aria-expanded="false"
+          title="Period filter"
+          aria-label="Period filter">
+    <i class="fa-solid fa-calendar-days"></i>
+    <span class="header-filter-toggle-label">Period</span>
+    {% if active %}<span class="header-filter-dot" aria-hidden="true"></span>{% endif %}
+  </button>
+  <div class="dropdown-menu dropdown-menu-start header-filter-menu p-0">
+    <form method="get" class="header-filter-form p-2" id="portal-period-form">
+      <label class="dash-filter-label">Period</label>
+      <select name="period" class="form-select form-select-sm" id="period-filter" onchange="onPortalPeriodChange()">
+        {% for value, text in periods %}
+        <option value="{{ value }}" {% if selected_period == value %}selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+      </select>
+      <span class="custom-date-field dash-filter-label">From</span>
+      <input type="date" name="start_date" value="{{ start_date or '' }}" class="form-control form-control-sm custom-date-field">
+      <span class="custom-date-field dash-filter-label">To</span>
+      <input type="date" name="end_date" value="{{ end_date or '' }}" class="form-control form-control-sm custom-date-field">
+      <button type="submit" class="btn btn-sm btn-outline-secondary custom-date-field header-filter-apply">Apply</button>
+      {% if active and clear_url %}
+      <a href="{{ clear_url }}" class="header-filter-clear" title="Clear filter" aria-label="Clear filter">
+        <i class="fa-solid fa-xmark"></i>
+      </a>
+      {% endif %}
+    </form>
+  </div>
+</div>

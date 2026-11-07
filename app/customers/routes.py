@@ -14,6 +14,7 @@ from app.services.customer_payment_service import (
     PAYMENT_TYPES,
     delete_customer_payment,
     record_customer_payment,
+    update_customer_payment,
 )
 from app.services.ledger_service import (
     delete_ledger_entry_cascading,
@@ -114,12 +115,17 @@ def _attach_customer_ledger_particulars(ledger):
             .all()
         )
         for sale in sales:
+            fallback = sale.notes or "—"
+            parts_full = items_particulars(
+                sale.items, limit=None, fallback=fallback, kind="sale"
+            )
             parts = items_particulars(
-                sale.items, fallback=sale.notes or "—", kind="sale"
+                sale.items, limit=4, fallback=fallback, kind="sale"
             )
             sales_map[sale.id] = {
                 "invoice_no": sale.invoice_no,
                 "particulars": parts,
+                "particulars_full": parts_full,
                 "notes": _sale_particulars_notes(sale),
             }
 
@@ -136,11 +142,15 @@ def _attach_customer_ledger_particulars(ledger):
         for ret in returns:
             inv = ret.sale.invoice_no if ret.sale else ""
             fallback = f"Return of {inv}" if inv else (ret.return_no or "Sale return")
+            parts_full = items_particulars(
+                ret.items, limit=None, fallback=fallback, kind="sale"
+            )
             returns_map[ret.id] = {
                 "invoice_no": ret.return_no or inv or "—",
                 "particulars": items_particulars(
-                    ret.items, fallback=fallback, kind="sale"
+                    ret.items, limit=4, fallback=fallback, kind="sale"
                 ),
+                "particulars_full": parts_full,
                 "notes": _sale_return_particulars_notes(ret, ret.sale),
             }
 
@@ -157,8 +167,10 @@ def _attach_customer_ledger_particulars(ledger):
         entry.invoice_no = (info or {}).get("invoice_no") or "—"
         if info and info.get("particulars"):
             entry.particulars = info["particulars"]
+            entry.particulars_full = info.get("particulars_full") or info["particulars"]
         else:
             entry.particulars = entry.notes or "—"
+            entry.particulars_full = entry.particulars
 
         desired = (info or {}).get("notes")
         if desired and desired != (entry.notes or ""):
@@ -243,11 +255,16 @@ def _parse_date(value):
 
 
 def _customer_page(form=None, open_modal=False):
+    from app.services.customer_type_service import customer_type_choices
     from app.services.dashboard_service import _range_for_filter
 
     form = form or CustomerForm()
+    type_choices = customer_type_choices()
+    form.customer_type.choices = type_choices
     if not form.joined_date.data:
         form.joined_date.data = get_working_date()
+    if form.customer_type.data not in {c[0] for c in type_choices}:
+        form.customer_type.data = type_choices[0][0] if type_choices else "good"
 
     period = request.args.get("period", "all")
     period_start = _parse_date(request.args.get("start_date"))
@@ -255,6 +272,9 @@ def _customer_page(form=None, open_modal=False):
     range_start, range_end = _range_for_filter(period, period_start, period_end)
     ctype = (request.args.get("type") or "all").strip().lower()
     active_filter = parse_party_active(request.args.get("active"), default="all")
+    profit_filter = (request.args.get("profit") or "all").strip().lower()
+    if profit_filter not in {"all", "profit", "loss", "zero"}:
+        profit_filter = "all"
 
     query = Customer.query.options(joinedload(Customer.photos)).filter_by(is_deleted=False)
     query = apply_party_active_filter(query, Customer, active_filter)
@@ -267,6 +287,28 @@ def _customer_page(form=None, open_modal=False):
 
     customers = query.order_by(Customer.name).all()
     _heal_customers_opening(customers)
+
+    from app.services.customer_list_analytics_service import customer_gross_profit_map
+
+    profit_map = customer_gross_profit_map(
+        period=period,
+        start_date=period_start,
+        end_date=period_end,
+        customer_ids=[c.id for c in customers] if customers else [],
+    )
+    for c in customers:
+        c.period_profit = profit_map.get(c.id, Decimal("0"))
+
+    if profit_filter == "profit":
+        customers = [c for c in customers if c.period_profit > 0]
+    elif profit_filter == "loss":
+        customers = [c for c in customers if c.period_profit < 0]
+    elif profit_filter == "zero":
+        customers = [c for c in customers if c.period_profit == 0]
+
+    total_period_profit = sum((c.period_profit for c in customers), Decimal("0"))
+    profit_customer_count = sum(1 for c in customers if c.period_profit > 0)
+    loss_customer_count = sum(1 for c in customers if c.period_profit < 0)
 
     from app.services.ledger_service import sum_party_balances_as_of
 
@@ -335,6 +377,11 @@ def _customer_page(form=None, open_modal=False):
         end_date=period_end.isoformat() if period_end else "",
         selected_type=ctype if ctype != "all" else "all",
         selected_active=active_filter,
+        selected_profit=profit_filter,
+        total_period_profit=total_period_profit,
+        profit_customer_count=profit_customer_count,
+        loss_customer_count=loss_customer_count,
+        customer_type_choices=type_choices,
     )
 
 
@@ -353,7 +400,10 @@ def create():
         session["open_customer_modal"] = True
         return redirect(url_for("customers.index"))
 
+    from app.services.customer_type_service import customer_type_choices
+
     form = CustomerForm()
+    form.customer_type.choices = customer_type_choices()
     if form.validate_on_submit():
         opening_raw = form.opening_balance.data
         opening = Decimal("0") if opening_raw in (None, "") else Decimal(str(opening_raw))
@@ -403,6 +453,8 @@ def payment():
     amount = request.form.get("amount")
     payment_date = request.form.get("payment_date") or get_working_date().isoformat()
     remarks = request.form.get("remarks")
+    due_enabled = (request.form.get("due_enabled") or "").strip() in ("1", "on", "true", "yes")
+    due_date = request.form.get("due_date") if due_enabled else None
 
     try:
         receiving = record_customer_payment(
@@ -412,6 +464,7 @@ def payment():
             payment_date=payment_date,
             remarks=remarks,
             user_id=current_user.id,
+            due_date=due_date,
         )
         log_audit("create", "customer_receiving", receiving.id, payment_type)
         db.session.commit()
@@ -492,6 +545,8 @@ def detail(customer_id):
         display_balance=display_balance,
     )
 
+    from app.services.customer_type_service import customer_type_choices
+
     return render_template(
         "customers/detail.html",
         customer=customer,
@@ -505,6 +560,7 @@ def detail(customer_id):
         selected_period=period,
         start_date=period_start.isoformat() if period_start else "",
         end_date=period_end.isoformat() if period_end else "",
+        customer_type_choices=customer_type_choices(),
     )
 
 
@@ -584,6 +640,39 @@ def delete(customer_id):
 @permission_required("customers.*")
 def edit_ledger(entry_id):
     try:
+        entry = db.session.get(LedgerEntry, entry_id)
+        if not entry:
+            raise ValueError("Ledger entry not found.")
+
+        entry_type = (request.form.get("entry_type") or "").strip().lower()
+        ref_type = (entry.reference_type or "").strip().lower()
+        is_payment = (
+            ref_type == "customer_receiving"
+            and entry.reference_id
+            and entry_type in PAYMENT_TYPES
+        )
+
+        if is_payment:
+            amount_raw = request.form.get("amount")
+            if amount_raw in (None, ""):
+                debit = Decimal(str(request.form.get("debit") or 0))
+                credit = Decimal(str(request.form.get("credit") or 0))
+                amount_raw = debit if entry_type == "loan" else credit
+                if Decimal(str(amount_raw or 0)) <= 0:
+                    amount_raw = max(debit, credit)
+            receiving = update_customer_payment(
+                int(entry.reference_id),
+                payment_type=entry_type,
+                amount=amount_raw,
+                payment_date=request.form.get("entry_date"),
+                remarks=request.form.get("notes"),
+                user_id=current_user.id,
+            )
+            log_audit("update", "customer_receiving", receiving.id)
+            db.session.commit()
+            flash("Payment updated. Balance and cash recalculated.", "success")
+            return redirect(url_for("customers.detail", customer_id=receiving.customer_id))
+
         entry = update_ledger_entry(
             entry_id,
             entry_date=request.form.get("entry_date"),

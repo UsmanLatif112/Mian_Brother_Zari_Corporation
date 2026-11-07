@@ -3,7 +3,7 @@ import shutil
 import sqlite3
 import time
 import zipfile
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from flask import current_app
 from sqlalchemy import text
@@ -248,8 +248,116 @@ def backup_sqlite(dest_path: str | None = None) -> str:
 
     if dest_path:
         _export_backup_folder(folder, dest_path)
-        return os.path.abspath(str(dest_path).strip())
-    return folder
+        result = os.path.abspath(str(dest_path).strip())
+    else:
+        result = folder
+
+    try:
+        prune_local_backups()
+    except Exception:
+        pass
+
+    return result
+
+
+def _backup_entry_date(name: str, path: str | None = None) -> date | None:
+    """
+    Parse calendar date from backup name (sqlite_backup_YYYYMMDD_HHMMSS)
+    or fall back to filesystem mtime for legacy files.
+    """
+    base = os.path.basename(name or "")
+    if base.startswith("sqlite_backup_") and len(base) >= 22:
+        stamp = base[len("sqlite_backup_") : len("sqlite_backup_") + 8]
+        try:
+            return datetime.strptime(stamp, "%Y%m%d").date()
+        except ValueError:
+            pass
+    # Legacy .db names may embed a stamp; try common patterns
+    for part in base.replace("-", "_").split("_"):
+        if len(part) == 8 and part.isdigit():
+            try:
+                return datetime.strptime(part, "%Y%m%d").date()
+            except ValueError:
+                pass
+    if path and os.path.exists(path):
+        try:
+            return datetime.fromtimestamp(os.path.getmtime(path)).date()
+        except OSError:
+            pass
+    return None
+
+
+def prune_local_backups(
+    keep_today: int | None = None,
+    keep_days: int | None = None,
+) -> int:
+    """
+    Retention:
+    - Current date: keep newest ``keep_today`` backups (default BACKUP_UI_LIMIT / 10)
+    - Each of the last ``keep_days`` calendar days: keep at least the newest
+      (day-end) backup for that date
+    - Delete everything older / not selected
+
+    Returns how many entries were removed.
+    """
+    if keep_today is None:
+        keep_today = int(current_app.config.get("BACKUP_UI_LIMIT", 10) or 10)
+    if keep_days is None:
+        keep_days = int(current_app.config.get("BACKUP_KEEP_DAYS", 10) or 10)
+    keep_today = max(1, int(keep_today))
+    keep_days = max(1, int(keep_days))
+
+    names, _total = list_backup_files(limit=None)
+    if not names:
+        return 0
+
+    backup_dir = ensure_backup_dir()
+    today = date.today()
+
+    by_date: dict[date, list[str]] = {}
+    undated: list[str] = []
+    for name in names:
+        path = os.path.join(backup_dir, name)
+        d = _backup_entry_date(name, path)
+        if d is None:
+            undated.append(name)
+            continue
+        by_date.setdefault(d, []).append(name)
+
+    # names are already newest-first globally; keep that order within each day
+    keep: set[str] = set()
+
+    # Today: last N intraday snapshots
+    for name in by_date.get(today, [])[:keep_today]:
+        keep.add(name)
+
+    # Last N calendar days: at least day-end (newest) of each day
+    for i in range(keep_days):
+        d = today - timedelta(days=i)
+        day_names = by_date.get(d) or []
+        if day_names:
+            keep.add(day_names[0])
+
+    # Undated legacy files: keep newest few as a safety net
+    for name in undated[:keep_today]:
+        keep.add(name)
+
+    removed = 0
+    for name in names:
+        if name in keep:
+            continue
+        path = os.path.join(backup_dir, name)
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=False)
+            elif os.path.isfile(path):
+                os.remove(path)
+            else:
+                continue
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 def _export_backup_folder(folder: str, dest_path: str) -> str:
