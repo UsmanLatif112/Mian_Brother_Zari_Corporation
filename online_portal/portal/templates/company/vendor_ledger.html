@@ -20,41 +20,54 @@
           <span class="badge bg-secondary-subtle text-secondary border">Inactive</span>
           {% endif %}
         </h1>
-        <p class="text-muted mb-0">
-          {% if vendor.phone %}{{ vendor.phone }} · {% endif %}
-          {% if vendor.cnic %}CNIC {{ vendor.cnic }} · {% endif %}
-          View only
-        </p>
+        <p class="text-muted mb-0">View only</p>
       </div>
     </div>
   </div>
 
   <div class="card dash-panel border-0 shadow-sm mb-3">
     <div class="card-body py-3">
-      <div class="row align-items-center g-3">
+      {% set pie = account_pie.pie %}
+      <div class="row align-items-center g-3 dash-pie-row party-detail-summary-row">
         <div class="col-md-5">
-          <dl class="row g-2 mb-3 small">
-            <dt class="col-5 text-muted">Phone</dt>
-            <dd class="col-7 mb-0 fw-semibold">{{ vendor.phone or '—' }}</dd>
-            <dt class="col-5 text-muted">CNIC</dt>
-            <dd class="col-7 mb-0">{{ vendor.cnic or '—' }}</dd>
-            <dt class="col-5 text-muted">Balance</dt>
-            <dd class="col-7 mb-0 fw-bold">{{ '%.2f'|format(display_balance|float) }}</dd>
-          </dl>
-          {% if account_pie.pie.rows %}
-          <ul class="list-unstyled mb-0 small">
-            {% for item in account_pie.pie.rows %}
-            <li class="d-flex justify-content-between border-bottom py-1">
-              <span>{{ item.name }}</span>
-              <strong>{{ '%.2f'|format(item.value|float) }}</strong>
+          <div class="party-detail-info mb-3 mb-md-0">
+            <dl class="row g-2 mb-0 small">
+              <dt class="col-5 text-muted">Phone</dt>
+              <dd class="col-7 mb-0 fw-semibold">{{ vendor.phone or '—' }}</dd>
+              <dt class="col-5 text-muted">CNIC</dt>
+              <dd class="col-7 mb-0">{{ vendor.cnic or '—' }}</dd>
+              <dt class="col-5 text-muted">Status</dt>
+              <dd class="col-7 mb-0">
+                {% if vendor.is_active is none or vendor.is_active %}
+                <span class="badge bg-success-subtle text-success border">Active</span>
+                {% else %}
+                <span class="badge bg-secondary-subtle text-secondary border">Inactive</span>
+                {% endif %}
+              </dd>
+              <dt class="col-5 text-muted">Balance</dt>
+              <dd class="col-7 mb-0 fw-bold">{{ '%.2f'|format(display_balance|float) }}</dd>
+            </dl>
+          </div>
+          {% if pie.rows %}
+          <ul class="dash-pie-list list-unstyled mb-0">
+            {% for item in pie.rows %}
+            <li class="dash-pie-list-item">
+              <span class="dash-pie-swatch" data-color-idx="{{ loop.index0 }}"></span>
+              <div class="dash-pie-list-text">
+                <div class="dash-pie-list-name">{{ item.name }}</div>
+                {% if item.detail %}
+                <div class="dash-pie-list-meta text-muted small">{{ item.detail }}</div>
+                {% endif %}
+              </div>
+              <div class="dash-pie-list-value">{{ '%.2f'|format(item.value|float) }}</div>
             </li>
             {% endfor %}
           </ul>
           {% endif %}
         </div>
         <div class="col-md-7">
-          {% if account_pie.pie.rows %}
-          <div class="dash-chart-wrap" style="min-height:220px">
+          {% if pie.rows %}
+          <div class="dash-pie-wrap party-detail-pie-wrap">
             <canvas id="partyAccountPie" aria-label="Account summary chart"></canvas>
           </div>
           {% else %}
@@ -105,28 +118,9 @@
 {% endblock %}
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>window.partyAccountPie = {{ account_pie.pie|tojson }};</script>
+<script src="{{ url_for('static', filename='js/party-detail.js') }}?v=1"></script>
 <script>
-(function () {
-  const pie = {{ account_pie.pie|tojson }};
-  const canvas = document.getElementById('partyAccountPie');
-  if (canvas && window.Chart && pie && pie.rows && pie.rows.length) {
-    new Chart(canvas, {
-      type: 'doughnut',
-      data: {
-        labels: pie.rows.map((r) => r.name),
-        datasets: [{
-          data: pie.rows.map((r) => r.value),
-          backgroundColor: ['#1f7a4d', '#2563eb', '#f59e0b', '#64748b'],
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom' } },
-      },
-    });
-  }
   document.getElementById('btn-print-ledger')?.addEventListener('click', () => window.print());
-})();
 </script>
 {% endblock %}

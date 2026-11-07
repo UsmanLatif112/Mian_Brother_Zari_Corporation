@@ -182,10 +182,27 @@ def _party_where(table: str) -> tuple[str, dict]:
     return where, params
 
 
+def _ledger_for_party_type(party_type: str):
+    """All ledger rows for chart series (no period filter — buckets need history)."""
+    if not _table_exists("ledger_entries"):
+        return []
+    return db.session.execute(
+        text(
+            """
+            SELECT id, party_id, entry_date, entry_type, debit, credit, balance_after
+            FROM ledger_entries
+            WHERE party_type = :pt
+            ORDER BY entry_date ASC, id ASC
+            """
+        ),
+        {"pt": party_type},
+    ).mappings().all()
+
+
 @company_bp.route("/customers")
 @company_admin_required
 def customers():
-    from portal.services.party_view import list_balance_stats, list_chart_payload
+    from portal.services.party_view import customer_list_chart, list_balance_stats
 
     rows = []
     error = None
@@ -214,8 +231,14 @@ def customers():
             text(f"SELECT {select_cols} FROM customers {where} ORDER BY name LIMIT 5000"),
             params,
         ).mappings().all()
+    period, start, end = _period_bounds()
     stats = list_balance_stats(rows)
-    chart = list_chart_payload(rows, party_label="Customers")
+    chart = customer_list_chart(
+        _ledger_for_party_type("customer"),
+        period=period,
+        start_date=start,
+        end_date=end,
+    )
     return render_template(
         "company/customers.html",
         customers=rows,
@@ -231,7 +254,7 @@ def customers():
 @company_bp.route("/customers/<int:customer_id>/ledger")
 @company_admin_required
 def customer_ledger(customer_id: int):
-    from portal.services.party_view import entry_type_label, ledger_account_pie
+    from portal.services.party_view import customer_account_pie, entry_type_label
 
     if not _table_exists("ledger_entries"):
         flash("Ledger data not synced yet.", "warning")
@@ -250,6 +273,7 @@ def customer_ledger(customer_id: int):
     if not customer:
         flash("Customer not found.", "danger")
         return redirect(url_for("company.customers"))
+    period, start, end = _period_bounds()
     period_sql, params = _period_clause("entry_date")
     params["cid"] = customer_id
     entries = db.session.execute(
@@ -265,7 +289,9 @@ def customer_ledger(customer_id: int):
         params,
     ).mappings().all()
     display_balance = float(customer["balance"] or 0)
-    account_pie = ledger_account_pie(entries, display_balance)
+    account_pie = customer_account_pie(
+        entries, display_balance, ranged=(period != "all")
+    )
     return render_template(
         "company/customer_ledger.html",
         customer=customer,
@@ -281,7 +307,7 @@ def customer_ledger(customer_id: int):
 @company_bp.route("/vendors")
 @company_admin_required
 def vendors():
-    from portal.services.party_view import list_balance_stats, list_chart_payload
+    from portal.services.party_view import list_balance_stats, vendor_list_chart
 
     rows = []
     error = None
@@ -306,8 +332,14 @@ def vendors():
             text(f"SELECT {select_cols} FROM vendors {where} ORDER BY name LIMIT 5000"),
             params,
         ).mappings().all()
+    period, start, end = _period_bounds()
     stats = list_balance_stats(rows)
-    chart = list_chart_payload(rows, party_label="Vendors")
+    chart = vendor_list_chart(
+        _ledger_for_party_type("vendor"),
+        period=period,
+        start_date=start,
+        end_date=end,
+    )
     return render_template(
         "company/vendors.html",
         vendors=rows,
@@ -323,7 +355,7 @@ def vendors():
 @company_bp.route("/vendors/<int:vendor_id>/ledger")
 @company_admin_required
 def vendor_ledger(vendor_id: int):
-    from portal.services.party_view import entry_type_label, ledger_account_pie
+    from portal.services.party_view import entry_type_label, vendor_account_pie
 
     if not _table_exists("ledger_entries"):
         flash("Ledger data not synced yet.", "warning")
@@ -341,6 +373,7 @@ def vendor_ledger(vendor_id: int):
     if not vendor:
         flash("Vendor not found.", "danger")
         return redirect(url_for("company.vendors"))
+    period, start, end = _period_bounds()
     period_sql, params = _period_clause("entry_date")
     params["vid"] = vendor_id
     entries = db.session.execute(
@@ -356,7 +389,9 @@ def vendor_ledger(vendor_id: int):
         params,
     ).mappings().all()
     display_balance = float(vendor["balance"] or 0)
-    account_pie = ledger_account_pie(entries, display_balance)
+    account_pie = vendor_account_pie(
+        entries, display_balance, ranged=(period != "all")
+    )
     return render_template(
         "company/vendor_ledger.html",
         vendor=vendor,

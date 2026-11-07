@@ -53,10 +53,12 @@
   </div>
 
   <div class="card dash-panel border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Total Credit · Advance Balance</strong></div>
+    <div class="card-header bg-white">
+      <strong>Total Sale · Total Paid · Total Credit</strong>
+    </div>
     <div class="card-body pt-3 pb-2">
       <div class="dash-chart-wrap">
-        <canvas id="customerListChart" height="120"></canvas>
+        <canvas id="customerListChart" aria-label="Customer list chart"></canvas>
       </div>
     </div>
   </div>
@@ -127,31 +129,9 @@
 {% endblock %}
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>window.customerListChart = {{ list_chart|tojson }};</script>
+<script src="{{ url_for('static', filename='js/list-page-charts.js') }}?v=1"></script>
 <script>
-(function () {
-  const chart = {{ list_chart|tojson }};
-  const canvas = document.getElementById('customerListChart');
-  if (canvas && window.Chart && chart) {
-    new Chart(canvas, {
-      type: 'bar',
-      data: {
-        labels: chart.labels,
-        datasets: [{
-          label: chart.party_label,
-          data: chart.values,
-          backgroundColor: ['rgba(245, 158, 11, 0.75)', 'rgba(37, 99, 235, 0.75)'],
-          borderRadius: 6,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true } },
-      },
-    });
-  }
   document.getElementById('btn-print-list')?.addEventListener('click', () => window.print());
-})();
 </script>
 {% endblock %}
