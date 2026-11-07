@@ -17,6 +17,7 @@ from app.services.backup_service import (
     zip_backup_folder,
 )
 from app.services import google_drive_service as drive
+from app.services.sync_service import get_sync_target_label, is_mysql_available, run_sync
 from app.utils.decorators import permission_required
 
 maintenance_bp = Blueprint("maintenance", __name__)
@@ -78,10 +79,17 @@ def index():
     # Show today's snapshots + day-end history (rough max ≈ today + prior days)
     list_limit = max(ui_limit + keep_days, ui_limit)
     backups, backup_total = list_backup_files(limit=list_limit)
+    can_sync = current_user.has_permission("sync.view") or current_user.has_permission(
+        "backup.view"
+    )
+    mysql_online = is_mysql_available() if can_sync else False
 
     return render_template(
         "maintenance/index.html",
         can_backup=can_backup,
+        can_sync=can_sync,
+        mysql_online=mysql_online,
+        sync_target_label=get_sync_target_label(),
         backups=backups,
         backup_total=backup_total,
         backup_ui_limit=list_limit,
@@ -99,6 +107,23 @@ def index():
         is_desktop=_is_desktop(),
         today=date.today().isoformat(),
     )
+
+
+@maintenance_bp.route("/push-mysql", methods=["POST"])
+@login_required
+def push_mysql():
+    """Push SQLite → MySQL (ledgers + company logo for online portal)."""
+    if not (
+        current_user.has_permission("sync.view")
+        or current_user.has_permission("backup.view")
+    ):
+        flash("You do not have permission to sync.", "danger")
+        return redirect(url_for("maintenance.index"))
+    log = run_sync(current_user.id)
+    log_audit("sync", "database", log.id, log.message)
+    db.session.commit()
+    flash(log.message or "Sync completed.", "success" if log.status == "success" else "warning")
+    return redirect(url_for("maintenance.index"))
 
 
 @maintenance_bp.route("/google/connect", methods=["GET"])

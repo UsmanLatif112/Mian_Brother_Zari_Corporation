@@ -6,7 +6,34 @@
   <p class="text-muted mb-4">
     Your data stays on local SQLite for fast offline work. Backups are saved on this PC and can be
     copied to <strong>Google Drive</strong> so you can restore after a crash or on a new computer.
+    Use <strong>Sync to MySQL</strong> to push ledgers and your company logo to the online portal.
   </p>
+
+  {% if can_sync %}
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <strong><i class="fa-solid fa-cloud-arrow-up me-1 text-success"></i> Sync to online portal (MySQL)</strong>
+      <span class="badge {% if mysql_online %}bg-success{% else %}bg-secondary{% endif %}">
+        {% if mysql_online %}{{ sync_target_label }} reachable{% else %}{{ sync_target_label }} offline{% endif %}
+      </span>
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">
+        Pushes customers, vendors, ledgers, and your <strong>company logo</strong> so Agri Books online
+        shows your branding after login. Requires internet + MySQL configured in <code>.env</code>.
+      </p>
+      <form method="post" action="{{ url_for('maintenance.push_mysql') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-success" type="submit" {% if not mysql_online %}disabled{% endif %}>
+          <i class="fa-solid fa-cloud-arrow-up me-1"></i> Sync now — push data &amp; logo
+        </button>
+      </form>
+      {% if not mysql_online %}
+      <p class="small text-warning mt-2 mb-0">Connect to the internet and refresh this page to enable sync.</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 
   <div class="row g-4">
     <div class="col-lg-6">

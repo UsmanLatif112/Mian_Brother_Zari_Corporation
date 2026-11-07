@@ -238,6 +238,7 @@ def register_blueprints(app):
     from app.categories.routes import categories_bp
     from app.account.routes import account_bp
     from app.maintenance.routes import maintenance_bp
+    from app.sync.routes import sync_bp
     from app.journal.routes import journal_bp
     from app.api.routes import api_bp
 
@@ -253,6 +254,7 @@ def register_blueprints(app):
     app.register_blueprint(categories_bp, url_prefix="/categories")
     app.register_blueprint(account_bp, url_prefix="/account")
     app.register_blueprint(maintenance_bp, url_prefix="/sync-backup")
+    app.register_blueprint(sync_bp, url_prefix="/sync")
     app.register_blueprint(journal_bp, url_prefix="/journal")
     app.register_blueprint(api_bp, url_prefix="/api")
 

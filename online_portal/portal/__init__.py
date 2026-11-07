@@ -46,21 +46,28 @@ def create_app(config_object: type = Config) -> Flask:
     def inject_branding():
         suite_name = app.config.get("SUITE_NAME", "Agri Books")
         suite_logo = url_for("static", filename="img/logo.png")
+        suite_favicon = url_for("static", filename="img/favicon-32.png")
         brand_name = "Agri"
         brand_sub = "Books"
         brand_logo = suite_logo
+        brand_favicon = suite_favicon
         brand_is_suite = True
 
         if current_user.is_authenticated and not current_user.is_super_admin():
+            from portal.services.branding_sync import hydrate_company_logo
+
             company = getattr(current_user, "company", None)
             display = (company.name if company else "") or ""
             brand_name = display.strip() or "Business"
             brand_sub = ""
             brand_is_suite = False
             brand_logo = None
+            brand_favicon = suite_favicon
             if company and company.id:
+                hydrate_company_logo(company, getattr(current_user, "username", None))
                 if company.logo_data or company.logo_path:
                     brand_logo = url_for("company_logo", company_id=company.id)
+                    brand_favicon = brand_logo
 
         return {
             "app_name": suite_name,
@@ -69,6 +76,7 @@ def create_app(config_object: type = Config) -> Flask:
             "brand_name": brand_name,
             "brand_sub": brand_sub,
             "brand_logo": brand_logo,
+            "brand_favicon": brand_favicon,
             "brand_is_suite": brand_is_suite,
             "developer_name": app.config.get("DEVELOPER_NAME", "U. Technologies"),
             "developer_url": app.config.get("DEVELOPER_URL", "https://udottechnologies.com/"),
@@ -79,8 +87,14 @@ def create_app(config_object: type = Config) -> Flask:
     @app.route("/media/company-logo/<int:company_id>")
     def company_logo(company_id: int):
         from portal.models import Company
+        from portal.services.branding_sync import hydrate_company_logo
 
         company = db.session.get(Company, company_id)
+        if company and not company.logo_data:
+            username = None
+            if current_user.is_authenticated and getattr(current_user, "company_id", None) == company_id:
+                username = current_user.username
+            hydrate_company_logo(company, username)
         if not company or not company.logo_data:
             return redirect(url_for("static", filename="img/logo.png"))
         from io import BytesIO
@@ -93,7 +107,7 @@ def create_app(config_object: type = Config) -> Flask:
             "webp": "image/webp",
             "gif": "image/gif",
         }.get(ext.lower(), "image/png")
-        return send_file(BytesIO(company.logo_data), mimetype=mime)
+        return send_file(BytesIO(bytes(company.logo_data)), mimetype=mime)
 
     # Public update channel (desktop apps + CDN-style path on agribooks domain)
     @app.route("/updates/version.json")
