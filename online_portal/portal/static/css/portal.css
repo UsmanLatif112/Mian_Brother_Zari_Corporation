@@ -186,9 +186,7 @@ body.erp-body {
   .erp-topbar,
   .sidebar-backdrop,
   .dt-toolbar,
-  .dt-footer,
-  #btn-print-list,
-  #btn-print-ledger {
+  .dt-footer {
     display: none !important;
   }
   .erp-main {

@@ -83,11 +83,8 @@
   </div>
 
   <div class="card dash-panel border-0 shadow-sm mb-3">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="card-header bg-white">
       <strong>Ledger</strong>
-      <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-print-ledger" title="Print ledger">
-        <i class="fa-solid fa-print me-1"></i> Print
-      </button>
     </div>
     <table class="table datatable mb-0 w-100" id="customer-ledger-table" data-empty-table="No ledger entries for this period.">
       <thead>
@@ -120,7 +117,4 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>window.partyAccountPie = {{ account_pie.pie|tojson }};</script>
 <script src="{{ url_for('static', filename='js/party-detail.js') }}?v=2"></script>
-<script>
-  document.getElementById('btn-print-ledger')?.addEventListener('click', () => window.print());
-</script>
 {% endblock %}

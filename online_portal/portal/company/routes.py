@@ -128,28 +128,6 @@ def _list_filter_args(**extra):
     return args
 
 
-def _party_profit_map(party_type: str) -> dict[int, float]:
-    if not _table_exists("portal_party_metrics"):
-        return {}
-    rows = db.session.execute(
-        text(
-            """
-            SELECT party_id, gross_profit
-            FROM portal_party_metrics
-            WHERE party_type = :pt
-            """
-        ),
-        {"pt": party_type},
-    ).all()
-    out: dict[int, float] = {}
-    for pid, profit in rows:
-        try:
-            out[int(pid)] = float(profit or 0)
-        except (TypeError, ValueError):
-            continue
-    return out
-
-
 def _customer_type_choices() -> list[tuple[str, str]]:
     choices: list[tuple[str, str]] = []
     if _table_exists("customer_types"):
@@ -270,13 +248,10 @@ def _ledger_for_party_type(party_type: str):
 @company_admin_required
 def customers():
     from portal.services.party_view import (
-        attach_period_profit,
         customer_list_chart,
         filter_by_active,
         filter_by_customer_type,
-        filter_by_profit,
         list_balance_stats,
-        profit_list_stats,
     )
 
     rows = []
@@ -309,19 +284,12 @@ def customers():
 
     selected_type = _arg("type")
     selected_active = _arg("active")
-    selected_profit = _arg("profit")
-    if selected_profit not in {"all", "profit", "loss", "zero"}:
-        selected_profit = "all"
     if selected_active not in {"all", "active", "inactive"}:
         selected_active = "all"
 
-    rows = attach_period_profit(rows, _party_profit_map("customer"))
     rows = filter_by_customer_type(rows, selected_type)
     rows = filter_by_active(rows, selected_active)
-    # Money cards use type+active before profit filter (same idea as desktop)
     stats = list_balance_stats(rows)
-    rows = filter_by_profit(rows, selected_profit)
-    pstats = profit_list_stats(rows)
 
     period, start, end = _period_bounds()
     chart = customer_list_chart(
@@ -334,7 +302,6 @@ def customers():
     preserve = {
         "type": selected_type if selected_type != "all" else "",
         "active": selected_active if selected_active != "all" else "",
-        "profit": selected_profit if selected_profit != "all" else "",
     }
     return render_template(
         "company/customers.html",
@@ -347,14 +314,8 @@ def customers():
         total_records=len(rows),
         selected_type=selected_type,
         selected_active=selected_active,
-        selected_profit=selected_profit,
         customer_type_choices=type_choices,
         filter_preserve=preserve,
-        total_period_profit=pstats["total_period_profit"],
-        list_profit=pstats["list_profit"],
-        list_loss=pstats["list_loss"],
-        profit_customer_count=pstats["profit_count"],
-        loss_customer_count=pstats["loss_count"],
         **_period_context(
             "company.customers",
             **{k: v for k, v in preserve.items() if v},
@@ -419,12 +380,9 @@ def customer_ledger(customer_id: int):
 @company_admin_required
 def vendors():
     from portal.services.party_view import (
-        attach_period_profit,
         filter_by_active,
-        filter_by_profit,
         filter_by_vendor_balance,
         list_balance_stats,
-        profit_list_stats,
         vendor_list_chart,
     )
 
@@ -454,20 +412,14 @@ def vendors():
 
     selected_status = _arg("status")
     selected_active = _arg("active")
-    selected_profit = _arg("profit")
     if selected_status not in {"all", "payable", "prepaid", "settled"}:
         selected_status = "all"
     if selected_active not in {"all", "active", "inactive"}:
         selected_active = "all"
-    if selected_profit not in {"all", "profit", "loss", "zero"}:
-        selected_profit = "all"
 
-    rows = attach_period_profit(rows, _party_profit_map("vendor"))
     rows = filter_by_vendor_balance(rows, selected_status)
     rows = filter_by_active(rows, selected_active)
     stats = list_balance_stats(rows)
-    rows = filter_by_profit(rows, selected_profit)
-    pstats = profit_list_stats(rows)
 
     period, start, end = _period_bounds()
     chart = vendor_list_chart(
@@ -498,7 +450,6 @@ def vendors():
     preserve = {
         "status": selected_status if selected_status != "all" else "",
         "active": selected_active if selected_active != "all" else "",
-        "profit": selected_profit if selected_profit != "all" else "",
     }
     return render_template(
         "company/vendors.html",
@@ -511,13 +462,7 @@ def vendors():
         total_records=len(rows),
         selected_status=selected_status,
         selected_active=selected_active,
-        selected_profit=selected_profit,
         filter_preserve=preserve,
-        total_period_profit=pstats["total_period_profit"],
-        list_profit=pstats["list_profit"],
-        list_loss=pstats["list_loss"],
-        profit_vendor_count=pstats["profit_count"],
-        loss_vendor_count=pstats["loss_count"],
         **_period_context(
             "company.vendors",
             **{k: v for k, v in preserve.items() if v},

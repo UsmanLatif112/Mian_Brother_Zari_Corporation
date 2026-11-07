@@ -15,9 +15,8 @@
     'start_date': start_date if selected_period == 'custom' else '',
     'end_date': end_date if selected_period == 'custom' else '',
     'active': selected_active if selected_active != 'all' else '',
-    'profit': selected_profit if selected_profit != 'all' else '',
   },
-  clear_url=url_for('company.vendors', period=selected_period or 'all', start_date=start_date if selected_period == 'custom' else None, end_date=end_date if selected_period == 'custom' else None, active=selected_active if selected_active != 'all' else None, profit=selected_profit if selected_profit != 'all' else None)
+  clear_url=url_for('company.vendors', period=selected_period or 'all', start_date=start_date if selected_period == 'custom' else None, end_date=end_date if selected_period == 'custom' else None, active=selected_active if selected_active != 'all' else None)
 %}
 {% include 'partials/status_filter.html' %}
 {% endwith %}
@@ -33,27 +32,8 @@
     'start_date': start_date if selected_period == 'custom' else '',
     'end_date': end_date if selected_period == 'custom' else '',
     'status': selected_status if selected_status != 'all' else '',
-    'profit': selected_profit if selected_profit != 'all' else '',
   },
-  clear_url=url_for('company.vendors', period=selected_period or 'all', start_date=start_date if selected_period == 'custom' else None, end_date=end_date if selected_period == 'custom' else None, status=selected_status if selected_status != 'all' else None, profit=selected_profit if selected_profit != 'all' else None)
-%}
-{% include 'partials/status_filter.html' %}
-{% endwith %}
-{% with
-  label='Profit / Loss',
-  field_name='profit',
-  icon='fa-chart-line',
-  selected=selected_profit,
-  default='all',
-  options=[('all', 'All'), ('profit', 'Profit'), ('loss', 'Loss'), ('zero', 'No sales / zero')],
-  preserve={
-    'period': selected_period if selected_period != 'all' else '',
-    'start_date': start_date if selected_period == 'custom' else '',
-    'end_date': end_date if selected_period == 'custom' else '',
-    'status': selected_status if selected_status != 'all' else '',
-    'active': selected_active if selected_active != 'all' else '',
-  },
-  clear_url=url_for('company.vendors', period=selected_period or 'all', start_date=start_date if selected_period == 'custom' else None, end_date=end_date if selected_period == 'custom' else None, status=selected_status if selected_status != 'all' else None, active=selected_active if selected_active != 'all' else None)
+  clear_url=url_for('company.vendors', period=selected_period or 'all', start_date=start_date if selected_period == 'custom' else None, end_date=end_date if selected_period == 'custom' else None, status=selected_status if selected_status != 'all' else None)
 %}
 {% include 'partials/status_filter.html' %}
 {% endwith %}
@@ -104,18 +84,6 @@
         </div>
       </div>
     </div>
-    <div class="col-6 col-md-4 col-xl">
-      <div class="card stat-card border-0 shadow-sm h-100">
-        <div class="card-body d-flex justify-content-between align-items-start">
-          <div>
-            <p class="text-muted small mb-1">Gross Profit <span class="fw-normal">(listed)</span></p>
-            <h3 class="mb-0 fw-bold {% if list_profit > 0 %}text-success{% endif %}">{{ '%.2f'|format(list_profit|float) }}</h3>
-            <div class="small text-muted mt-1">{{ profit_vendor_count }} with profit</div>
-          </div>
-          <div class="stat-icon bg-success-subtle text-success"><i class="fa-solid fa-chart-line"></i></div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <div class="card dash-panel border-0 shadow-sm mb-3">
@@ -132,12 +100,7 @@
   <div class="card dash-panel border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
       <strong>Vendor List</strong>
-      <div class="d-flex align-items-center gap-2">
-        <span class="text-muted small">{{ total_records }} records</span>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-print-list" title="Print list">
-          <i class="fa-solid fa-print me-1"></i> Print
-        </button>
-      </div>
+      <span class="text-muted small">{{ total_records }} records</span>
     </div>
     <table class="table datatable mb-0 align-middle w-100" id="vendors-table" data-empty-table="No vendors.">
       <thead>
@@ -146,14 +109,12 @@
           <th>Phone</th>
           <th>Address</th>
           <th>Status</th>
-          <th class="text-end">Profit / Loss</th>
           <th class="text-end">Balance</th>
           <th class="col-actions">Action</th>
         </tr>
       </thead>
       <tbody>
         {% for v in vendors %}
-        {% set profit = (v.period_profit or 0)|float %}
         <tr>
           <td class="fw-semibold">{{ v.name }}</td>
           <td>{{ v.phone or '—' }}</td>
@@ -164,9 +125,6 @@
             {% else %}
             <span class="badge bg-secondary-subtle text-secondary border">Inactive</span>
             {% endif %}
-          </td>
-          <td class="text-end fw-semibold {% if profit > 0 %}text-success{% elif profit < 0 %}text-danger{% else %}text-muted{% endif %}">
-            {% if profit < 0 %}Loss {{ '%.2f'|format((-profit)|float) }}{% elif profit > 0 %}+{{ '%.2f'|format(profit) }}{% else %}0.00{% endif %}
           </td>
           <td class="text-end {% if (v.balance or 0)|float > 0 %}text-warning{% elif (v.balance or 0)|float < 0 %}text-success{% endif %}">
             {{ '%.2f'|format((v.balance or 0)|float) }}
@@ -190,7 +148,4 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>window.vendorListChart = {{ list_chart|tojson }};</script>
 <script src="{{ url_for('static', filename='js/list-page-charts.js') }}?v=2"></script>
-<script>
-  document.getElementById('btn-print-list')?.addEventListener('click', () => window.print());
-</script>
 {% endblock %}
