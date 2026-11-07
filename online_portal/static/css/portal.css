@@ -1,0 +1,40 @@
+/* Keep desktop theme; only layout glue for portal */
+.erp-main {
+  margin-left: var(--erp-sidebar-width);
+  min-height: 100vh;
+  background: var(--erp-bg);
+  display: flex;
+  flex-direction: column;
+  width: calc(100% - var(--erp-sidebar-width));
+}
+.erp-sidebar .nav-link.active {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff !important;
+}
+.portal-kpi {
+  background: var(--erp-card);
+  border-radius: var(--erp-radius);
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--erp-border);
+}
+.portal-kpi .label {
+  color: var(--erp-muted);
+  font-size: 0.8rem;
+  margin-bottom: 0.25rem;
+}
+.portal-kpi .value {
+  font-size: 1.45rem;
+  font-weight: 700;
+}
+#portal-period-form .custom-date-field {
+  display: none;
+}
+#portal-period-form[data-custom="1"] .custom-date-field,
+#period-filter option[value="custom"]:checked ~ .custom-date-field {
+  display: inline-flex;
+}
+@media (max-width: 991.98px) {
+  .erp-sidebar { transform: translateX(-100%); }
+  .erp-sidebar.open { transform: translateX(0); }
+  .erp-main { margin-left: 0; width: 100%; }
+}
