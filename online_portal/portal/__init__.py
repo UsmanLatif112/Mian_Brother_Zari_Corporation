@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from flask import Flask, redirect, send_file, url_for
+from flask import Flask, redirect, request, send_file, url_for
 from flask_login import current_user
 
 from portal.config import Config
@@ -116,6 +116,9 @@ def create_app(config_object: type = Config) -> Flask:
                     db.session.rollback()
 
         if not data:
+            # Admin preview uses ?strict=1 so missing logos 404 (img onerror). Elsewhere fall back to suite logo.
+            if request.args.get("strict"):
+                return ("", 404)
             return redirect(url_for("static", filename="img/logo.png"))
 
         ext = (Path(logo_path or "logo.png").suffix or ".png").lstrip(".")
@@ -126,8 +129,13 @@ def create_app(config_object: type = Config) -> Flask:
             "webp": "image/webp",
             "gif": "image/gif",
         }.get(ext.lower(), "image/png")
-        resp = make_response(send_file(BytesIO(data), mimetype=mime))
-        resp.headers["Cache-Control"] = "no-cache, max-age=0"
+        buf = BytesIO(data)
+        buf.seek(0)
+        resp = make_response(
+            send_file(buf, mimetype=mime, download_name=f"company_{company_id}.{ext or 'png'}")
+        )
+        resp.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
         return resp
 
     # Public update channel (desktop apps + CDN-style path on agribooks domain)

@@ -28,14 +28,20 @@
             <div class="mb-3">
               {{ form.logo.label(class='form-label') }}
               <p class="text-muted small mb-2">Upload the shop’s desktop app logo for this company (sidebar + favicon for their online login).</p>
-              <div class="d-flex align-items-center gap-3 mb-2 p-2 border rounded bg-light">
-                <img src="{{ url_for('company_logo', company_id=company.id) }}?v={{ company.updated_at }}"
+              <div class="d-flex align-items-center gap-3 mb-2 p-2 border rounded bg-light" id="logo-preview-box">
+                {% if company.logo_data or company.logo_path %}
+                <img id="logo-preview-img"
+                     src="{{ url_for('company_logo', company_id=company.id, strict=1, v=(company.updated_at.timestamp() if company.updated_at else 0)) }}"
                      alt="Current logo"
                      style="max-height:64px;max-width:140px;object-fit:contain;background:#fff"
-                     onerror="this.style.display='none'; this.nextElementSibling.textContent='No logo saved yet — upload below.';">
-                <span class="small text-muted">{% if company.logo_data or company.logo_path %}Current logo — choose a new file below to replace{% else %}No logo saved yet — upload a JPG/PNG below{% endif %}</span>
+                     onerror="this.style.display='none'; document.getElementById('logo-preview-hint').textContent='Saved logo could not be loaded — re-upload below.';">
+                <span class="small text-muted" id="logo-preview-hint">Current logo — choose a new file below to replace</span>
+                {% else %}
+                <img id="logo-preview-img" alt="Logo preview" style="display:none;max-height:64px;max-width:140px;object-fit:contain;background:#fff">
+                <span class="small text-muted" id="logo-preview-hint">No logo saved yet — upload a JPG/PNG below</span>
+                {% endif %}
               </div>
-              {{ form.logo(class='form-control', accept='image/png,image/jpeg,image/webp,image/gif') }}
+              {{ form.logo(class='form-control', accept='image/png,image/jpeg,image/webp,image/gif', id='company-logo-input') }}
               {% if form.logo.errors %}
               <div class="text-danger small mt-1">{{ form.logo.errors[0] }}</div>
               {% endif %}
@@ -109,4 +115,27 @@
     </div>
   </div>
 </div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+  var input = document.getElementById("company-logo-input");
+  var img = document.getElementById("logo-preview-img");
+  var hint = document.getElementById("logo-preview-hint");
+  if (!input || !img) return;
+  input.addEventListener("change", function () {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    if (!/^image\//.test(file.type || "")) {
+      if (hint) hint.textContent = "Choose a JPG, PNG, WEBP, or GIF image.";
+      return;
+    }
+    var url = URL.createObjectURL(file);
+    img.onload = function () { try { URL.revokeObjectURL(url); } catch (e) {} };
+    img.style.display = "";
+    img.src = url;
+    if (hint) hint.textContent = "New logo selected — click Save company & logo to store it.";
+  });
+})();
+</script>
 {% endblock %}

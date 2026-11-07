@@ -12,7 +12,11 @@
         <div class="mb-3">
           {{ form.logo.label(class='form-label') }}
           <p class="text-muted small mb-2">Optional. Upload the shop’s desktop app logo for their online portal branding.</p>
-          {{ form.logo(class='form-control') }}
+          <div class="d-flex align-items-center gap-3 mb-2 p-2 border rounded bg-light">
+            <img id="logo-preview-img" alt="Logo preview" style="display:none;max-height:64px;max-width:140px;object-fit:contain;background:#fff">
+            <span class="small text-muted" id="logo-preview-hint">Choose a JPG/PNG to preview before saving</span>
+          </div>
+          {{ form.logo(class='form-control', accept='image/png,image/jpeg,image/webp,image/gif', id='company-logo-input') }}
         </div>
         <div class="form-check mb-3">{{ form.is_active(class='form-check-input') }}{{ form.is_active.label(class='form-check-label') }}</div>
         {{ form.submit(class='btn btn-success') }}
@@ -21,4 +25,27 @@
     </div>
   </div>
 </div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+  var input = document.getElementById("company-logo-input");
+  var img = document.getElementById("logo-preview-img");
+  var hint = document.getElementById("logo-preview-hint");
+  if (!input || !img) return;
+  input.addEventListener("change", function () {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    if (!/^image\//.test(file.type || "")) {
+      if (hint) hint.textContent = "Choose a JPG, PNG, WEBP, or GIF image.";
+      return;
+    }
+    var url = URL.createObjectURL(file);
+    img.onload = function () { try { URL.revokeObjectURL(url); } catch (e) {} };
+    img.style.display = "";
+    img.src = url;
+    if (hint) hint.textContent = "Logo ready — it will be saved with the company.";
+  });
+})();
+</script>
 {% endblock %}

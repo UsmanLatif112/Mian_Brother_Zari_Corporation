@@ -146,7 +146,16 @@ def company_new():
         db.session.flush()
         logo_file = request.files.get("logo") or form.logo.data
         saved = _save_logo(logo_file, company)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            flash(
+                f"Company created but logo failed to store (logo column may be too small). "
+                f"Run migrate_schema.py. ({exc})",
+                "danger",
+            )
+            return redirect(url_for("admin.company_detail", company_id=company.id))
         if saved:
             flash(f"Company “{company.name}” created with logo.", "success")
         else:

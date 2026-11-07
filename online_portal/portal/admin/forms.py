@@ -1,5 +1,5 @@
 from flask_wtf import FlaskForm
-from flask_wtf.file import FileAllowed, FileField
+from flask_wtf.file import FileField
 from wtforms import BooleanField, PasswordField, SelectField, StringField, SubmitField, TextAreaField
 from wtforms.validators import DataRequired, Email, Length, Optional
 
@@ -10,7 +10,8 @@ class CompanyForm(FlaskForm):
     is_active = BooleanField("Active", default=True)
     logo = FileField(
         "Company / app logo",
-        validators=[Optional(), FileAllowed(["jpg", "jpeg", "png", "webp", "gif"], "Images only")],
+        # Extension checked in _save_logo — FileAllowed + empty FileStorage can block saves
+        validators=[Optional()],
     )
     submit = SubmitField("Save company & logo")
 
